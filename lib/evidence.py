@@ -49,9 +49,14 @@ def extract_sqlmap_evidence(log_content: str, log_dir: str) -> Dict[str, Any]:
         if "current database:" in ll:    info["current_db"]   = clean.split(":", 1)[-1].strip().strip("'\"")
         if "banner:" in ll:              info["banner"]        = clean.split(":", 1)[-1].strip().strip("'\"")
 
-        if re.match(r"^\[\*\]\s+\w", l) and "starting" not in ll and "shutting" not in ll:
+        if re.match(r"^\[\*\]\s+\w", l) and not any(
+            kw in ll for kw in ("starting", "shutting", "ending", "fetched", "retrieved",
+                                "maximum", "available", "used", "resumed", "cached")
+        ):
             val = l.lstrip("[*] ").strip()
-            if val and len(val) < 60 and val not in info["tables"]:
+            # Rejeitar linhas que parecem timestamps ou mensagens de status
+            if val and len(val) < 60 and not re.match(r"\w+ @ \d{2}:\d{2}:\d{2}", val) \
+                    and val not in info["tables"]:
                 info["tables"].append(val)
 
         m = re.search(r"testing URL '([^']+)'", l)
@@ -121,6 +126,33 @@ def format_sqlmap_evidence(info: Dict[str, Any]) -> Optional[str]:
 
 # backwards-compat alias
 format_evidence = format_sqlmap_evidence
+
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*[mKHFABCDJsu]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove sequências de escape ANSI de texto terminal."""
+    return _ANSI_RE.sub("", text)
+
+
+def is_valid_url(url: str) -> bool:
+    """Retorna True se url tem scheme http/https e hostname real (não vazio, não filename)."""
+    if not url:
+        return False
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False
+    if p.scheme not in ("http", "https"):
+        return False
+    host = p.netloc or p.path
+    if not host or "." not in host:
+        return False
+    # Rejeita paths que parecem filenames (sem ponto de domínio no netloc)
+    if not p.netloc:
+        return False
+    return True
 
 
 def collect_and_consolidate(outdir: str) -> Dict[str, Any]:

@@ -9,7 +9,7 @@ set -uo pipefail
 _parse_nikto_json() {
     local json_file="$1" min_sev="$2"
     python3 - "$json_file" "$min_sev" << 'PYEOF'
-import json, sys
+import sys, json
 
 path, min_sev = sys.argv[1], int(sys.argv[2])
 SEV_KW = {
@@ -20,21 +20,31 @@ SEV_KW = {
         "missing header", "insecure cookie", "clickjack", "open redirect"],
 }
 
-try:
-    data = json.load(open(path))
-except Exception as e:
-    sys.exit(0)
-
 findings = []
-if isinstance(data, dict):
-    for block in data.get("host", [data]):
-        for vuln in block.get("vulnerabilities", []):
+try:
+    content = open(path).read()
+    if content.lstrip().startswith('<'):
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(content)
+        for item in root.iter('item'):
             findings.append({
-                "msg":    vuln.get("msg", ""),
-                "url":    vuln.get("url", ""),
-                "method": vuln.get("method", "GET"),
-                "osvdb":  vuln.get("OSVDB", "0"),
+                "msg":    (item.findtext('description') or item.findtext('msg') or ''),
+                "url":    (item.findtext('uri') or item.findtext('url') or ''),
+                "method": (item.findtext('method') or 'GET'),
+                "osvdb":  (item.findtext('OSVDB') or '0'),
             })
+    else:
+        data = json.loads(content)
+        for block in (data if isinstance(data, list) else data.get("host", [data])):
+            for vuln in block.get("vulnerabilities", []):
+                findings.append({
+                    "msg":    vuln.get("msg", ""),
+                    "url":    vuln.get("url", ""),
+                    "method": vuln.get("method", "GET"),
+                    "osvdb":  vuln.get("OSVDB", "0"),
+                })
+except Exception:
+    print("[]"); sys.exit(0)
 
 seen, results = set(), []
 for f in findings:
@@ -73,12 +83,12 @@ run_nikto_phase() {
         return 0
     fi
 
-    local json_out="$nikto_dir/nikto_report.json"
+    local json_out="$nikto_dir/nikto_report.xml"
     local raw_log="$nikto_dir/nikto_raw.txt"
 
     local nikto_args=(
         -h "$target_url"
-        -Format json
+        -Format xml
         -output "$json_out"
         -Tuning 123456789abc
         -maxtime "${timeout}s"

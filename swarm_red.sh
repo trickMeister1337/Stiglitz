@@ -655,6 +655,55 @@ run_services() {
     checkpoint_done "services"
 }
 
+# ── Notificação (Telegram ou Slack/webhook genérico) ──────────────────────────
+# Configuração via variáveis de ambiente:
+#   Telegram:      export SWARM_TELEGRAM_TOKEN=<bot_token> SWARM_TELEGRAM_CHAT=<chat_id>
+#   Slack/generic: export SWARM_NOTIFY_WEBHOOK=https://hooks.slack.com/...
+#   Teams:         export SWARM_TEAMS_WEBHOOK=https://outlook.office.com/webhook/...
+#                  (ou URL do Power Automate Workflow)
+send_notification() {
+    local message="$1"
+    local token="${SWARM_TELEGRAM_TOKEN:-}"
+    local chat="${SWARM_TELEGRAM_CHAT:-}"
+    local webhook="${SWARM_NOTIFY_WEBHOOK:-}"
+    local teams="${SWARM_TEAMS_WEBHOOK:-}"
+
+    if [ -n "$token" ] && [ -n "$chat" ]; then
+        curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+            -d "chat_id=${chat}" \
+            --data-urlencode "text=${message}" \
+            -d "parse_mode=HTML" \
+            --max-time 10 >/dev/null 2>&1 || true
+    fi
+
+    if [ -n "$teams" ]; then
+        # Formata como MessageCard (compatível com legacy connector e Power Automate)
+        local escaped
+        escaped=$(echo "$message" | sed 's/"/\\"/g' | sed 's/$/\\n/' | tr -d '\n')
+        local teams_payload
+        teams_payload=$(printf '{
+  "@type": "MessageCard",
+  "@context": "https://schema.org/extensions",
+  "themeColor": "CC0000",
+  "summary": "SWARM RED — scan concluído",
+  "sections": [{ "activityTitle": "🎯 SWARM RED v%s", "activityText": "%s" }]
+}' "$VERSION" "$escaped")
+        curl -s -X POST "$teams" \
+            -H "Content-Type: application/json" \
+            -d "$teams_payload" \
+            --max-time 10 >/dev/null 2>&1 || true
+    fi
+
+    if [ -n "$webhook" ]; then
+        local payload
+        payload=$(printf '{"text":"%s"}' "$(echo "$message" | sed 's/"/\\"/g')")
+        curl -s -X POST "$webhook" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            --max-time 10 >/dev/null 2>&1 || true
+    fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  GATE DE AUTORIZAÇÃO
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -682,6 +731,13 @@ authorization_gate() {
         return 0
     fi
 
+    # Bypass para execução encadeada pelo swarm_full.sh
+    if [ "${SWARM_AUTHORIZED:-0}" = "1" ]; then
+        info "Autorizado pelo orquestrador SWARM FULL."
+        log "AUTORIZADO (SWARM_FULL). Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]}"
+        return 0
+    fi
+
     echo -e "  Digite ${BLD}EU AUTORIZO${RST} para confirmar e iniciar os testes:"
     read -r _auth_input
     if [[ "$_auth_input" != "EU AUTORIZO" ]]; then
@@ -699,9 +755,9 @@ run_report() {
 
     local target_domain="${SCOPE_DOMAINS[0]}"
     local total_urls
-    total_urls=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null || echo 0)
+    total_urls=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null) || total_urls=0
     local n_confirmed
-    n_confirmed=$(grep -cE "SQLI|XSS|BRUTE|VULNERABLE" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    n_confirmed=$(grep -cE "SQLI|XSS|BRUTE|VULNERABLE" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); n_confirmed=${n_confirmed:-0}
     local failed=$(( total_urls - n_confirmed ))
     [ "$failed" -lt 0 ] && failed=0
 
@@ -719,6 +775,17 @@ run_report() {
     else
         warn "Erro no relatório: $report_out"
     fi
+
+    # Auto-diff: comparar com scan anterior do mesmo domínio
+    local domain="${SCOPE_DOMAINS[0]//[^a-zA-Z0-9._-]/_}"
+    local prev_scan
+    prev_scan=$(find . -maxdepth 1 -type d -name "swarm_red_${domain}_*" \
+        ! -path "./${OUTDIR}" 2>/dev/null | sort -r | head -1)
+    if [ -n "$prev_scan" ] && [ -f "${SCRIPT_DIR}/swarm_diff.py" ]; then
+        log "Diff com scan anterior: $prev_scan"
+        python3 "${SCRIPT_DIR}/swarm_diff.py" "$prev_scan" "$OUTDIR" --html 2>/dev/null \
+            && info "Diff gerado: ver swarm_diff_*.html" || warn "swarm_diff: falhou (não crítico)"
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -726,9 +793,9 @@ run_report() {
 # ═══════════════════════════════════════════════════════════════════════════════
 print_summary() {
     local n_sqli=0 n_xss=0 n_brute=0
-    n_sqli=$(grep -c "SQLI\|SQL_INJECT" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
-    n_xss=$(grep -c "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
-    n_brute=$(grep -c "BRUTE\|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    n_sqli=$(grep -c "SQLI\|SQL_INJECT" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); n_sqli=${n_sqli:-0}
+    n_xss=$(grep -c "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); n_xss=${n_xss:-0}
+    n_brute=$(grep -c "BRUTE\|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); n_brute=${n_brute:-0}
     local total=$(( n_sqli + n_xss + n_brute ))
 
     echo ""
@@ -800,6 +867,18 @@ main() {
     print_summary
 
     log "SWARM RED concluído — Output: $OUTDIR"
+
+    # Notificação ao finalizar
+    local n_sqli_f n_xss_f n_brute_f n_total_f
+    n_sqli_f=$(grep -c "SQLI\|SQL_INJECT" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    n_xss_f=$(grep -c "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    n_brute_f=$(grep -c "BRUTE\|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    n_total_f=$(( n_sqli_f + n_xss_f + n_brute_f ))
+    send_notification "[SWARM RED v${VERSION}] Concluído
+Alvo: ${SCOPE_DOMAINS[*]}
+Perfil: ${PROFILE^^} | Modo: ${MODE^^}
+Findings: ${n_total_f} (SQLi:${n_sqli_f} XSS:${n_xss_f} Brute:${n_brute_f})
+Output: ${OUTDIR}"
 }
 
 main "$@"

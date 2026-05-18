@@ -21,6 +21,7 @@ jobs:
           bash -n pci_scan.sh
           bash -n setup.sh
           bash -n swarm_batch.sh
+          bash -n swarm_full.sh
 
       - name: Check lib/ shell modules
         run: |

@@ -21,11 +21,14 @@ Uso não autorizado é crime (Art. 154-A CP / CFAA / Computer Misuse Act).
 
 ## Visão Geral
 
-O SWARM é uma suite completa de segurança ofensiva composta por quatro scripts principais que se integram em pipeline:
+O SWARM é uma suite completa de segurança ofensiva composta por scripts independentes que se integram em pipeline:
 
 ```
 [osint.sh] → [swarm.sh] → [swarm_red.sh] → relatório HTML
   OSINT        Recon/Scan    Exploração
+
+[swarm_full.sh] — orquestra as três fases acima em um único comando
+[pci_scan.sh]   — scanner de conformidade PCI DSS (independente)
 ```
 
 | Script | Função | Quando usar |
@@ -34,6 +37,7 @@ O SWARM é uma suite completa de segurança ofensiva composta por quatro scripts
 | `swarm.sh` | Reconhecimento e varredura (11 fases) | Mapeamento da superfície |
 | `swarm_red.sh` | Exploração automatizada (8 fases) | Após recon ou standalone |
 | `pci_scan.sh` | Conformidade PCI DSS 4.0.1 | Ambientes de pagamento |
+| `swarm_full.sh` | Pipeline completo em um comando | Relatório consolidado end-to-end |
 | `swarm_batch.sh` | Wrapper multi-alvo para `swarm.sh` | Múltiplos alvos em série |
 | `swarm_diff.py` | Comparação entre dois scans | Rastreamento de remediação |
 
@@ -41,12 +45,13 @@ O SWARM é uma suite completa de segurança ofensiva composta por quatro scripts
 
 ## Últimas Atualizações
 
-### v7.0 — Blackbox Engine + CI/CD (Mai 2026)
+### v7.0 — Blackbox Engine + CI/CD + Pipeline Completo (Mai 2026)
 
+- **`swarm_full.sh` adicionado** — orquestrador end-to-end que encadeia osint.sh → swarm.sh → swarm_red.sh → pci_scan.sh com gate único de autorização, índice HTML consolidado e métricas por fase
 - **`swarm_red.sh` refatorado em arquitetura modular** — orquestrador thin de 845 linhas delegando para 7 módulos independentes em `lib/` (recon, crawl, sqli, xss, brute, msf, web)
-- **Notificações ao finalizar scan** — suporte a Telegram, Slack e Microsoft Teams via variáveis de ambiente; disparadas ao término de `swarm.sh` e `swarm_red.sh`
+- **Notificações ao finalizar scan** — suporte a Telegram, Slack e Microsoft Teams via variáveis de ambiente; disparadas ao término de `swarm.sh`, `swarm_red.sh` e `swarm_full.sh`
 - **`swarm_diff.py` integrado ao pipeline** — ao finalizar cada scan, `swarm_red.sh` detecta automaticamente o scan anterior do mesmo domínio e gera relatório de diff (novos/corrigidos/persistentes)
-- **CI/CD com GitHub Actions** — syntax check (`bash -n`) em todos os scripts + 42 testes unitários Python em cada push/PR
+- **CI/CD com GitHub Actions** — syntax check (`bash -n`) em todos os scripts incluindo `swarm_full.sh` + 42 testes unitários Python em cada push/PR
 - **Testes expandidos de 18 para 42** — adicionadas classes `TestIngest` (11 testes) e `TestPocGenerator` (10 testes); bug real corrigido em `evidence.py` (falso-positivo de tabela sqlmap)
 - **`osint.sh` e `pci_scan.sh` publicados** no repositório principal
 - **`swarm_batch.sh` e `swarm_diff.py`** incorporados da branch de desenvolvimento
@@ -235,6 +240,71 @@ bash pci_scan.sh https://alvo.com
 
 ---
 
+## `swarm_full.sh` — Pipeline Completo em Um Comando
+
+Orquestrador que encadeia toda a suite em sequência com um único gate de autorização e gera um índice HTML consolidando os relatórios de todas as fases.
+
+```
+  osint.sh  →  swarm.sh  →  swarm_red.sh
+     ↓              ↓              ↓
+  OSINT          Recon          Exploit
+     └──────────────┴──────────────┘
+              full_<alvo>_<ts>/index.html
+```
+
+```bash
+# Pipeline completo (padrão)
+bash swarm_full.sh -t https://alvo.com
+
+# Com perfil de produção, apenas recon (sem exploração)
+bash swarm_full.sh -t https://alvo.com -p production --skip-red
+
+# Pular OSINT (quando já foi executado antes)
+bash swarm_full.sh -t https://alvo.com --skip-osint
+
+# Simulação completa sem executar ferramentas
+bash swarm_full.sh -t https://alvo.com --dry-run
+
+# Com autenticação e escopo
+bash swarm_full.sh -t https://alvo.com \
+    --scope-file escopo.txt \
+    --auth-cookie "session=abc123" \
+    --auth-header "Authorization: Bearer <token>"
+```
+
+### Flags disponíveis
+
+| Flag | Descrição |
+|---|---|
+| `-t, --target URL` | URL do alvo (obrigatório) |
+| `-p, --profile` | `lab` / `staging` / `production` (padrão: `staging`) |
+| `--skip-osint` | Pular fase OSINT |
+| `--skip-scan` | Pular fase swarm.sh |
+| `--skip-red` | Pular fase swarm_red.sh |
+| `--dry-run` | Simular pipeline sem executar ferramentas |
+| `--scope-file FILE` | Arquivo com domínios/IPs em escopo |
+| `--auth-cookie` | Cookie de autenticação |
+| `--auth-header` | Header de autenticação (ex: `Authorization: Bearer …`) |
+| `--output-dir DIR` | Diretório base customizado |
+
+### Output gerado
+
+```
+full_alvo.com_20260514_120000/
+├── index.html              # Índice consolidado com links e métricas por fase
+├── osint_alvo.com_*/       # Diretório OSINT
+├── scan_alvo.com_*/        # Diretório swarm.sh
+└── swarm_red_alvo.com_*/   # Diretório swarm_red.sh
+```
+
+O `index.html` exibe métricas por fase (subdomínios, findings, exploits confirmados), tempo de execução de cada etapa e links diretos para os relatórios individuais.
+
+> Os scripts individuais continuam funcionando normalmente de forma independente — `swarm_full.sh` é uma opção adicional para quando você quer o relatório completo end-to-end de um único engajamento.
+>
+> Para scan PCI DSS, use `pci_scan.sh` separadamente após o pipeline.
+
+---
+
 ## `swarm_diff.py` — Rastreamento de Remediação
 
 Compara dois diretórios de scan e classifica vulnerabilidades em novas, corrigidas e persistentes. Integrado automaticamente ao final de cada execução do `swarm_red.sh`.
@@ -343,7 +413,8 @@ SWARM/
 ├── swarm.sh                  # Scanner principal (11 fases)
 ├── swarm_red.sh              # Engine de exploração (8 fases)
 ├── osint.sh                  # OSINT pré-engajamento (10 fases)
-├── pci_scan.sh               # Conformidade PCI DSS 4.0.1
+├── pci_scan.sh               # Conformidade PCI DSS 4.0.1 (independente)
+├── swarm_full.sh             # Orquestrador end-to-end (osint → swarm → red)
 ├── swarm_batch.sh            # Wrapper multi-alvo
 ├── swarm_diff.py             # Comparação entre scans
 ├── setup.sh                  # Instalador universal
@@ -395,7 +466,7 @@ Cada push ou PR para `main` dispara dois jobs em paralelo:
 
 ```yaml
 syntax:       bash -n em swarm.sh, swarm_red.sh, osint.sh, pci_scan.sh,
-              setup.sh, swarm_batch.sh e todos os lib/*.sh
+              setup.sh, swarm_batch.sh, swarm_full.sh e todos os lib/*.sh
 unit-tests:   python3 -m pytest test_lib.py (42 testes)
 ```
 
