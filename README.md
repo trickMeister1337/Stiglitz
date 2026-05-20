@@ -45,6 +45,17 @@ O SWARM é uma suite completa de segurança ofensiva composta por scripts indepe
 
 ## Últimas Atualizações
 
+### v7.1 — Ferramentas atualizadas + correções de relatório (Mai 2026)
+
+- **`swarm_batch.sh`** — removidos os cards "Risco Máximo" e "Risco Médio" do relatório batch; o score agregado de múltiplos alvos não é representativo por natureza e induzia leituras incorretas
+- **Go 1.22.2 → 1.26.3** — runtime atualizado; todos os binários Go recompilados com o novo toolchain (`nuclei`, `httpx`, `katana`, `subfinder`, `ffuf`, `dalfox`, `waybackurls`)
+- **katana 1.5.0 → 1.6.1** — via `go install @latest` com Go 1.26.3
+- **sqlmap 1.8.4 → 1.10.5** — instalado via `pip3 install --user --upgrade sqlmap`; `~/.local/bin` tem precedência sobre `/usr/bin`
+- **nikto → 2.6.0** — atualizado do repositório oficial; wrapper `~/.local/bin/nikto` configurado com `PERL5LIB` para módulos userspace
+- **hydra 9.5 → 9.8-dev** — compilado a partir do fonte
+- **trufflehog 3.95.2 → 3.95.3**
+- **amass**: mantido em v3.19.2 intencionalmente — a v5 quebra a interface de linha de comando (`amass enum -passive` deixa de existir); atualização requer reescrita dos scripts de uso
+
 ### v7.0 — Blackbox Engine + CI/CD + Pipeline Completo (Mai 2026)
 
 - **`swarm_full.sh` adicionado** — orquestrador end-to-end que encadeia osint.sh → swarm.sh → swarm_red.sh → pci_scan.sh com gate único de autorização, índice HTML consolidado e métricas por fase
@@ -352,7 +363,7 @@ ou Canal → `Workflows` → `Post to a channel when a webhook request is receiv
 ### Requisitos
 
 - Linux (Ubuntu 22.04+, Debian 12, Kali) ou WSL2
-- bash ≥ 4.4, Python 3.8+, Go 1.21+
+- bash ≥ 4.4, Python 3.8+, Go 1.26+
 
 ### Automática (recomendado)
 
@@ -531,6 +542,106 @@ scan_alvo.com_20260514_120000/
 
 ---
 
+## Metodologia de Classificação de Criticidades
+
+O SWARM usa um modelo de classificação em camadas: cada finding passa por múltiplas fontes de severidade, e a mais alta prevalece. O score de risco final do alvo é calculado a partir da contagem ponderada de findings por nível.
+
+### 1. Fontes de severidade (ordem de precedência)
+
+| Fonte | Como é usada | Onde entra no pipeline |
+|---|---|---|
+| **Nuclei — severidade nativa do template** | Templates do ProjectDiscovery já classificam cada finding em `critical / high / medium / low / info` | Fase 4 (`swarm.sh`) — resultado direto do scan |
+| **NVD CVSS v3 via API** | Para CVEs identificados pelo nuclei, a fase de enriquecimento consulta a NVD API v2 e obtém o score CVSS 3.x oficial | Fase 6 (`swarm.sh`) — enriquecimento CVE |
+| **Mapa CWE → severidade** | `swarm.sh` mantém um mapa de ~40 CWEs com score CVSS base e nível associado para findings com CWE mas sem CVE direto | Fase 11 — montagem do relatório |
+| **ZAP Active Scan** | Alerts classificados pelo próprio ZAP como `Critical / High / Medium / Low` | Fase 9 (`swarm.sh`) |
+| **Security Headers** | `header_check.py` mapeia cada header ausente para um nível: CSP ausente = critical; HSTS ausente = high; X-Frame-Options = medium | Fase 10 (`swarm.sh`) |
+| **PoC Validator** | Apenas findings com confiança ≥ 60% são marcados como `confirmed=True` | Fase 5 (`swarm.sh`) / `lib/poc_validator.py` |
+
+### 2. Mapeamento CVSS → severidade (padrão NVD)
+
+```
+CVSS  9.0 – 10.0  →  Critical
+CVSS  7.0 –  8.9  →  High
+CVSS  4.0 –  6.9  →  Medium
+CVSS  0.1 –  3.9  →  Low
+CVSS  0.0          →  Info
+```
+
+Função no código: `cvss_to_sev(score)` em `swarm.sh` (fase 11).
+
+### 3. Escalada automática — CISA KEV
+
+CVEs presentes no catálogo **Known Exploited Vulnerabilities (CISA KEV)** são escalados automaticamente na interface, independente do CVSS, com flag `[🔴 KEV — exploração ativa]`. O CVSS não é alterado, mas o finding recebe destaque máximo no relatório e o campo `in_kev: true` no `findings.json`.
+
+> O cache KEV tem validade de 24 horas. Renovado automaticamente na próxima execução.
+
+### 4. EPSS — probabilidade de exploração
+
+Para cada CVE enriquecido, o SWARM consulta a [FIRST.org EPSS API](https://www.first.org/epss/) e armazena:
+
+- `epss_score` — probabilidade de exploração nos próximos 30 dias (0.0 a 1.0)
+- `epss_percentile` — posição percentual entre todos os CVEs conhecidos
+
+O EPSS **não altera o nível de severidade**, mas é exibido no relatório como dado complementar para priorização de remediação.
+
+```
+EPSS > 0.5   → Alta probabilidade de exploração ativa
+EPSS > 0.1   → Probabilidade relevante — priorizar remediação
+EPSS < 0.01  → Exploração improvável no curto prazo
+```
+
+### 5. Score de risco do alvo
+
+Calculado em `lib/report_generator.py` ao final de cada scan. Agrega todos os findings confirmados e ponderados:
+
+```
+risk_score = min(100,  Critical × 30
+                     + High     × 15
+                     + Medium   × 5
+                     + Low      × 1)
+```
+
+| Faixa | Nível | Cor |
+|---|---|---|
+| 70 – 100 | CRÍTICO | `#7a2e2e` |
+| 40 –  69 | ALTO    | `#b34e4e` |
+| 15 –  39 | MÉDIO   | `#d4833a` |
+|  0 –  14 | BAIXO   | `#4a7c8c` |
+
+> O mesmo cálculo é usado no `swarm_batch.sh` para o score por alvo individual. O relatório batch exibe contagem de findings por nível — **não exibe score agregado** entre alvos, pois médias de scores de segurança são métricas sem significado operacional.
+
+### 6. Confiança do PoC (`poc_validator.py`)
+
+O validador reexecuta cada finding com requisições ativas e atribui um percentual de confiança:
+
+| Confiança | Significado | Aparece como |
+|---|---|---|
+| ≥ 95% | Exploração ativa demonstrada (time-based, diff de conteúdo) | `confirmed: true` |
+| 70 – 94% | Resposta consistente com a vulnerabilidade | `confirmed: true` |
+| 60 – 69% | Comportamento anômalo detectado — confiança mínima aceita | `confirmed: true` |
+| < 60% | Sem evidência suficiente | `confirmed: false` — não entra no relatório como confirmado |
+
+Limiar configurável em `lib/poc_validator.py`: `MIN_CONFIRM_CONFIDENCE = 60`.
+
+### 7. Mapa de impacto prático por CWE
+
+O relatório traduz CWEs para linguagem de negócio. Exemplos do mapa interno:
+
+| CWE | Severidade base | Impacto resumido |
+|---|---|---|
+| CWE-89 (SQLi) | Critical — CVSS 9.8 | Leitura, modificação ou destruição do banco de dados |
+| CWE-78 (OS Command Injection) | Critical — CVSS 9.8 | Execução de comandos arbitrários no servidor |
+| CWE-918 (SSRF) | Critical — CVSS 9.8 | Acesso a serviços internos via servidor (AWS metadata, DBs) |
+| CWE-287 (Improper Auth) | Critical — CVSS 9.1 | Acesso não autorizado — personificação de qualquer usuário |
+| CWE-79 (XSS) | Medium — CVSS 6.1 | Roubo de sessão via script no browser da vítima |
+| CWE-352 (CSRF) | High — CVSS 8.8 | Ações não autorizadas em nome de usuário autenticado |
+| CWE-326 (Weak Crypto) | High — CVSS 7.5 | Comunicações interceptáveis e decifráveis |
+| CWE-693 (Missing Headers) | Varia por header | Browser do usuário sem proteções contra XSS e injeção |
+
+O mapa completo (24 entradas) está em `swarm.sh` — seção `CWE_MAP` e `IMPACT_MAP`.
+
+---
+
 ## Dependências
 
 ### Obrigatórias
@@ -548,18 +659,19 @@ scan_alvo.com_20260514_120000/
 | subfinder | Recon | `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` |
 | httpx | Recon / Surface | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` |
 | nmap | Surface | `apt install nmap` |
-| katana | Crawl | `go install github.com/projectdiscovery/katana/cmd/katana@latest` |
+| katana ≥ 1.6.1 | Crawl | `go install github.com/projectdiscovery/katana/cmd/katana@latest` |
 | nuclei | Varredura | `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest` |
 | ffuf | Crawl | `go install github.com/ffuf/ffuf/v2@latest` |
-| sqlmap | SQLi | `apt install sqlmap` |
+| sqlmap ≥ 1.10.5 | SQLi | `pip3 install --user --upgrade sqlmap` |
 | dalfox | XSS | `go install github.com/hahwul/dalfox/v2@latest` |
-| hydra | Brute Force | `apt install hydra` |
-| nikto | Web Scanner | `apt install nikto` |
+| hydra ≥ 9.8 | Brute Force | compilar do fonte ou `apt install hydra` (9.5+) |
+| nikto ≥ 2.6.0 | Web Scanner | `apt install nikto` ou [fonte oficial](https://github.com/sullo/nikto) |
 | msfconsole | Metasploit | `bash setup.sh` |
 | testssl.sh | TLS | `apt install testssl` |
 | wafw00f | WAF Detection | `pip3 install wafw00f` |
 | zaproxy | ZAP Active Scan | `snap install zaproxy --classic` |
-| trufflehog | Secrets | `pip3 install trufflehog` |
+| trufflehog ≥ 3.95.3 | Secrets | `pip3 install --user trufflehog` |
+| amass **v3.x** | Subdomain Discovery | manter em v3 — v5 quebra interface (`amass enum -passive`) |
 | searchsploit | CVE lookup | `apt install exploitdb` |
 
 ---

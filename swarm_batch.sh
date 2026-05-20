@@ -464,12 +464,6 @@ a{{color:#388bfd;text-decoration:none}}a:hover{{text-decoration:underline}}
   <div class="kpi" style="background:#d4833a">
     <div class="num">{total_med}</div><div class="lbl">MÉDIO (total)</div>
   </div>
-  <div class="kpi" style="background:{rc(max_risk)}">
-    <div class="num">{max_risk}</div><div class="lbl">Risco Máximo</div>
-  </div>
-  <div class="kpi" style="background:#4a7c8c">
-    <div class="num">{avg_risk}</div><div class="lbl">Risco Médio</div>
-  </div>
 </div>
 
 {'<div class="info-box">' + insight_html + '</div>' if insight_html else ''}
