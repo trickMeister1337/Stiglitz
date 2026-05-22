@@ -100,6 +100,22 @@ export WPSCAN_API_TOKEN="seu_token_aqui"  # acesso à base premium de vulnerabil
 
 ---
 
+### v7.3.1 — Correções de relatório e CI (Mai 2026)
+
+**`swarm.sh` — fix de contagem de findings:**
+
+- **TLS e email findings incluídos em `all_f`** — `tls_findings` usava chave `"sev"` em vez de `"severity"` e não era adicionado à lista mestre `all_f`; achados críticos/altos do testssl.sh eram exibidos no HTML mas ignorados nas stat cards, no risk score e no terminal. Corrigido: `tls_findings` agora tem todos os campos obrigatórios (`name`, `severity`, `source`, `url`, `description`, etc.) e é incluído em `all_f` junto com `email_findings` (SPF/DMARC/DKIM).
+- **`email_findings` convertido para lista de findings** — novo bloco converte o dict `email_security` (SPF/DMARC/DKIM) em findings padronizados com CWE (`CWE-349` para SPF/DMARC, `CWE-345` para DKIM), incluídos nas stats e no risk score.
+
+Resultado: terminal e relatório HTML agora mostram as mesmas contagens — ex: um alvo com 2 criticalidades TLS e 2 highs de email antes exibia `C=0 A=0` no terminal; agora exibe `C=2 A=2` corretamente.
+
+**CI/CD — fix de pipeline:**
+
+- **`pytest` ausente no job `unit-tests`** — o step `Install dependencies` usava `pip install requests 2>/dev/null || true`, silenciando o erro de instalação; `pytest` nunca foi instalado, fazendo o job falhar com `No module named pytest`.
+- **`requirements-dev.txt` criado** — lista `pytest>=7.0` e `requests>=2.28`; workflow atualizado para `pip install -r requirements-dev.txt` sem supressão de erros.
+
+---
+
 ### v7.2 — Cobertura de superfície expandida + SWARM RED melhorias (Mai 2026)
 
 **`swarm.sh` — 4 novos módulos de detecção:**
