@@ -3484,12 +3484,22 @@ if os.path.exists(tf) and os.path.getsize(tf) > 0:
             sev_raw = item.get("severity","INFO")
             sev = SEV_MAP.get(sev_raw.upper(),"info")
             if sev_raw.upper() in ("CRITICAL","HIGH","WARN","LOW"):
+                _tls_id  = item.get("id","")
+                _tls_txt = item.get("finding","")
                 tls_findings.append({
-                    "id":   item.get("id",""),
-                    "sev":  sev,
-                    "sev_raw": sev_raw,
-                    "finding": item.get("finding",""),
-                    "cve":  item.get("cve",""),
+                    "id":       _tls_id,
+                    "name":     f"TLS/SSL: {_tls_id}" if _tls_id else "TLS/SSL Issue",
+                    "severity": sev, "severity_orig": sev, "severity_reclassified": False,
+                    "sev":      sev,
+                    "sev_raw":  sev_raw,
+                    "source":   "testssl.sh",
+                    "url":      TARGET,
+                    "cve":      item.get("cve",""), "cve_ids": [],
+                    "finding":  _tls_txt,
+                    "description": _tls_txt,
+                    "remediation": "",
+                    "evidence": _tls_txt,
+                    "param": "", "attack": "", "other": "",
                 })
     except Exception as e: errors.append(f"testssl: {e}")
 
@@ -3550,6 +3560,30 @@ _esf = os.path.join(OUTDIR,'raw','email_security.json')
 if os.path.exists(_esf):
     try: email_security = json.load(open(_esf))
     except Exception as e: errors.append(f'email_security: {e}')
+
+# Converter email_security dict em lista de findings para stats/risk
+email_findings = []
+if email_security:
+    _EMAIL_CWE   = {'spf':'CWE-349','dmarc':'CWE-349','dkim':'CWE-345'}
+    _EMAIL_NAMES = {
+        'spf':   'SPF Ausente — Domínio Vulnerável a E-mail Spoofing',
+        'dmarc': 'DMARC Ausente — Sem Proteção Anti-Spoofing',
+        'dkim':  'DKIM Não Detectado — Autenticidade de E-mail Comprometida',
+    }
+    for _proto, _edata in email_security.items():
+        _esev = _edata.get('severity','info')
+        if _esev not in ('critical','high','medium','low'): continue
+        email_findings.append({
+            "id":       f"email-{_proto}",
+            "name":     _EMAIL_NAMES.get(_proto, _proto.upper()),
+            "severity": _esev, "severity_orig": _esev, "severity_reclassified": False,
+            "source":   "Email Security",
+            "url":      TARGET,
+            "cve":      _EMAIL_CWE.get(_proto,''), "cve_ids": [],
+            "description": _edata.get('detail',''),
+            "remediation": _edata.get('recommendation',''),
+            "evidence": "", "param": "", "attack": "", "other": "",
+        })
 
 # ── Scan metadata (comportamento + evasão) ───────────────────
 scan_meta = {}
@@ -3704,7 +3738,7 @@ for f in findings:
 
 # Stats — contagem de CARDS únicos por severidade (padrão relatórios profissionais)
 # Cada tipo de vulnerabilidade = 1, independente de quantas URLs afeta
-all_f = sorted(findings + zap_findings + header_findings + version_findings, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3,"info":4}.get(x["severity"],5))
+all_f = sorted(findings + zap_findings + header_findings + version_findings + tls_findings + email_findings, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3,"info":4}.get(x["severity"],5))
 stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
 for f in all_f:
     if f["severity"] in stats: stats[f["severity"]] += 1
