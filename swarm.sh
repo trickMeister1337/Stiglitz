@@ -3472,6 +3472,165 @@ if os.path.exists(nf):
     except Exception as e: errors.append(f"nmap: {e}")
 
 # ── testssl ───────────────────────────────────────────────────
+# Mapeamento de IDs testssl → nome legível, descrição e remediação
+TLS_ID_INFO = {
+    "cipherlist_NULL": {
+        "name": "Cipher Suites NULL Habilitadas (Sem Criptografia)",
+        "desc": "O servidor aceita cipher suites do tipo NULL, que não aplicam nenhuma criptografia ao tráfego. Qualquer atacante com acesso à rede pode ler e modificar os dados em trânsito sem barreiras.",
+        "rem":  "Desabilitar todas as cipher suites NULL na configuração TLS do servidor. Em Nginx: ssl_ciphers 'HIGH:!NULL:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5'; em Apache: SSLCipherSuite HIGH:!NULL:!aNULL. Reiniciar o servidor após a mudança.",
+    },
+    "cipherlist_aNULL": {
+        "name": "Cipher Suites Anônimas Habilitadas (Sem Autenticação)",
+        "desc": "O servidor aceita cipher suites anônimas (aNULL/DH anônimo), que não autenticam o servidor. Isso permite ataques Man-in-the-Middle onde um atacante se passa pelo servidor legítimo sem que o cliente perceba.",
+        "rem":  "Desabilitar cipher suites aNULL e DH anônimo. Em Nginx: ssl_ciphers 'HIGH:!aNULL:!NULL:!eNULL'; em Apache: SSLCipherSuite HIGH:!aNULL:!NULL. Também remover ciphers EXPORT, DES e RC4 da configuração.",
+    },
+    "cipherlist_EXPORT": {
+        "name": "Cipher Suites EXPORT Habilitadas (Criptografia Fraca — FREAK/LogJam)",
+        "desc": "O servidor aceita cipher suites de exportação (40-56 bits), criadas nos anos 90 para contornar regulações de exportação dos EUA. São vulneráveis aos ataques FREAK (CVE-2015-0204) e LOGJAM.",
+        "rem":  "Remover cipher suites EXPORT: ssl_ciphers '!EXPORT' (Nginx) / SSLCipherSuite !EXPORT (Apache). Atualizar para TLS 1.2+ com ciphers modernos (AES-256-GCM, CHACHA20).",
+    },
+    "cipherlist_LOW": {
+        "name": "Cipher Suites de Baixa Segurança Habilitadas",
+        "desc": "O servidor aceita cipher suites com criptografia fraca (DES, RC2, 56-bit). Essas cifras podem ser quebradas por força bruta com hardware moderno.",
+        "rem":  "Remover todos os ciphers LOW e MEDIUM: ssl_ciphers 'HIGH:!LOW:!MEDIUM:!EXPORT:!aNULL:!NULL' (Nginx). Manter apenas AES-128-GCM, AES-256-GCM e CHACHA20-POLY1305.",
+    },
+    "cipherlist_3DES_IDEA": {
+        "name": "3DES/IDEA Habilitado (Vulnerável ao SWEET32)",
+        "desc": "O servidor aceita 3DES ou IDEA, vulneráveis ao ataque SWEET32 (CVE-2016-2183) que permite descriptografar sessões longas após ~768 GB de dados trocados.",
+        "rem":  "Desabilitar 3DES e IDEA: adicionar '!3DES:!IDEA' à diretiva ssl_ciphers. Priorizar AES-GCM e CHACHA20.",
+    },
+    "cipherlist_OBSOLETED": {
+        "name": "Cipher Suites Obsoletas Habilitadas",
+        "desc": "O servidor aceita cipher suites consideradas obsoletas (RC4, DES, IDEA, SEED ou similar). Essas cifras possuem fraquezas conhecidas e não devem ser usadas em ambientes de produção.",
+        "rem":  "Restringir o servidor a cipher suites modernas: TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256 (TLS 1.3) e ECDHE-ECDSA-AES256-GCM-SHA384, ECDHE-RSA-AES256-GCM-SHA384 (TLS 1.2).",
+    },
+    "cipherlist_STRONG_NOFS": {
+        "name": "Ausência de Forward Secrecy em Ciphers Fortes",
+        "desc": "Cipher suites fortes sem Perfect Forward Secrecy (PFS) estão habilitadas. Se a chave privada do servidor for comprometida no futuro, sessões passadas gravadas podem ser descriptografadas retroativamente.",
+        "rem":  "Priorizar cipher suites ECDHE/DHE: ssl_ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305'. Desativar RSA key exchange estático.",
+    },
+    "fallback_SCSV": {
+        "name": "TLS Fallback SCSV Não Suportado (Vulnerável a Downgrade)",
+        "desc": "O servidor não suporta TLS Fallback SCSV (RFC 7507), mecanismo que impede ataques de downgrade de protocolo. Sem isso, um atacante MITM pode forçar a conexão a usar uma versão TLS mais antiga e menos segura.",
+        "rem":  "Atualizar a biblioteca TLS do servidor (OpenSSL 1.0.1j+, NSS 3.17.1+). O suporte a SCSV é automático em versões modernas. Também desabilitar TLS 1.0 e 1.1 para eliminar o vetor de downgrade.",
+    },
+    "BEAST": {
+        "name": "Vulnerabilidade BEAST (CVE-2011-3389)",
+        "desc": "O servidor está vulnerável ao ataque BEAST via CBC em TLS 1.0. Um atacante MITM pode injetar texto plano e realizar um ataque chosen-plaintext para recuperar partes do tráfego.",
+        "rem":  "Desabilitar TLS 1.0: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). Como mitigação adicional, priorizar ciphers RC4 foi sugerido no passado, mas RC4 também é fraco — a solução correta é desativar TLS 1.0.",
+    },
+    "LUCKY13": {
+        "name": "Vulnerabilidade LUCKY13 (CVE-2013-0169)",
+        "desc": "O servidor está potencialmente vulnerável ao LUCKY13, um timing attack contra CBC em TLS/DTLS que pode permitir recuperação parcial de texto plano.",
+        "rem":  "Priorizar ciphers GCM (AEAD) em vez de CBC: ssl_ciphers 'ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:!CBC'. Em TLS 1.3, LUCKY13 não se aplica.",
+    },
+    "POODLE_SSL": {
+        "name": "Vulnerabilidade POODLE (CVE-2014-3566) — SSLv3",
+        "desc": "O servidor suporta SSLv3, vulnerável ao ataque POODLE que permite recuperar bytes individuais do texto plano em sessões HTTPS através de ataques de padding oracle.",
+        "rem":  "Desabilitar SSLv3 imediatamente: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol TLSv1.2 TLSv1.3 (Apache). SSLv3 não deve ser usado em nenhum cenário de produção.",
+    },
+    "POODLE_TLS": {
+        "name": "Vulnerabilidade POODLE-TLS — Padding Oracle em TLS",
+        "desc": "Implementação TLS vulnerável ao POODLE via padding oracle em TLS (não apenas SSLv3). Alguns stacks TLS aceitam padding inválido sem reportar erro, permitindo ataque similar ao POODLE original.",
+        "rem":  "Atualizar o servidor/biblioteca TLS para versão que corrige o padding oracle. Habilitar apenas TLS 1.2 e 1.3 que são resistentes a este ataque.",
+    },
+    "DROWN": {
+        "name": "Vulnerabilidade DROWN (CVE-2016-0800)",
+        "desc": "O servidor ou um servidor com a mesma chave privada suporta SSLv2, vulnerável ao DROWN. Um atacante pode descriptografar sessões TLS modernas usando o oráculo SSLv2.",
+        "rem":  "Desabilitar SSLv2 em todos os servidores que compartilham a chave privada. Revogar e renegociar certificados se a chave foi exposta. Nunca reutilizar a mesma chave privada em serviços com configurações TLS diferentes.",
+    },
+    "LOGJAM": {
+        "name": "Vulnerabilidade LOGJAM — DH Fraco (CVE-2015-4000)",
+        "desc": "O servidor aceita parâmetros Diffie-Hellman com tamanho insuficiente (< 2048 bits), vulneráveis ao ataque LOGJAM que permite downgrade para export-grade DH e descriptografia offline.",
+        "rem":  "Gerar parâmetros DH fortes: openssl dhparam -out dhparam.pem 2048. Configurar ssl_dhparam /etc/nginx/dhparam.pem. Preferir ECDHE sobre DHE para eliminar este vetor.",
+    },
+    "SWEET32": {
+        "name": "Vulnerabilidade SWEET32 (CVE-2016-2183)",
+        "desc": "O servidor suporta cifras com bloco de 64 bits (3DES, DES, IDEA, Blowfish), vulneráveis ao SWEET32. Após ~768 GB de dados com a mesma chave de sessão, colisões de bloco permitem recuperação parcial de texto.",
+        "rem":  "Desabilitar 3DES, DES, IDEA e Blowfish: adicionar '!3DES:!DES:!IDEA' ao ssl_ciphers. Limitar duração de sessões TLS (ssl_session_timeout 1h) como mitigação adicional.",
+    },
+    "ROBOT": {
+        "name": "Vulnerabilidade ROBOT — Return of Bleichenbacher Oracle Threat",
+        "desc": "O servidor é vulnerável ao ROBOT, uma variação do ataque Bleichenbacher de 1998 que permite descriptografar sessões RSA e gerar assinaturas RSA forjadas usando RSA PKCS#1 v1.5.",
+        "rem":  "Desabilitar RSA key exchange (static RSA): remover !RSA (sem ECDHE) dos ciphers. Habilitar apenas ciphers com forward secrecy (ECDHE). Atualizar a biblioteca TLS se o fornecedor lançou patch específico.",
+    },
+    "HEARTBLEED": {
+        "name": "Vulnerabilidade Heartbleed (CVE-2014-0160) — CRÍTICA",
+        "desc": "O servidor está vulnerável ao Heartbleed, falha crítica no OpenSSL que permite ler até 64 KB da memória do processo por request. Dados como chaves privadas, senhas e tokens de sessão podem ser extraídos remotamente sem autenticação.",
+        "rem":  "Atualizar OpenSSL para 1.0.1g+ / 1.0.2+ IMEDIATAMENTE. Revogar todos os certificados e gerar novos após o patch. Invalidar todas as sessões ativas e forçar troca de senhas de usuários.",
+    },
+    "CCS": {
+        "name": "OpenSSL CCS Injection (CVE-2014-0224)",
+        "desc": "O servidor está vulnerável à injeção ChangeCipherSpec do OpenSSL. Permite a um atacante MITM inserir uma chave de sessão nula, descriptografando e modificando o tráfego TLS em tempo real.",
+        "rem":  "Atualizar OpenSSL para versão 0.9.8za, 1.0.0m ou 1.0.1h e superiores. Esta vulnerabilidade exige patch na biblioteca — não há workaround de configuração.",
+    },
+    "CRIME_TLS": {
+        "name": "Vulnerabilidade CRIME (CVE-2012-4929) — Compressão TLS",
+        "desc": "O servidor suporta compressão TLS, vulnerável ao CRIME. Um atacante que injeta texto no tráfego pode inferir cookies de sessão e tokens por análise de variação no tamanho comprimido.",
+        "rem":  "Desabilitar compressão TLS: ssl_comp_add_compression_method() não deve ser chamado; em OpenSSL, compilar com -DOPENSSL_NO_COMP. Em Nginx moderno a compressão TLS já é desabilitada por padrão.",
+    },
+    "BREACH": {
+        "name": "Vulnerabilidade BREACH — Compressão HTTP",
+        "desc": "O servidor usa compressão HTTP (gzip) em respostas que contêm segredos (CSRF tokens, dados de sessão), vulnerável ao BREACH. Similar ao CRIME mas explora a compressão na camada HTTP.",
+        "rem":  "Desabilitar compressão em respostas que contêm segredos: não comprimir endpoints com CSRF token ou dados sensíveis. Implementar CSRF tokens variáveis por request (masked tokens). A compressão HTTP geral pode ser mantida em recursos estáticos.",
+    },
+    "TICKETBLEED": {
+        "name": "Vulnerabilidade Ticketbleed (CVE-2016-9244)",
+        "desc": "O servidor F5/Citrix está vulnerável ao Ticketbleed, falha em session tickets TLS que vaza até 31 bytes de memória não inicializada por conexão.",
+        "rem":  "Aplicar patch do fornecedor (F5 BIG-IP, Citrix). Desabilitar TLS session tickets como mitigação temporária: ssl_session_tickets off (Nginx).",
+    },
+    "TLS1": {
+        "name": "TLS 1.0 Habilitado (Protocolo Deprecado)",
+        "desc": "O servidor suporta TLS 1.0, depreciado pelo IETF (RFC 8996) e proibido pelo PCI DSS desde 2018. Está sujeito a múltiplos ataques (BEAST, POODLE, CRIME) e usa funções hash fracas (MD5/SHA-1).",
+        "rem":  "Desabilitar TLS 1.0 e 1.1: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol -all +TLSv1.2 +TLSv1.3 (Apache). Verificar compatibilidade com clientes legítimos antes de aplicar.",
+    },
+    "TLS1_1": {
+        "name": "TLS 1.1 Habilitado (Protocolo Deprecado)",
+        "desc": "O servidor suporta TLS 1.1, depreciado pelo IETF (RFC 8996) junto com TLS 1.0. Não suporta cipher suites AEAD e usa construções de MAC legadas vulneráveis a timing attacks.",
+        "rem":  "Desabilitar TLS 1.1: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). Manter apenas TLS 1.2 (com ciphers GCM) e TLS 1.3.",
+    },
+    "SSLv2": {
+        "name": "SSLv2 Habilitado (Protocolo Severamente Vulnerável)",
+        "desc": "O servidor suporta SSLv2, protocolo completamente quebrado que usa criptografia de 40-bit, sem proteção contra replay e vulnerável ao DROWN. Deve ser desabilitado em qualquer ambiente.",
+        "rem":  "Desabilitar SSLv2 imediatamente: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). Se o servidor não permitir desabilitar SSLv2, trocar o servidor/biblioteca TLS.",
+    },
+    "SSLv3": {
+        "name": "SSLv3 Habilitado (Vulnerável ao POODLE)",
+        "desc": "O servidor suporta SSLv3, vulnerável ao POODLE (CVE-2014-3566) e sem suporte a TLS extensions. Todas as comunicações via SSLv3 podem ser descriptografadas por um atacante MITM.",
+        "rem":  "Desabilitar SSLv3: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol -SSLv3 (Apache). Não há uso legítimo para SSLv3 em 2024+.",
+    },
+    "HSTS": {
+        "name": "HTTP Strict Transport Security (HSTS) Ausente",
+        "desc": "O servidor não envia o header Strict-Transport-Security, permitindo que conexões HTTP não criptografadas sejam aceitas e que ataques de downgrade SSL stripping redirecionem usuários para HTTP.",
+        "rem":  "Adicionar header HSTS: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload (Nginx: add_header Strict-Transport-Security). Após estabilidade, submeter domínio ao HSTS preload list.",
+    },
+    "OCSP_stapling": {
+        "name": "OCSP Stapling Não Configurado",
+        "desc": "O servidor não usa OCSP stapling, fazendo com que browsers consultem o servidor OCSP da CA para verificar revogação de certificado — o que pode vazar o IP do usuário à CA e adicionar latência.",
+        "rem":  "Habilitar OCSP stapling: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 (Nginx). Verificar se a CA suporta OCSP e que o certificado tem extensão OCSP URL.",
+    },
+    "DNS_CAArecord": {
+        "name": "Registro CAA DNS Ausente",
+        "desc": "O domínio não possui registro CAA (Certification Authority Authorization), que restringe quais CAs podem emitir certificados para o domínio. Sem CAA, qualquer CA do mundo pode emitir certificados, ampliando o risco de certificados fraudulentos.",
+        "rem":  "Adicionar registro CAA no DNS: exemplo para Let's Encrypt: 0 issue letsencrypt.org; 0 issuewild letsencrypt.org; 0 iodef mailto:security@dominio.com. Verificar com: dig CAA dominio.com",
+    },
+    "cert_expired": {
+        "name": "Certificado TLS Expirado",
+        "desc": "O certificado TLS do servidor está expirado. Browsers exibirão erro de segurança para todos os usuários, potencialmente tornando a aplicação inacessível.",
+        "rem":  "Renovar o certificado imediatamente. Implementar renovação automática via Let's Encrypt (certbot renew) ou monitoramento de expiração com alertas com 30+ dias de antecedência.",
+    },
+    "cert_notYetValid": {
+        "name": "Certificado TLS Ainda Não Válido",
+        "desc": "O certificado TLS tem data de início (NotBefore) no futuro. O servidor está apresentando um certificado inválido para todos os clientes.",
+        "rem":  "Verificar se o relógio do sistema está sincronizado (NTP). Renegociar o certificado com datas corretas junto à CA.",
+    },
+    "cert_chain_of_trust": {
+        "name": "Cadeia de Certificação Inválida ou Incompleta",
+        "desc": "O servidor não apresenta a cadeia completa de certificados intermediários, impedindo que clientes validem o certificado corretamente. Pode causar erros de SSL em alguns clientes.",
+        "rem":  "Configurar o servidor para enviar os certificados intermediários (chain): ssl_certificate /path/to/fullchain.pem (Nginx). O arquivo fullchain.pem deve conter: certificado do servidor + intermediário(s) + raiz (opcional).",
+    },
+}
+
 tls_findings = []
 tf = os.path.join(OUTDIR,"raw","testssl.json")
 if os.path.exists(tf) and os.path.getsize(tf) > 0:
@@ -3483,22 +3642,29 @@ if os.path.exists(tf) and os.path.getsize(tf) > 0:
         for item in findings_raw:
             sev_raw = item.get("severity","INFO")
             sev = SEV_MAP.get(sev_raw.upper(),"info")
-            if sev_raw.upper() in ("CRITICAL","HIGH","WARN","LOW"):
-                _tls_id  = item.get("id","")
-                _tls_txt = item.get("finding","")
+            _tls_id = item.get("id","")
+            # scanTime é metadado do testssl (duração do scan), não uma vulnerabilidade
+            if sev_raw.upper() in ("CRITICAL","HIGH","WARN","LOW") and _tls_id != "scanTime":
+                _tls_raw  = item.get("finding","")  # resultado bruto do teste (ex: "offered")
+                _cve_raw  = item.get("cve","") or item.get("cwe","")
+                _info     = TLS_ID_INFO.get(_tls_id, {})
+                _name     = _info.get("name") or f"TLS/SSL: {_tls_id}" if _tls_id else "TLS/SSL Issue"
+                _desc     = _info.get("desc") or f"testssl.sh reportou '{_tls_raw}' para o teste '{_tls_id}'."
+                _rem      = _info.get("rem") or "Consultar a documentação do servidor para desabilitar este recurso TLS inseguro."
+                _evidence = f"testssl.sh · teste: {_tls_id} · resultado: {_tls_raw}" if _tls_raw else f"testssl.sh · teste: {_tls_id}"
                 tls_findings.append({
                     "id":       _tls_id,
-                    "name":     f"TLS/SSL: {_tls_id}" if _tls_id else "TLS/SSL Issue",
+                    "name":     _name,
                     "severity": sev, "severity_orig": sev, "severity_reclassified": False,
                     "sev":      sev,
                     "sev_raw":  sev_raw,
                     "source":   "testssl.sh",
                     "url":      TARGET,
-                    "cve":      item.get("cve",""), "cve_ids": [],
-                    "finding":  _tls_txt,
-                    "description": _tls_txt,
-                    "remediation": "",
-                    "evidence": _tls_txt,
+                    "cve":      _cve_raw, "cve_ids": [],
+                    "finding":  _tls_raw,
+                    "description": _desc,
+                    "remediation": _rem,
+                    "evidence": _evidence,
                     "param": "", "attack": "", "other": "",
                 })
     except Exception as e: errors.append(f"testssl: {e}")
@@ -3924,8 +4090,10 @@ def render_finding(f):
   <table>{rows}
   </table></div>'''
 
+# TLS e Email têm seções HTML próprias — excluir dos cards principais para não duplicar
+_DEDICATED_SOURCES = {"testssl.sh", "Email Security"}
 # Only render critical / high / medium as detailed cards
-_main_findings = [f for f in all_f if f["severity"] in ("critical","high","medium")]
+_main_findings = [f for f in all_f if f["severity"] in ("critical","high","medium") and f.get("source") not in _DEDICATED_SOURCES]
 vhtml = (
     '<div class="info-box"><p>✅ Nenhuma vulnerabilidade encontrada no escopo analisado.</p></div>'
     if not _main_findings
@@ -3935,7 +4103,7 @@ vhtml = (
 # ── Consolidated Low / Info table (all sources) ───────────────
 # Collect low/info items from every source: Nuclei, Security Headers,
 # Version Fingerprint, and ZAP low_groups (already grouped by name).
-_low_info_findings = [f for f in all_f if f["severity"] in ("low","info")]
+_low_info_findings = [f for f in all_f if f["severity"] in ("low","info") and f.get("source") not in _DEDICATED_SOURCES]
 
 low_table_html = ""
 if _low_info_findings or zap_low_groups:
@@ -4341,8 +4509,8 @@ else:
 SEV_ORDER = {"critical":0,"high":1,"medium":2,"low":3,"info":4}
 
 # Coletar todos os achados acionáveis por prazo
-imediato  = [f for f in all_f if f["severity"] in ("critical","high")]
-sprint    = [f for f in all_f if f["severity"] == "medium"]
+imediato  = [f for f in all_f if f["severity"] in ("critical","high") and f.get("source") not in _DEDICATED_SOURCES]
+sprint    = [f for f in all_f if f["severity"] == "medium" and f.get("source") not in _DEDICATED_SOURCES]
 backlog   = [f for f in zap_low_groups.values() if f["sev"] in ("low","info")]
 
 def action_card(title, icon, color, bg, items, prazo, descricao):
