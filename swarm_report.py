@@ -624,6 +624,28 @@ for _c in (confirmations if isinstance(confirmations, list) else []):
     _nc.append(_c)
 confirmations = _nc
 
+# Conjunto de identificadores com confirmação ativa (template_id / id testssl).
+# Usado para marcar os cards/linhas correspondentes como "confirmado ativamente".
+_confirmed_keys = set()
+for _c in confirmations:
+    if _c.get("confirmed"):
+        _k = str(_c.get("template_id", "")).strip().lower()
+        if _k and _k != "—":
+            _confirmed_keys.add(_k)
+
+def _is_confirmed(f):
+    """True se o finding tem uma confirmação ativa correspondente.
+    Nuclei guarda o template-id em f['other']; testssl em f['id']."""
+    cands = []
+    if f.get("source") == "Nuclei":
+        cands.append(f.get("other", ""))
+    cands.append(f.get("id", ""))
+    for c in cands:
+        ck = str(c).strip().lower()
+        if ck and ck in _confirmed_keys:
+            return True
+    return False
+
 # ── WAF & Email Security ───────────────────────────────────
 email_security = {}
 _esf = os.path.join(OUTDIR,'raw','email_security.json')
@@ -989,8 +1011,13 @@ def render_finding(f):
                'source-headers' if _src == 'Security Headers'    else
                'source-version' if _src == 'Version Fingerprint' else
                'source-zap')
+    confirmed_badge = ''
+    if _is_confirmed(f):
+        confirmed_badge = ('<span style="background:#1b5e20;color:white;padding:2px 8px;'
+            'border-radius:4px;font-size:10px;font-weight:bold;margin-left:6px;'
+            'border:1px solid #2e7d32">✓ CONFIRMADO ATIVAMENTE</span>')
     return f'''<div class="vuln {f['severity']}">
-  <h3>{html.escape(f.get('name',''))} <span class="source-badge {src_cls}">{f.get('source','')}</span> {badge(f['severity'])}{reclassify_badge}</h3>
+  <h3>{html.escape(f.get('name',''))} <span class="source-badge {src_cls}">{f.get('source','')}</span> {badge(f['severity'])}{reclassify_badge}{confirmed_badge}</h3>
   <table>{rows}
   </table></div>'''
 
@@ -1307,16 +1334,22 @@ if js_analysis:
 SEV_TLS_CLASS = {"critical":"tls-critical","high":"tls-high","medium":"tls-warn","low":"tls-warn","info":"tls-ok"}
 if tls_findings:
     TLS_SEV_PT = {"CRITICAL":"CRÍTICO","HIGH":"ALTO","WARN":"AVISO","LOW":"BAIXO","OK":"OK","INFO":"INFO"}
+    def _tls_problem_cell(f):
+        cell = html.escape(f.get("name", f.get("finding", "")))
+        if _is_confirmed(f):
+            cell += ('  <span style="background:#1b5e20;color:white;padding:1px 6px;'
+                'border-radius:3px;font-size:10px;font-weight:bold">✓ CONFIRMADO</span>')
+        return cell
     tls_rows = "".join(
         f'<tr><td style="font-family:monospace;font-size:12px">{html.escape(f["id"])}</td>'
         f'<td class="{SEV_TLS_CLASS.get(f["sev"],"tls-ok")}">{html.escape(TLS_SEV_PT.get(f["sev_raw"].upper(),f["sev_raw"]))}</td>'
-        f'<td>{html.escape(f["finding"])}</td>'
+        f'<td>{_tls_problem_cell(f)}</td>'
         f'<td>{html.escape(f["cve"] or "—")}</td></tr>'
         for f in tls_findings
     )
     tls_html = f'''<h2>TLS / SSL — {len(tls_findings)} problema(s) identificado(s)</h2>
     <table>
-      <tr style="background:#f5f5f5"><th>Identificador</th><th>Severidade</th><th>Achado</th><th>CVE</th></tr>
+      <tr style="background:#f5f5f5"><th>Identificador</th><th>Severidade</th><th>Problema</th><th>CVE/CWE</th></tr>
       {tls_rows}
     </table>'''
 else:
