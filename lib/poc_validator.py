@@ -861,6 +861,10 @@ def confirm_tls(outdir, domain):
     except Exception:
         return confirmations
 
+    # IDs do testssl que são metadados/operacionais, não vulnerabilidades —
+    # nunca devem ser marcados como "exploit confirmado".
+    NON_VULN_TLS_IDS = {"scantime", "service", "engine_problem", "pre_128cipher",
+                        "clientsimulation", "grease", "ipv4_in_san", "drown_hint"}
     seen = set()
     for item in findings:
         sev = (item.get("severity") or "").lower()
@@ -868,6 +872,9 @@ def confirm_tls(outdir, domain):
             continue
         finding_id = item.get("id", "")
         label      = item.get("finding", "")[:80]
+        # Pular metadados do testssl e erros operacionais (ex: "Scan interrupted")
+        if finding_id.lower() in NON_VULN_TLS_IDS or "scan interrupt" in label.lower():
+            continue
         key = f"tls::{finding_id}"
         if key in seen:
             continue
