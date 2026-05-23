@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/stiglitz_logo.png" alt="Stiglitz" width="420">
+  <img src="assets/stiglitz_logo.png" alt="Stiglitz" width="600">
 </p>
 
 <h1 align="center">Stiglitz</h1>
