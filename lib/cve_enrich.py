@@ -87,7 +87,7 @@ enriched = {}
 for cve_id in sorted(cves):
     in_kev = cve_id in kev_set
     kev_info = kev_meta.get(cve_id, {})
-    entry = {"cve_id": cve_id, "cvss_v3": None, "cvss_v2": None,
+    entry = {"cve_id": cve_id, "cvss_v3": None, "cvss_v2": None, "cvss_vector": "",
              "description": "", "epss_score": None, "epss_percentile": None,
              "severity": "", "in_kev": in_kev, "kev": kev_info}
     if in_kev:
@@ -127,11 +127,16 @@ for cve_id in sorted(cves):
             metrics = cve_data.get("metrics", {})
             cvss3 = metrics.get("cvssMetricV31", metrics.get("cvssMetricV30", []))
             if cvss3:
-                entry["cvss_v3"] = cvss3[0].get("cvssData", {}).get("baseScore")
-                entry["severity"] = cvss3[0].get("cvssData", {}).get("baseSeverity", "")
+                _cd = cvss3[0].get("cvssData", {})
+                entry["cvss_v3"] = _cd.get("baseScore")
+                entry["severity"] = _cd.get("baseSeverity", "")
+                entry["cvss_vector"] = _cd.get("vectorString", "")
             cvss2 = metrics.get("cvssMetricV2", [])
             if cvss2:
-                entry["cvss_v2"] = cvss2[0].get("cvssData", {}).get("baseScore")
+                _cd2 = cvss2[0].get("cvssData", {})
+                entry["cvss_v2"] = _cd2.get("baseScore")
+                if not entry["cvss_vector"]:
+                    entry["cvss_vector"] = _cd2.get("vectorString", "")
         print(f"  [✓] NVD: {cve_id} — CVSS {entry.get('cvss_v3','?')} {entry.get('severity','')}")
     time.sleep(6)  # NVD rate limit: 5 req/30s sem API key — mínimo 6s entre chamadas
 

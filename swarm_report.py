@@ -944,6 +944,22 @@ def trows(items,empty="Sem resultados"):
     if not items: return f'<tr><td style="color:#999;font-style:italic">{empty}</td></tr>'
     return "".join(f'<tr><td style="font-family:monospace;font-size:12px">{html.escape(i)}</td></tr>' for i in items[:50])
 
+def _decode_cvss_vector(vec):
+    """Decodifica os campos mais decisivos do vetor CVSS (exploitabilidade)."""
+    if not vec:
+        return ""
+    parts = dict(p.split(":") for p in vec.split("/") if p.count(":") == 1)
+    av = {"N":"Rede","A":"Adjacente","L":"Local","P":"Físico"}.get(parts.get("AV",""), "")
+    ac = {"L":"Baixa","H":"Alta"}.get(parts.get("AC",""), "")
+    pr = {"N":"Nenhum","L":"Baixo","H":"Alto"}.get(parts.get("PR",""), "")
+    ui = {"N":"Nenhuma","R":"Requerida"}.get(parts.get("UI",""), "")
+    bits = []
+    if av: bits.append(f"Vetor: {av}")
+    if ac: bits.append(f"Complexidade: {ac}")
+    if pr: bits.append(f"Privilégio: {pr}")
+    if ui: bits.append(f"Interação: {ui}")
+    return " · ".join(bits)
+
 def render_finding(f):
     # Enriquecer CVE com dados NVD/EPSS se disponível
     cve_val = f.get('cve','N/A')
@@ -978,6 +994,12 @@ def render_finding(f):
                 if kev_prod: enrich_rows += f'<br><small style="color:#7a0000;font-weight:bold">Adicionado ao KEV em {html.escape(kev_added)} — {html.escape(kev_prod)}</small> '
             if cvss: enrich_rows += f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS {cvss} {html.escape(sev_pt)}</span> '
             if epss is not None: enrich_rows += f'<span style="background:{epss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px">EPSS {epss:.4f} ({epss_pct*100:.1f}° percentil)</span> '
+            # Vetor CVSS — exibe a string e decodifica os campos de exploitabilidade
+            _vec = ev.get("cvss_vector", "")
+            if _vec:
+                _dec = _decode_cvss_vector(_vec)
+                enrich_rows += (f'<br><code style="font-size:10px;color:#666">{html.escape(_vec)}</code>'
+                    + (f' <span style="font-size:10px;color:#888">({html.escape(_dec)})</span>' if _dec else ''))
             # Link direto para advisory NVD
             enrich_rows += (f'<a href="https://nvd.nist.gov/vuln/detail/{html.escape(cve_id)}" '
                 f'target="_blank" style="font-size:11px;color:#388bfd;margin-left:6px">'
