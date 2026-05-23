@@ -743,6 +743,25 @@ if command -v nuclei &>/dev/null; then
         echo -e "  ${BLUE}[…] Evasão passiva ativada: UA rotation + origin spoofing + payload alterations${NC}"
     fi
 
+    # Atualização de templates do Nuclei com cache diário (24h).
+    # A adaptação por tags só é tão boa quanto os templates instalados — manter
+    # frescos garante cobertura de CVEs novos. Cacheado para não baixar a cada scan.
+    _nuc_tpl_marker="$HOME/.cache/stiglitz/nuclei_templates_updated"
+    mkdir -p "$(dirname "$_nuc_tpl_marker")" 2>/dev/null
+    _nuc_tpl_age=$(( $(date +%s) - $(stat -c %Y "$_nuc_tpl_marker" 2>/dev/null || echo 0) ))
+    if [ "$_nuc_tpl_age" -gt 86400 ]; then
+        echo -e "  ${BLUE}[…] Atualizando templates do Nuclei (cache diário)...${NC}"
+        if timeout 120 nuclei -update-templates -silent 2>/dev/null; then
+            touch "$_nuc_tpl_marker"
+            echo -e "  ${GREEN}[✓] Templates do Nuclei atualizados${NC}"
+        else
+            echo -e "  ${YELLOW}[!] Falha/timeout ao atualizar templates — usando os instalados${NC}"
+        fi
+    else
+        echo -e "  ${GREEN}[✓] Templates do Nuclei atualizados há $(( _nuc_tpl_age/3600 ))h (cache)${NC}"
+    fi
+    unset _nuc_tpl_marker _nuc_tpl_age
+
     # Always include custom templates directory if it exists
     NUCLEI_TEMPLATES_FLAGS=()
     _custom_tpl_dir="$(dirname "$0")/nuclei-custom-templates"

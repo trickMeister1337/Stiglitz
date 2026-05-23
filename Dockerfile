@@ -49,8 +49,10 @@ COPY requirements-dev.txt /tmp/requirements-dev.txt
 RUN pip3 install --no-cache-dir --break-system-packages requests wafw00f && \
     pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements-dev.txt
 
-# Nuclei templates (best-effort; image still works offline without an update)
-RUN nuclei -update-templates 2>/dev/null || true
+# Nuclei templates (best-effort; image still works offline without an update).
+# Seed the daily-cache marker so the first in-container scan reuses these.
+RUN nuclei -update-templates 2>/dev/null || true; \
+    mkdir -p /root/.cache/stiglitz && touch /root/.cache/stiglitz/nuclei_templates_updated
 
 # Project files (kept tiny via .dockerignore)
 COPY . /opt/stiglitz
