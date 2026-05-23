@@ -10,13 +10,13 @@ outdir = sys.argv[1]
 httpx_file = os.path.join(outdir,"raw","httpx_results.txt")
 
 SECURITY_HEADERS = {
-    "content-security-policy":      ("critical","CSP ausente — XSS sem mitigação"),
-    "x-content-type-options":       ("medium","X-Content-Type-Options ausente — MIME sniffing possível"),
-    "x-frame-options":              ("medium","X-Frame-Options ausente — Clickjacking possível"),
-    "strict-transport-security":    ("high","HSTS ausente — downgrade HTTPS possível"),
-    "referrer-policy":              ("low","Referrer-Policy ausente — vazamento de URL em requests"),
-    "permissions-policy":           ("low","Permissions-Policy ausente — acesso irrestrito a APIs do browser"),
-    "x-xss-protection":             ("info","X-XSS-Protection legado — preferir CSP"),
+    "content-security-policy":      ("critical","CSP missing — XSS unmitigated"),
+    "x-content-type-options":       ("medium","X-Content-Type-Options missing — MIME sniffing possible"),
+    "x-frame-options":              ("medium","X-Frame-Options missing — Clickjacking possible"),
+    "strict-transport-security":    ("high","HSTS missing — HTTPS downgrade possible"),
+    "referrer-policy":              ("low","Referrer-Policy missing — URL leakage in requests"),
+    "permissions-policy":           ("low","Permissions-Policy missing — unrestricted access to browser APIs"),
+    "x-xss-protection":             ("info","X-XSS-Protection legacy — prefer CSP"),
 }
 
 results = []

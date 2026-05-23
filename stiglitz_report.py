@@ -2078,6 +2078,65 @@ try:
 except Exception as _e:
     print(f"[!] findings.json: {_e}")
 
+# ── findings.sarif (SARIF 2.1.0 — GitHub Security / DefectDojo / CI) ──
+try:
+    _SARIF_LEVEL = {"critical": "error", "high": "error",
+                    "medium": "warning", "low": "note", "info": "none"}
+    def _rule_id(f):
+        """ID estável: 1º CVE, senão CWE, senão slug do nome."""
+        cve = str(f.get("cve", ""))
+        m = re.search(r'CVE-\d{4}-\d{4,7}', cve, re.IGNORECASE)
+        if m: return m.group(0).upper()
+        m = re.search(r'CWE-?\d+', cve, re.IGNORECASE)
+        if m: return m.group(0).upper().replace("CWE", "CWE-").replace("CWE--", "CWE-")
+        slug = re.sub(r'[^a-z0-9]+', '-', str(f.get("name", "finding")).lower()).strip('-')
+        return ("stiglitz-" + slug)[:80] or "stiglitz-finding"
+
+    _sarif_rules, _seen_rules, _sarif_results = [], set(), []
+    for f in all_f:
+        rid = _rule_id(f)
+        if rid not in _seen_rules:
+            _seen_rules.add(rid)
+            _rule = {
+                "id": rid,
+                "name": re.sub(r'[^A-Za-z0-9]', '', f.get("name", "Finding")) or "Finding",
+                "shortDescription": {"text": f.get("name", "")[:200] or rid},
+                "properties": {"tags": [f.get("source", ""), f.get("severity", "")],
+                               "security-severity": str(f.get("cvss") or
+                                   {"critical":"9.5","high":"7.5","medium":"5.0","low":"3.0","info":"0.0"}.get(f.get("severity",""),"0.0"))},
+            }
+            if rid.startswith("CVE-"):
+                _rule["helpUri"] = f"https://nvd.nist.gov/vuln/detail/{rid}"
+            _sarif_rules.append(_rule)
+        _msg = f.get("name", "") + (": " + f.get("description", "") if f.get("description") else "")
+        _sarif_results.append({
+            "ruleId": rid,
+            "level": _SARIF_LEVEL.get(f.get("severity", ""), "warning"),
+            "message": {"text": _msg[:1000] or rid},
+            "locations": [{"physicalLocation": {
+                "artifactLocation": {"uri": f.get("url", TARGET) or TARGET}}}],
+            "properties": {"severity": f.get("severity", ""), "source": f.get("source", ""),
+                           "cve": f.get("cve", ""), "epss": f.get("epss_score"),
+                           "in_kev": f.get("in_kev", False)},
+        })
+    sarif_out = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "Stiglitz",
+                "informationUri": "https://github.com/trickMeister1337/Stiglitz",
+                "rules": _sarif_rules,
+            }},
+            "results": _sarif_results,
+        }],
+    }
+    sf = os.path.join(OUTDIR, "findings.sarif")
+    json.dump(sarif_out, open(sf, "w", encoding="utf-8"), ensure_ascii=False, indent=2, default=str)
+    print(f"[✓] SARIF 2.1.0: {sf}")
+except Exception as _e:
+    print(f"[!] findings.sarif: {_e}")
+
 # ── executive_summary.html ────────────────────────────────────────
 try:
     rc = "#7a2e2e" if risk>=70 else ("#b34e4e" if risk>=40 else ("#d4833a" if risk>=15 else "#27ae60"))
