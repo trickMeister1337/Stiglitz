@@ -287,12 +287,12 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                 ev_parts_zap = []
                 _alert_name = a.get("name","")
                 _xml_ev = _zap_xml_evidence.get(_alert_name, {})
-                if a.get("param",""):      ev_parts_zap.append(f"Parâmetro: {a['param']}")
-                if a.get("attack",""):     ev_parts_zap.append(f"Vetor de Ataque:\n{a['attack']}")
-                if a.get("evidence",""):   ev_parts_zap.append(f"Evidência:\n{a['evidence']}")
-                if _xml_ev.get("request"): ev_parts_zap.append(f"--- REQUISIÇÃO HTTP ---\n{_xml_ev['request']}")
-                if _xml_ev.get("response"):ev_parts_zap.append(f"--- RESPOSTA HTTP ---\n{_xml_ev['response']}")
-                if a.get("other",""):      ev_parts_zap.append(f"Detalhe adicional:\n{a['other']}")
+                if a.get("param",""):      ev_parts_zap.append(f"Parameter: {a['param']}")
+                if a.get("attack",""):     ev_parts_zap.append(f"Attack Vector:\n{a['attack']}")
+                if a.get("evidence",""):   ev_parts_zap.append(f"Evidence:\n{a['evidence']}")
+                if _xml_ev.get("request"): ev_parts_zap.append(f"--- HTTP REQUEST ---\n{_xml_ev['request']}")
+                if _xml_ev.get("response"):ev_parts_zap.append(f"--- HTTP RESPONSE ---\n{_xml_ev['response']}")
+                if a.get("other",""):      ev_parts_zap.append(f"Additional detail:\n{a['other']}")
                 ev = "\n\n".join(ev_parts_zap)  # sem truncagem — evidência completa
                 # Extrair CVE do campo reference; fallback para CWE
                 _refs = a.get("reference","") or ""
@@ -1072,9 +1072,9 @@ def render_finding(f):
     # Exibir evidência dividida em blocos legíveis
     _ev_full = f.get("evidence","")
     if _ev_full:
-        _req_match  = re.search(r"--- REQUISIÇÃO HTTP ---\n(.*?)(?=---|$)", _ev_full, re.DOTALL)
-        _res_match  = re.search(r"--- RESPOSTA HTTP ---\n(.*?)(?=---|$)", _ev_full, re.DOTALL)
-        _ev_other   = re.sub(r"--- (REQUISIÇÃO|RESPOSTA) HTTP ---\n.*?(?=---|$)", "", _ev_full, flags=re.DOTALL).strip()
+        _req_match  = re.search(r"--- HTTP REQUEST ---\n(.*?)(?=---|$)", _ev_full, re.DOTALL)
+        _res_match  = re.search(r"--- HTTP RESPONSE ---\n(.*?)(?=---|$)", _ev_full, re.DOTALL)
+        _ev_other   = re.sub(r"--- HTTP (REQUEST|RESPONSE) ---\n.*?(?=---|$)", "", _ev_full, flags=re.DOTALL).strip()
         if _ev_other:
             rows += f'\n    <tr><th>Evidence</th><td><div class="evidence-box">{html.escape(_ev_other)}</div></td></tr>'
         if _req_match:
