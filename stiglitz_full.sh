@@ -4,12 +4,12 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 #  Executa o pipeline completo em sequência:
-#    osint.sh → stiglitz.sh → stiglitz_red.sh → (pci_scan.sh)
+#    osint.sh → stiglitz.sh → stiglitz_red.sh
 #  e gera um índice HTML consolidando todos os relatórios.
 #
 #  Uso:
 #    bash stiglitz_full.sh -t https://alvo.com
-#    bash stiglitz_full.sh -t https://alvo.com -p staging --pci
+#    bash stiglitz_full.sh -t https://alvo.com -p staging
 #    bash stiglitz_full.sh -t https://alvo.com --skip-osint --skip-red
 # ═══════════════════════════════════════════════════════════════════════════════
 set -uo pipefail

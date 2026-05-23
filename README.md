@@ -34,7 +34,6 @@ Stiglitz chains the tools a red-teamer already uses — `subfinder`, `httpx`, `n
   osint.sh        stiglitz.sh         stiglitz_red.sh        auto-generated
 
             stiglitz_full.sh  ── runs the whole chain in one command
-            pci_scan.sh    ── standalone PCI DSS 4.0.1 compliance scan
 ```
 
 ## Why Stiglitz?
@@ -65,7 +64,6 @@ Output lands in `scan_<domain>_<timestamp>/` — open `stiglitz_report.html`.
 | `stiglitz.sh` | Recon & adaptive vulnerability scanning (11 phases) | Map the attack surface |
 | `stiglitz_red.sh` | Automated exploitation engine (8 phases) | After recon, or standalone |
 | `stiglitz_full.sh` | End-to-end orchestrator | One-command full engagement |
-| `pci_scan.sh` | PCI DSS 4.0.1 compliance scan | Payment environments |
 | `stiglitz_batch.sh` | Multi-target wrapper | Many targets in series |
 | `stiglitz_diff.py` | Scan-to-scan comparison | Remediation tracking |
 
@@ -184,7 +182,6 @@ stiglitz.sh            Main scanner (11 phases)
 stiglitz_red.sh        Exploitation engine (8 phases)
 osint.sh            Pre-engagement OSINT (10 phases)
 stiglitz_full.sh       End-to-end orchestrator
-pci_scan.sh         PCI DSS 4.0.1 compliance
 stiglitz_report.py     HTML/JSON report generator
 stiglitz_diff.py       Scan comparison
 lib/                Python modules (parsers, evidence, poc_validator, cve_enrich, …)

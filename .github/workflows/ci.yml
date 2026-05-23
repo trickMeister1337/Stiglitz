@@ -18,7 +18,6 @@ jobs:
           bash -n stiglitz.sh
           bash -n stiglitz_red.sh
           bash -n osint.sh
-          bash -n pci_scan.sh
           bash -n setup.sh
           bash -n stiglitz_batch.sh
           bash -n stiglitz_full.sh
