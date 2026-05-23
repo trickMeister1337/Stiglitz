@@ -1,0 +1,34 @@
+# Stiglitz — docker compose
+#
+#   Build + scan a target:
+#     docker compose build
+#     docker compose run --rm stiglitz https://target.com
+#
+#   Local demo against OWASP Juice Shop (vulnerable app):
+#     docker compose --profile demo up -d juiceshop
+#     docker compose run --rm stiglitz http://juiceshop:3000
+#
+# Reports land in ./output (mounted at /scans inside the container).
+
+services:
+  stiglitz:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: stiglitz:latest
+    volumes:
+      - ./output:/scans
+    # Pass API keys / notification webhooks through if set in the host env
+    environment:
+      - WPSCAN_API_TOKEN
+      - SHODAN_API_KEY
+      - STIGLITZ_TELEGRAM_TOKEN
+      - STIGLITZ_TELEGRAM_CHAT
+      - STIGLITZ_NOTIFY_WEBHOOK
+
+  # Optional: a vulnerable target for local demos / testing (profile "demo")
+  juiceshop:
+    image: bkimminich/juice-shop
+    profiles: ["demo"]
+    ports:
+      - "3000:3000"

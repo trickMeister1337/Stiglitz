@@ -9,8 +9,11 @@
 
 # ── Allowed: Stiglitz project files ──────────────────────────────────────
 !/.gitignore
+!/.dockerignore
 !/.github
 !/CHANGELOG.md
+!/Dockerfile
+!/docker-compose.yml
 !/LICENSE
 !/README.md
 !/requirements-dev.txt
@@ -28,6 +31,7 @@
 !/test_lib.py
 !/test_swarm_modules.py
 !/test_swarm_red.sh
+!/test_integration.py
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
 __pycache__/

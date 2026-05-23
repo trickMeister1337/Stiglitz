@@ -46,6 +46,17 @@ Stiglitz chains the tools a red-teamer already uses — `subfinder`, `httpx`, `n
 
 ## Quick start
 
+**Docker (recommended — no host setup, pinned tooling):**
+
+```bash
+docker build -t stiglitz .
+docker run --rm -v "$PWD/output:/scans" stiglitz https://target.com
+# or with compose:
+docker compose run --rm stiglitz https://target.com
+```
+
+**Native:**
+
 ```bash
 git clone https://github.com/trickMeister1337/Stiglitz.git
 cd Stiglitz
@@ -54,7 +65,12 @@ bash setup.sh                      # installs system + Go + Python tooling
 bash stiglitz.sh https://target.com   # recon + adaptive scan + report
 ```
 
-Output lands in `scan_<domain>_<timestamp>/` — open `stiglitz_report.html`.
+Output lands in `scan_<domain>_<timestamp>/` — open `stiglitz_report.html`
+(and `findings.sarif` for GitHub code scanning / DefectDojo).
+
+> The Docker image ships the core scan path (recon, adaptive Nuclei, TLS, JS,
+> report/SARIF). Heavy/optional engines (OWASP ZAP, Metasploit, sqlmap, hydra)
+> are not bundled; those phases are skipped gracefully when the tool is absent.
 
 ## Components
 
@@ -114,6 +130,7 @@ tech_profile.json  → nuclei tags · ffuf wordlist · CMS scanner
 | `stiglitz_report.html` | Full technical report — exec summary, methodology, tech inventory, prioritization matrix, scan diff, reproducible evidence |
 | `executive_summary.html` | One-page risk summary for management |
 | `findings.json` | Structured export for SIEM / Jira |
+| `findings.sarif` | SARIF 2.1.0 — ingest into GitHub code scanning, DefectDojo, CI/CD |
 | `raw/` | nuclei JSONL, ZAP alerts, TLS issues, tech_profile.json, JS analysis, CVE enrichment |
 
 ## Usage
@@ -186,14 +203,16 @@ stiglitz_report.py     HTML/JSON report generator
 stiglitz_diff.py       Scan comparison
 lib/                Python modules (parsers, evidence, poc_validator, cve_enrich, …)
                     + bash modules (recon, crawl, sqli, xss, brute, msf, web)
-.github/workflows/  CI: bash syntax + Python compile + unit tests
+Dockerfile          Containerized core scan pipeline
+docker-compose.yml  Build/run + optional Juice Shop demo target
+.github/workflows/  CI: bash syntax + Python compile + unit + integration tests
 ```
 
 Full version history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
-Issues and PRs welcome. CI runs bash syntax checks, `py_compile` on all Python, and the unit-test suite on every push — keep it green.
+Issues and PRs welcome. CI runs on every push: bash syntax checks, `py_compile` on all Python, the unit-test suite, and an **end-to-end integration scan against OWASP Juice Shop** (real target → findings → report → SARIF). Keep it green.
 
 ## License
 

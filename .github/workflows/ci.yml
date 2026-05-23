@@ -52,3 +52,34 @@ jobs:
 
       - name: Run tests
         run: python3 -m pytest test_lib.py test_swarm_modules.py -v --tb=short
+
+  integration:
+    name: Integration scan (Juice Shop)
+    runs-on: ubuntu-latest
+    services:
+      juiceshop:
+        image: bkimminich/juice-shop
+        ports:
+          - 3000:3000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Wait for Juice Shop to be ready
+        run: |
+          for i in $(seq 1 40); do
+            curl -sf -o /dev/null http://localhost:3000 && { echo "ready"; exit 0; }
+            sleep 3
+          done
+          echo "Juice Shop did not become ready"; exit 1
+
+      - name: Run end-to-end integration scan
+        env:
+          STIGLITZ_TEST_TARGET: http://localhost:3000
+        run: python3 -m pytest test_integration.py -v --tb=short
