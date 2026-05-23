@@ -1157,16 +1157,17 @@ if _low_info_findings or zap_low_groups:
         urls_str = ", ".join(grp["urls"][:3])
         if len(grp["urls"]) > 3:
             urls_str += f" (+{len(grp['urls'])-3})"
+        # span de URLs montado fora do f-string (sem barra invertida em {} — compat. Python 3.11)
+        _urls_span = (f'<br><span style="font-size:10px;color:#888">{html.escape(urls_str)}</span>'
+                      if urls_str else "")
         rows_low += (
             f'<tr>'
-            f'<td style="font-size:12px">{html.escape(name)}'
-            f'{"<br><span style=\\'font-size:10px;color:#888\\'>" + html.escape(urls_str) + "</span>" if urls_str else ""}'
-            f'</td>'
+            f'<td style="font-size:12px">{html.escape(name)}{_urls_span}</td>'
             f'<td style="text-align:center">{badge(grp.get("sev","low"))}</td>'
             f'<td style="text-align:center"><span style="background:{src_col};color:white;'
             f'padding:2px 7px;border-radius:4px;font-size:10px;font-weight:bold">ZAP</span></td>'
             f'<td style="font-size:11px">{html.escape(grp.get("cve","—") or "—")}</td>'
-            f'<td style="font-size:11px;color:#555">{grp["count"]} ocorrência(s) — confiança: {html.escape(grp.get("conf","?"))}</td>'
+            f'<td style="font-size:11px;color:#555">{grp["count"]} occurrence(s) — confidence: {html.escape(grp.get("conf","?"))}</td>'
             f'<td style="font-size:11px">{html.escape((grp["finding"].get("remediation") or ""))}</td>'
             f'</tr>'
         )
@@ -1948,7 +1949,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <div class="stat-card medium"><div class="number">{stats['medium']}</div><div>MEDIUM</div></div>
 <div class="stat-card low"><div class="number">{stats['low']}</div><div>LOW</div></div>
 <div class="stat-card info"><div class="number">{stats['info']}</div><div>INFO</div></div></div>
-{f'<div style="background:#7a0000;color:white;padding:14px 18px;border-radius:6px;margin:12px 0;border-left:6px solid #ff4444"><strong style="font-size:14px">🔴 {kev_count} CVE(S) WITH CONFIRMED ACTIVE EXPLOITATION — CISA KEV</strong><br><span style="font-size:12px;opacity:.9">These CVEs are in the CISA Known Exploited Vulnerabilities catalog. Regardless of CVSS score, they require immediate action: ' + ", ".join(f"<code style=\'background:rgba(255,255,255,.15);padding:1px 4px;border-radius:3px\'>{html.escape(cid)}</code>" for cid in list(kev_matches.keys())[:10]) + (f" and {len(kev_matches)-10} more" if len(kev_matches)>10 else "") + "</span></div>" if kev_count > 0 else ""}
+{f'<div style="background:#7a0000;color:white;padding:14px 18px;border-radius:6px;margin:12px 0;border-left:6px solid #ff4444"><strong style="font-size:14px">🔴 {kev_count} CVE(S) WITH CONFIRMED ACTIVE EXPLOITATION — CISA KEV</strong><br><span style="font-size:12px;opacity:.9">These CVEs are in the CISA Known Exploited Vulnerabilities catalog. Regardless of CVSS score, they require immediate action: ' + ", ".join(f"<code style='background:rgba(255,255,255,.15);padding:1px 4px;border-radius:3px'>{html.escape(cid)}</code>" for cid in list(kev_matches.keys())[:10]) + (f" and {len(kev_matches)-10} more" if len(kev_matches)>10 else "") + "</span></div>" if kev_count > 0 else ""}
 <div class="info-box">
 <p><strong>Risk Score (0–100):</strong> {risk} <small style="color:#888;font-size:11px">(methodology: KEV + EPSS + CVSS + JS)</small></p>
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
