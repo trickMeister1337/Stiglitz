@@ -81,8 +81,9 @@ Output lands in `scan_<domain>_<timestamp>/` — open `stiglitz_report.html`
 |---|---|---|
 | `osint.sh` | Passive pre-engagement intelligence (10 phases) | Before any active scan |
 | `stiglitz.sh` | Recon & adaptive vulnerability scanning (11 phases) | Map the attack surface |
+| `pipeline.py` | Phase-level orchestrator for the scan — real checkpoint, retry, resume | Long/flaky scans you want to resume |
 | `stiglitz_red.sh` | Automated exploitation engine (8 phases) | After recon, or standalone |
-| `stiglitz_full.sh` | End-to-end orchestrator | One-command full engagement |
+| `stiglitz_full.sh` | End-to-end orchestrator (OSINT → scan → exploit) | One-command full engagement |
 | `stiglitz_batch.sh` | Multi-target wrapper | Many targets in series |
 | `stiglitz_diff.py` | Scan-to-scan comparison | Remediation tracking |
 
@@ -159,6 +160,34 @@ bash stiglitz_full.sh target.com
 bash stiglitz_batch.sh -f targets.txt -p staging
 ```
 
+### Orchestrated scan with checkpoint & resume
+
+`pipeline.py` drives the 11 scan phases as resumable units. If a long scan is
+interrupted (or a phase fails), re-running it skips everything already completed
+instead of starting over — the resume that the plain shell script only pretended
+to have. Phase work itself stays in `stiglitz.sh`; the orchestrator only sequences
+it, with per-phase retry and a dry-run plan.
+
+```bash
+# Full scan via the orchestrator (creates scan_<domain>_<ts>/)
+python3 pipeline.py https://target.com
+
+# Show the execution plan without running anything
+python3 pipeline.py https://target.com --dry-run
+
+# Resume an interrupted scan — completed phases are skipped
+python3 pipeline.py https://target.com --outdir scan_target.com_20260524_120000
+
+# Retry each phase up to 2 extra times on failure; run only a subset
+python3 pipeline.py https://target.com --retries 2 --only P1,P3_P4,P11
+
+# Passthrough to stiglitz.sh
+python3 pipeline.py https://target.com --token "eyJ..." --osint-dir osint_target.com_*/
+```
+
+State lives in `<outdir>/raw/.pipeline_state.json`. Use `--no-resume` to force a
+clean re-run.
+
 ### Execution profiles
 
 | Profile | sqlmap level/risk | Brute force | Use |
@@ -199,6 +228,7 @@ Set any of these and Stiglitz pings on scan completion: `STIGLITZ_TELEGRAM_TOKEN
 
 ```
 stiglitz.sh            Main scanner (11 phases)
+pipeline.py            Phase orchestrator (checkpoint/retry/resume)
 stiglitz_red.sh        Exploitation engine (8 phases)
 osint.sh            Pre-engagement OSINT (10 phases)
 stiglitz_full.sh       End-to-end orchestrator
