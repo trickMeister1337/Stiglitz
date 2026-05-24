@@ -56,6 +56,7 @@ run_crawl_phase() {
         if [ -n "$wordlist" ]; then
             echo "[!] ffuf: fuzzing de endpoints em $target..."
 
+            # shellcheck disable=SC2054  # flags ffuf com valores comma-separated (ex: -mc) são intencionais
             local ffuf_args=(
                 -u "${target}/FUZZ"
                 -w "$wordlist"

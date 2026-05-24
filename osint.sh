@@ -23,7 +23,7 @@
 set -uo pipefail
 
 readonly VERSION="1.0.0"
-readonly SCRIPT_START=$(date +%s)
+SCRIPT_START=$(date +%s); readonly SCRIPT_START
 
 # ─── PATH ────────────────────────────────────────────────────────────────────
 for _d in "$HOME/go/bin" "/root/go/bin" "$HOME/.local/bin" \
@@ -34,6 +34,7 @@ unset _d
 
 # ─── Cores ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GRN='\033[0;32m'; YLW='\033[1;33m'; CYN='\033[0;36m'
+# shellcheck disable=SC2034  # paleta de cores mantida completa
 MAG='\033[0;35m'; BLD='\033[1m'; DIM='\033[2m'; RST='\033[0m'
 
 # ─── Signal handling ─────────────────────────────────────────────────────────

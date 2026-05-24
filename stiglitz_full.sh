@@ -15,7 +15,9 @@
 set -uo pipefail
 
 readonly VERSION="1.0"
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; readonly SCRIPT_DIR
+
+trap 'echo; echo "[!] Interrompido pelo usuário — abortando."; exit 130' INT TERM
 
 # ── Cores ──────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GRN='\033[0;32m'; YLW='\033[1;33m'; CYN='\033[0;36m'
@@ -33,6 +35,7 @@ SKIP_SCAN=false
 SKIP_RED=false
 DRY_RUN=false
 OUTDIR_OVERRIDE=""
+# shellcheck disable=SC2034  # reservado p/ args extras
 EXTRA_ARGS=()
 
 # Diretórios capturados de cada fase
@@ -43,7 +46,9 @@ FULL_DIR=""
 LOG=""
 
 # Métricas por fase
-OSINT_SUBDOMAINS=0; OSINT_LEAKS=0; OSINT_CVES_SHODAN=0
+OSINT_SUBDOMAINS=0; OSINT_LEAKS=0
+# shellcheck disable=SC2034  # OSINT_CVES_SHODAN reservado p/ relatório
+OSINT_CVES_SHODAN=0
 SCAN_FINDINGS=0;    SCAN_CVES=0;   SCAN_CONFIRMED=0
 RED_SQLI=0;         RED_XSS=0;     RED_BRUTE=0
 
@@ -340,7 +345,7 @@ run_red() {
 generate_index() {
     phase "RELATÓRIO — Índice consolidado"
 
-    local total_elapsed=$(elapsed $T_START)
+    local total_elapsed; total_elapsed=$(elapsed "$T_START")
     local ts_str; ts_str=$(date '+%d/%m/%Y %H:%M')
     local total_red=$(( RED_SQLI + RED_XSS + RED_BRUTE ))
 
@@ -500,7 +505,7 @@ send_notification() {
 
 # ── Sumário final ─────────────────────────────────────────────────────────────
 print_summary() {
-    local total_elapsed=$(elapsed $T_START)
+    local total_elapsed; total_elapsed=$(elapsed "$T_START")
     local total_red=$(( RED_SQLI + RED_XSS + RED_BRUTE ))
 
     echo ""
@@ -570,7 +575,7 @@ main() {
     fi
 
     print_summary
-    log "Stiglitz FULL concluído — $(fmt_time $(elapsed $T_START)) — Output: $FULL_DIR"
+    log "Stiglitz FULL concluído — $(fmt_time "$(elapsed "$T_START")") — Output: $FULL_DIR"
 
     local total_red=$(( RED_SQLI + RED_XSS + RED_BRUTE ))
     send_notification "[Stiglitz FULL v${VERSION}] Pipeline concluído
@@ -578,7 +583,7 @@ Alvo: ${TARGET}
 OSINT: ${OSINT_SUBDOMAINS} subdomínios · ${OSINT_LEAKS} vazamentos
 Stiglitz: ${SCAN_FINDINGS} findings · ${SCAN_CVES} CVEs
 RED: SQLi:${RED_SQLI} XSS:${RED_XSS} Brute:${RED_BRUTE}
-Duração: $(fmt_time $(elapsed $T_START))
+Duração: $(fmt_time "$(elapsed "$T_START")")
 Índice: ${FULL_DIR}/index.html"
 }
 

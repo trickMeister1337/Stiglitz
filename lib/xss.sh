@@ -100,8 +100,8 @@ _consolidate_xss_results() {
     local per_url_dir="$1"
     local xss_dir="$2"
 
-    > "$xss_dir/xss_confirmed.txt"
-    > "$xss_dir/xss_all_results.json"
+    : > "$xss_dir/xss_confirmed.txt"
+    : > "$xss_dir/xss_all_results.json"
 
     python3 - "$per_url_dir" "$xss_dir/xss_confirmed.txt" "$xss_dir/xss_all_results.json" << 'PYEOF'
 import os, json, sys, glob

@@ -170,9 +170,11 @@ trap 'exit 130' INT TERM
 # ====================== VALIDAÇÃO INICIAL ======================
 
 # ── Suporte a modo single-target e multi-target (-f / --file) ───
+# shellcheck disable=SC2034  # knob de config reservado
 TARGETS_FILE=""
 TARGET=""
 
+# shellcheck disable=SC2034  # knob de config reservado
 PARALLEL_JOBS=1
 AUTH_TOKEN=""      # Bearer token para scan autenticado
 AUTH_HEADER=""     # Header customizado (ex: "Cookie: session=abc")
@@ -289,8 +291,8 @@ phase_start() {
 }
 
 phase_end() {
-    local _s=$(grep "^$1:start:" "$PHASE_TIMES_FILE" 2>/dev/null | tail -1 | cut -d: -f3)
-    local _e=$(date +%s)
+    local _s; _s=$(grep "^$1:start:" "$PHASE_TIMES_FILE" 2>/dev/null | tail -1 | cut -d: -f3)
+    local _e; _e=$(date +%s)
     local _dur=$(( _e - ${_s:-_e} ))
     echo "$1:end:$_e:dur:$_dur" >> "$PHASE_TIMES_FILE"
     printf "  ${BLUE}[⏱] Duração da fase: %dm%02ds${NC}\n" $(( _dur/60 )) $(( _dur%60 ))
@@ -736,6 +738,7 @@ if command -v nuclei &>/dev/null; then
         NUCLEI_EVASION_FLAGS+=(-H "X-Forwarded-For: 127.0.0.1")
         NUCLEI_EVASION_FLAGS+=(-H "X-Real-IP: 127.0.0.1")
         # Ignorar respostas de bloqueio do WAF (403/406/429) e continuar
+        # shellcheck disable=SC2054  # nuclei -hc espera lista comma-separated num único arg
         NUCLEI_EVASION_FLAGS+=(-hc 403,406,429)
         # Payload alterations — testa variações de encoding automaticamente
         NUCLEI_EVASION_FLAGS+=(-pa)

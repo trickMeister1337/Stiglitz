@@ -14,8 +14,10 @@
 set -uo pipefail
 
 readonly VERSION="7.0-blackbox"
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; readonly SCRIPT_DIR
 readonly LIB="$SCRIPT_DIR/lib"
+
+trap 'echo; echo "[!] Interrompido pelo usuário — abortando."; exit 130' INT TERM
 
 # ── Cores ──────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GRN='\033[0;32m'; YLW='\033[1;33m'; CYN='\033[0;36m'
@@ -182,6 +184,7 @@ validate() {
 
 # ── Carrega profiles.conf ──────────────────────────────────────────────────────
 load_profiles() {
+    # shellcheck disable=SC2034  # arrays de perfil populados/lidos dinamicamente
     declare -gA PROFILE_DESCRIPTION \
                 PROFILE_SQLMAP_LEVEL PROFILE_SQLMAP_RISK PROFILE_SQLMAP_THREADS PROFILE_SQLMAP_DUMP \
                 PROFILE_MSF_PAYLOAD PROFILE_BRUTE_FORCE PROFILE_NIKTO_ENABLED \
@@ -273,7 +276,7 @@ run_recon() {
         "${SCOPE_DOMAINS[0]}" \
         "$OUTDIR/recon" \
         "$OUTDIR/data/live_hosts.txt" \
-        "${PROFILE_RECON_THREADS[$PROFILE]:-50}"
+        "${THREADS_OVERRIDE:-${PROFILE_RECON_THREADS[$PROFILE]:-50}}"
 
     checkpoint_done "recon"
 }
@@ -393,7 +396,7 @@ PYEOF
 
 _build_scored_targets() {
     local tmp_raw="$OUTDIR/data/raw_urls.txt"
-    > "$tmp_raw"
+    : > "$tmp_raw"
 
     # 1. URLs do crawl
     [ -f "$OUTDIR/crawl/katana_urls.txt" ]  && cat "$OUTDIR/crawl/katana_urls.txt"  >> "$tmp_raw"
@@ -525,7 +528,7 @@ run_sqli() {
         "$OUTDIR/exploits_confirmed.csv" \
         "${PROFILE_SQLMAP_LEVEL[$PROFILE]:-1}" \
         "${PROFILE_SQLMAP_RISK[$PROFILE]:-1}" \
-        "${PROFILE_SQLMAP_THREADS[$PROFILE]:-1}" \
+        "${THREADS_OVERRIDE:-${PROFILE_SQLMAP_THREADS[$PROFILE]:-1}}" \
         "${PROFILE_MAX_EXPLOITS[$PROFILE]:-10}" \
         "${PROFILE_TIMEOUT_SQLMAP_URL[$PROFILE]:-120}" \
         "$AUTH_COOKIE" \
@@ -670,7 +673,7 @@ _run_http_form_brute() {
         local hydra_service
         [ "$ep_proto" = "https" ] && hydra_service="https-post-form" || hydra_service="http-post-form"
 
-        local out_file="$OUTDIR/hydra/http_form_$(echo "$ep_host" | tr '.' '_').txt"
+        local out_file; out_file="$OUTDIR/hydra/http_form_$(echo "$ep_host" | tr '.' '_').txt"
 
         log "HTTP form brute: ${hydra_service}://${ep_host}:${ep_port}${ep_path}"
 
@@ -988,7 +991,7 @@ main() {
     fi
 
     mkdir -p "$OUTDIR"/{data,recon,crawl,sqlmap,xss,hydra,nikto,metasploit,searchsploit,poc}
-    > "$OUTDIR/exploits_confirmed.csv"
+    : > "$OUTDIR/exploits_confirmed.csv"
 
     LOG="$OUTDIR/stiglitz_red.log"
     STATE_FILE="$OUTDIR/.stiglitz_red_state"

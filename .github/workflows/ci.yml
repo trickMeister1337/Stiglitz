@@ -29,17 +29,11 @@ jobs:
             bash -n "$f"
           done
 
-      - name: ShellCheck (errors gate)
-        run: |
-          shellcheck --severity=error \
-            stiglitz.sh stiglitz_red.sh stiglitz_full.sh stiglitz_batch.sh \
-            osint.sh setup.sh lib/*.sh
-
-      - name: ShellCheck (warnings — informational, non-blocking)
+      - name: ShellCheck (warnings gate)
         run: |
           shellcheck --severity=warning \
             stiglitz.sh stiglitz_red.sh stiglitz_full.sh stiglitz_batch.sh \
-            osint.sh setup.sh lib/*.sh || true
+            osint.sh setup.sh lib/*.sh
 
       - name: Check Python modules (compile)
         run: |
