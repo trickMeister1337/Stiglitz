@@ -133,12 +133,94 @@ def cvss_to_sev(score):
 OUTDIR          = os.environ.get('OUTDIR','scan_output')
 TARGET          = os.environ.get('TARGET','https://example.com')
 DOMAIN          = os.environ.get('DOMAIN','example.com')
-OPEN_PORTS      = os.environ.get('OPEN_PORTS','N/A')
-ACTIVE_COUNT    = os.environ.get('ACTIVE_COUNT','0')
-SUB_COUNT       = os.environ.get('SUB_COUNT','0')
-OPENAPI_FOUND   = os.environ.get('OPENAPI_FOUND','0') == '1'
-TLS_ISSUES      = int(os.environ.get('TLS_ISSUES','0'))
-CONFIRMED_COUNT = int(os.environ.get('CONFIRMED_COUNT','0'))
+
+# ── KPIs: a env var tem precedência (preserva o run monolítico byte-a-byte);
+#    na ausência, deriva dos arquivos em raw/. Isso permite que a fase de
+#    relatório (P11) rode standalone — `stiglitz.sh --only-phase P11 --outdir X` —
+#    sob o orquestrador pipeline.py, sem depender de variáveis em memória.
+def _raw(name): return os.path.join(OUTDIR, "raw", name)
+
+def _count_lines(name):
+    try:
+        with open(_raw(name), encoding="utf-8", errors="ignore") as f:
+            return sum(1 for ln in f if ln.strip())
+    except OSError:
+        return 0
+
+def _json_load(name):
+    try:
+        with open(_raw(name), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+def _derive_tls():
+    d = _json_load("testssl.json")
+    if d is None: return 0
+    fnd = d if isinstance(d, list) else d.get("scanResult",[{}])[0].get("findings",[])
+    return len([f for f in fnd if f.get("severity","") in ("WARN","HIGH","CRITICAL","LOW")])
+
+def _derive_confirmed():
+    d = _json_load("exploit_confirmations.json")
+    return sum(1 for c in d if c.get("confirmed")) if isinstance(d, list) else 0
+
+def _derive_js(key):
+    d = _json_load("js_analysis.json")
+    return len(d.get(key, [])) if isinstance(d, dict) else 0
+
+def _derive_ffuf():
+    d = _json_load("ffuf.json")
+    return len(d.get("results", [])) if isinstance(d, dict) else 0
+
+def _derive_email():
+    d = _json_load("email_security.json")
+    if not isinstance(d, dict): return 0
+    return sum(1 for v in d.values() if isinstance(v, dict) and v.get("severity","") in ("high","medium"))
+
+def _derive_smuggler():
+    try:
+        txt = open(_raw("smuggler.txt"), encoding="utf-8", errors="ignore").read()
+    except OSError:
+        return 0
+    return 1 if re.search(r"vulnerable|CL\.TE|TE\.CL|CL\.0|desync", txt, re.I) else 0
+
+def _derive_open_ports():
+    try:
+        ports = [m.group(1) for ln in open(_raw("nmap.txt"), encoding="utf-8", errors="ignore")
+                 if (m := re.match(r"^(\d+/tcp)\s+open", ln))]
+    except OSError:
+        return "N/A"
+    return " ".join(ports) if ports else "nenhuma"
+
+def _derive_waf_name():
+    try:
+        n = open(_raw("waf_name.txt"), encoding="utf-8").read().strip()
+        if n: return n
+    except OSError:
+        pass
+    d = _json_load("waf.json")
+    results = d if isinstance(d, list) else (d.get("results", []) if isinstance(d, dict) else [])
+    for r in results:
+        if isinstance(r, dict):
+            fw = r.get("firewall","") or r.get("waf","")
+            if fw and fw.lower() not in ("none","generic",""):
+                return fw
+    return ""
+
+def _env_or(name, derived):
+    """Retorna a env var se definida (mesmo '0'/''), senão o valor derivado."""
+    v = os.environ.get(name)
+    return v if v is not None and v != "" else derived
+
+_d_waf_name = _derive_waf_name()
+
+OPEN_PORTS      = _env_or('OPEN_PORTS', _derive_open_ports())
+ACTIVE_COUNT    = _env_or('ACTIVE_COUNT', str(_count_lines("httpx_results.txt")))
+SUB_COUNT       = _env_or('SUB_COUNT', str(_count_lines("subdomains.txt")))
+OPENAPI_FOUND   = (os.environ.get('OPENAPI_FOUND','0') == '1') if 'OPENAPI_FOUND' in os.environ \
+                  else os.path.exists(_raw("openapi_spec.json"))
+TLS_ISSUES      = int(_env_or('TLS_ISSUES', _derive_tls()))
+CONFIRMED_COUNT = int(_env_or('CONFIRMED_COUNT', _derive_confirmed()))
 SCAN_START_TS   = int(os.environ.get('SCAN_START_TS','0'))
 
 # Carregar tempos por fase
@@ -151,17 +233,18 @@ if os.path.exists(_ptf):
             if len(_parts) >= 5 and _parts[1] == 'end':
                 phase_times[_parts[0]] = int(_parts[4])
     except: pass
-JS_SECRETS      = int(os.environ.get('JS_SECRETS','0'))
-JS_ENDPOINTS    = int(os.environ.get('JS_ENDPOINTS','0'))
-JS_FRAMEWORKS   = int(os.environ.get('JS_FRAMEWORKS','0'))
-JS_FILES        = int(os.environ.get('JS_FILES','0'))
-KATANA_URLS      = int(os.environ.get('KATANA_URLS','0'))
-SMUGGLER_FOUND   = int(os.environ.get('SMUGGLER_FOUND','0'))
-FFUF_FOUND       = int(os.environ.get('FFUF_FOUND','0'))
-TRUFFLEHOG_FOUND = int(os.environ.get('TRUFFLEHOG_FOUND','0'))
-WAF_DETECTED    = os.environ.get('WAF_DETECTED','') == '1'
-WAF_NAME        = os.environ.get('WAF_NAME','')
-EMAIL_ISSUES    = int(os.environ.get('EMAIL_ISSUES','0'))
+JS_SECRETS      = int(_env_or('JS_SECRETS', _derive_js("secrets")))
+JS_ENDPOINTS    = int(_env_or('JS_ENDPOINTS', _derive_js("endpoints")))
+JS_FRAMEWORKS   = int(_env_or('JS_FRAMEWORKS', _derive_js("frameworks")))
+JS_FILES        = int(_env_or('JS_FILES', _derive_js("js_files")))
+KATANA_URLS      = int(_env_or('KATANA_URLS', _count_lines("katana_urls.txt")))
+SMUGGLER_FOUND   = int(_env_or('SMUGGLER_FOUND', _derive_smuggler()))
+FFUF_FOUND       = int(_env_or('FFUF_FOUND', _derive_ffuf()))
+TRUFFLEHOG_FOUND = int(_env_or('TRUFFLEHOG_FOUND', _count_lines("trufflehog.json")))
+WAF_DETECTED    = (os.environ.get('WAF_DETECTED','') == '1') if 'WAF_DETECTED' in os.environ \
+                  else bool(_d_waf_name)
+WAF_NAME        = os.environ.get('WAF_NAME') if os.environ.get('WAF_NAME') is not None else _d_waf_name
+EMAIL_ISSUES    = int(_env_or('EMAIL_ISSUES', _derive_email()))
 errors = []
 
 # Nuclei
