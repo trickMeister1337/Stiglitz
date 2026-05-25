@@ -382,7 +382,8 @@ for r in results:
     total_med  += stats["medium"]
 
     report_path = os.path.join(r["outdir"], "stiglitz_report.html") if r["outdir"] else ""
-    report_link = (f'<a href="{html.escape(os.path.abspath(report_path))}" target="_blank" '
+    rel_path = os.path.join(os.path.basename(r["outdir"]), "stiglitz_report.html") if r["outdir"] else ""
+    report_link = (f'<a href="{html.escape(rel_path)}" target="_blank" '
                    f'style="color:#388bfd;font-weight:500">📄 Abrir</a>') \
                    if os.path.exists(report_path) else \
                    '<span style="color:#e74c3c">✗ falhou</span>'
