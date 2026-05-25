@@ -131,8 +131,46 @@ def cvss_to_sev(score):
     return "info"
 
 OUTDIR          = os.environ.get('OUTDIR','scan_output')
-TARGET          = os.environ.get('TARGET','https://example.com')
-DOMAIN          = os.environ.get('DOMAIN','example.com')
+
+def _derive_domain_from_outdir(outdir):
+    """Extrai o domínio do padrão scan_<domain>_YYYYMMDD_HHMMSS."""
+    base = os.path.basename(outdir.rstrip('/'))
+    m = re.match(r'^scan_(.+)_\d{8}_\d{6}$', base)
+    if m:
+        return m.group(1)
+    # fallback: strip prefixo scan_ se existir
+    if base.startswith('scan_'):
+        return base[5:]
+    return None
+
+def _derive_domain_from_files(outdir):
+    """Tenta extrair o domínio do primeiro subdomínio ou URL nos arquivos raw."""
+    for fname in ('subdomains.txt', 'nuclei_urls.txt', 'katana_urls.txt'):
+        fpath = os.path.join(outdir, 'raw', fname)
+        try:
+            with open(fpath, encoding='utf-8') as _f:
+                for line in _f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # linha pode ser URL ou hostname puro
+                    if line.startswith('http'):
+                        from urllib.parse import urlparse
+                        h = urlparse(line).hostname or ''
+                    else:
+                        h = line.split('/')[0]
+                    if h and '.' in h:
+                        return h
+        except OSError:
+            continue
+    return None
+
+_env_target = os.environ.get('TARGET', '')
+_env_domain = os.environ.get('DOMAIN', '')
+if not _env_domain:
+    _env_domain = _derive_domain_from_outdir(OUTDIR) or _derive_domain_from_files(OUTDIR) or 'example.com'
+TARGET = _env_target if _env_target else f'https://{_env_domain}'
+DOMAIN = _env_domain
 
 # ── KPIs: a env var tem precedência (preserva o run monolítico byte-a-byte);
 #    na ausência, deriva dos arquivos em raw/. Isso permite que a fase de
@@ -1194,10 +1232,16 @@ def render_finding(f):
   <table>{rows}
   </table></div>'''
 
-# TLS e Email têm seções HTML próprias — excluir dos cards principais para não duplicar
+# Email Security: apenas na tabela dedicada, sem cards.
+# testssl.sh: critical/high viram cards; medium/low/info ficam só na tabela TLS.
+_EMAIL_ONLY_TABLE = {"Email Security"}
 _DEDICATED_SOURCES = {"testssl.sh", "Email Security"}
-# Only render critical / high / medium as detailed cards
-_main_findings = [f for f in all_f if f["severity"] in ("critical","high","medium") and f.get("source") not in _DEDICATED_SOURCES]
+_main_findings = [
+    f for f in all_f
+    if f["severity"] in ("critical","high","medium")
+    and f.get("source") not in _EMAIL_ONLY_TABLE
+    and (f.get("source") != "testssl.sh" or f["severity"] in ("critical","high"))
+]
 vhtml = (
     '<div class="info-box"><p>✅ No vulnerabilities found within the analyzed scope.</p></div>'
     if not _main_findings
@@ -1640,7 +1684,8 @@ else:
 SEV_ORDER = {"critical":0,"high":1,"medium":2,"low":3,"info":4}
 
 # Coletar todos os achados acionáveis por prazo
-imediato  = [f for f in all_f if f["severity"] in ("critical","high") and f.get("source") not in _DEDICATED_SOURCES]
+# Email Security fica apenas na tabela — excluir do plano de ação para não duplicar
+imediato  = [f for f in all_f if f["severity"] in ("critical","high") and f.get("source") not in _EMAIL_ONLY_TABLE]
 sprint    = [f for f in all_f if f["severity"] == "medium" and f.get("source") not in _DEDICATED_SOURCES]
 backlog   = [f for f in zap_low_groups.values() if f["sev"] in ("low","info")]
 
