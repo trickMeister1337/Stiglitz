@@ -429,8 +429,315 @@ if top_risks:
             insight_html += f'<li><strong>{html.escape(r_item["url"])}</strong> — Risco {r_val} ({rl(r_val)})</li>'
     insight_html += "</ul>"
 
+# ── Knowledge base: descrição e remediação por tipo de vulnerabilidade ────────
+VULN_KB = [
+    {
+        "keywords": ["node-red", "nodered", "default login"],
+        "title": "Node-RED — Credenciais Padrão (Default Login)",
+        "description": (
+            "A instância Node-RED está acessível com credenciais padrão. O endpoint "
+            "<code>/auth/token</code> retornou HTTP&nbsp;200 e emitiu um JWT válido sem "
+            "autenticação customizada. Node-RED é uma plataforma de automação que permite "
+            "execução de código arbitrário no servidor (RCE), tornando esta vulnerabilidade "
+            "equivalente ao comprometimento total do host."
+        ),
+        "remediation": (
+            "<ol><li>Altere <strong>imediatamente</strong> as credenciais padrão via "
+            "<code>settings.js</code> (propriedade <code>adminAuth</code>).</li>"
+            "<li>Restrinja o acesso ao painel por IP, VPN ou firewall de aplicação.</li>"
+            "<li>Implemente autenticação forte (LDAP, OAuth2 ou MFA).</li>"
+            "<li>Audite os logs de acesso para identificar sessões abertas com as "
+            "credenciais padrão e invalide todos os tokens ativos.</li>"
+            "<li>Avalie se o painel Node-RED precisa estar exposto na internet "
+            "— considere movê-lo para rede interna.</li></ol>"
+        ),
+        "ref": "CWE-1392 · OWASP A07:2021 — Identification and Authentication Failures"
+    },
+    {
+        "keywords": ["content-security-policy", "csp"],
+        "title": "Header Ausente: Content-Security-Policy (CSP)",
+        "description": (
+            "O servidor não envia o header <code>Content-Security-Policy</code>. "
+            "Sem CSP, o navegador não possui instruções sobre quais origens são "
+            "autorizadas para scripts, estilos e recursos. Isso amplifica o impacto "
+            "de qualquer ataque Cross-Site Scripting (XSS), permitindo execução irrestrita "
+            "de scripts maliciosos, captura de sessões e exfiltração de dados sensíveis."
+        ),
+        "remediation": (
+            "<ol><li>Defina uma política restritiva: "
+            "<code>Content-Security-Policy: default-src 'self'; script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'</code></li>"
+            "<li>Utilize <code>nonce</code> ou <code>hash</code> em vez de "
+            "<code>'unsafe-inline'</code> para scripts inline.</li>"
+            "<li>Configure <code>report-uri</code> ou <code>report-to</code> para "
+            "monitorar violações antes de enforçar a política em produção.</li>"
+            "<li>Aplique o header no gateway/reverse proxy para cobrir toda a plataforma "
+            "com uma única configuração.</li></ol>"
+        ),
+        "ref": "CWE-693 · OWASP A05:2021 — Security Misconfiguration"
+    },
+    {
+        "keywords": ["strict-transport-security", "hsts"],
+        "title": "Header Ausente: HSTS (Strict-Transport-Security)",
+        "description": (
+            "O servidor não envia o header <code>Strict-Transport-Security</code>. "
+            "Sem HSTS, navegadores podem aceitar conexões HTTP não criptografadas "
+            "mesmo quando HTTPS está disponível, expondo usuários a ataques de "
+            "SSL-strip (downgrade HTTPS&nbsp;→&nbsp;HTTP). Para APIs de pagamento, "
+            "a ausência de HSTS representa risco direto de interceptação de dados sensíveis."
+        ),
+        "remediation": (
+            "<ol><li>Adicione: <code>Strict-Transport-Security: max-age=31536000; "
+            "includeSubDomains; preload</code></li>"
+            "<li>Certifique-se de que todo tráfego HTTP seja redirecionado (301) "
+            "para HTTPS antes de ativar o header.</li>"
+            "<li>Para domínios de pagamento: submeta à HSTS Preload List "
+            "(<code>hstspreload.org</code>) para proteção em browsers sem histórico.</li></ol>"
+        ),
+        "ref": "CWE-319 · RFC 6797 · PCI DSS v4 Req. 4.2.1"
+    },
+    {
+        "keywords": ["spf missing", "spf: missing", "spf ausente", "spf record missing", "email spoofing"],
+        "title": "SPF Ausente — Domínio vulnerável a e-mail spoofing",
+        "description": (
+            "O domínio não possui registro DNS SPF (Sender Policy Framework). "
+            "Sem SPF, qualquer servidor de e-mail pode enviar mensagens em nome "
+            "do domínio, facilitando ataques de phishing e Business Email Compromise "
+            "(BEC) que se passam por comunicações legítimas da Bee2Pay para clientes "
+            "e parceiros."
+        ),
+        "remediation": (
+            "<ol><li>Crie registro TXT no DNS: "
+            "<code>v=spf1 include:_spf.provedor.com ~all</code></li>"
+            "<li>Liste todos os servidores autorizados a enviar e-mail pelo domínio.</li>"
+            "<li>Após validação completa, substitua <code>~all</code> (softfail) por "
+            "<code>-all</code> (hardfail) para rejeição definitiva.</li>"
+            "<li>Combine com DMARC e DKIM para proteção completa do canal de e-mail.</li></ol>"
+        ),
+        "ref": "CWE-290 · RFC 7208"
+    },
+    {
+        "keywords": ["dmarc missing", "dmarc: missing", "dmarc ausente", "dmarc record missing", "anti-spoofing"],
+        "title": "DMARC Ausente — Sem política anti-spoofing",
+        "description": (
+            "O domínio não possui registro DNS DMARC (Domain-based Message Authentication, "
+            "Reporting and Conformance). Sem DMARC não há visibilidade sobre e-mails "
+            "enviados em nome do domínio nem política de rejeição de mensagens fraudulentas, "
+            "facilitando ataques de Business Email Compromise (BEC) e phishing direcionado."
+        ),
+        "remediation": (
+            "<ol><li>Crie registro TXT: "
+            "<code>_dmarc.dominio.com → v=DMARC1; p=none; rua=mailto:dmarc@dominio.com</code></li>"
+            "<li>Inicie com <code>p=none</code> para monitoramento sem impacto no fluxo de e-mails.</li>"
+            "<li>Após confirmar que todos os e-mails legítimos passam em SPF e DKIM, "
+            "evolua para <code>p=quarantine</code> e depois <code>p=reject</code>.</li>"
+            "<li>Monitore os relatórios de aggregate (rua) e forensic (ruf) regularmente.</li></ol>"
+        ),
+        "ref": "CWE-290 · RFC 7489"
+    },
+    {
+        "keywords": ["x-content-type-options"],
+        "title": "Header Ausente: X-Content-Type-Options",
+        "description": (
+            "O servidor não envia o header <code>X-Content-Type-Options</code>. "
+            "Sem este header, navegadores podem realizar MIME-sniffing — inferir "
+            "o tipo de conteúdo ignorando o <code>Content-Type</code> declarado. "
+            "Isso pode permitir que arquivos maliciosos sejam interpretados como "
+            "scripts executáveis, ampliando a superfície de ataque para XSS."
+        ),
+        "remediation": (
+            "<ol><li>Adicione: <code>X-Content-Type-Options: nosniff</code></li>"
+            "<li>Configure no gateway/reverse proxy para cobrir todos os endpoints "
+            "com uma única instrução.</li></ol>"
+        ),
+        "ref": "CWE-116 · OWASP A05:2021"
+    },
+    {
+        "keywords": ["x-frame-options", "clickjacking"],
+        "title": "Header Ausente: X-Frame-Options",
+        "description": (
+            "O servidor não envia o header <code>X-Frame-Options</code>. "
+            "Sem este header, a página pode ser embarcada em um iframe por "
+            "qualquer domínio, possibilitando ataques de clickjacking — onde "
+            "o usuário é induzido a clicar em elementos invisíveis sobrepostos "
+            "sobre conteúdo legítimo, podendo autorizar transações involuntariamente."
+        ),
+        "remediation": (
+            "<ol><li>Adicione: <code>X-Frame-Options: DENY</code> "
+            "(ou <code>SAMEORIGIN</code> se iframes internos forem necessários).</li>"
+            "<li>Alternativamente, use CSP com <code>frame-ancestors 'none'</code>, "
+            "que é mais flexível e a abordagem moderna recomendada.</li></ol>"
+        ),
+        "ref": "CWE-1021 · OWASP A05:2021"
+    },
+    {
+        "keywords": ["rc4", "obsolete cipher", "weak cipher"],
+        "title": "Cifras TLS Obsoletas / RC4",
+        "description": (
+            "O servidor aceita suítes de cifra consideradas obsoletas ou inseguras "
+            "(RC4, DES, IDEA, EXPORT ou similares). RC4 possui vieses estatísticos "
+            "conhecidos que permitem recuperação parcial de plaintext. DES usa chaves "
+            "de 56 bits facilmente quebráveis por força bruta. Essas cifras violam "
+            "PCI DSS v4 Req. 4.2.1 e TLS best practices."
+        ),
+        "remediation": (
+            "<ol><li>Desative todas as cifras RC4, DES, 3DES, EXPORT e IDEA "
+            "na configuração TLS do servidor.</li>"
+            "<li>Permita apenas suítes modernas (AES-GCM, ChaCha20-Poly1305) "
+            "com TLS 1.2+ (idealmente apenas TLS 1.3).</li>"
+            "<li>Use a configuração recomendada pelo Mozilla SSL Config Generator "
+            "(<code>ssl-config.mozilla.org</code>).</li>"
+            "<li>Verifique a conformidade com: "
+            "<code>testssl.sh --cipher-per-proto alvo</code></li></ol>"
+        ),
+        "ref": "CWE-326 · PCI DSS v4 Req. 4.2.1 · RFC 7465"
+    },
+    {
+        "keywords": ["lucky13", "lucky 13"],
+        "title": "Vulnerabilidade LUCKY13 (CVE-2013-0169)",
+        "description": (
+            "O servidor é potencialmente vulnerável ao LUCKY13, um ataque de temporização "
+            "contra o modo CBC em TLS/DTLS. O ataque explora diferenças de tempo no "
+            "processamento do padding MAC para recuperar fragmentos de plaintext de "
+            "sessões TLS criptografadas, incluindo cookies de sessão e tokens."
+        ),
+        "remediation": (
+            "<ol><li>Priorize suítes AEAD (AES-GCM, ChaCha20-Poly1305) que são "
+            "imunes ao LUCKY13 por não usarem CBC.</li>"
+            "<li>Se CBC for necessário, certifique-se de que o servidor aplica "
+            "o patch de temporização constante (constant-time MAC comparison).</li>"
+            "<li>Habilite TLS 1.3 onde possível — elimina CBC por design.</li></ol>"
+        ),
+        "ref": "CVE-2013-0169 · CWE-208"
+    },
+    {
+        "keywords": ["ocsp stapling", "ocsp"],
+        "title": "OCSP Stapling não configurado",
+        "description": (
+            "O servidor não utiliza OCSP Stapling, fazendo com que navegadores "
+            "consultem diretamente o servidor OCSP da CA para verificar a revogação "
+            "do certificado. Isso aumenta a latência de conexão, revela metadados "
+            "de navegação para a CA e pode causar falhas de conexão se o servidor "
+            "OCSP estiver indisponível."
+        ),
+        "remediation": (
+            "<ol><li>Habilite OCSP Stapling no servidor web "
+            "(Nginx: <code>ssl_stapling on; ssl_stapling_verify on;</code> / "
+            "Apache: <code>SSLUseStapling on</code>).</li>"
+            "<li>Configure um resolver DNS no servidor para buscar as respostas OCSP.</li>"
+            "<li>Verifique com: <code>openssl s_client -connect host:443 -status</code></li></ol>"
+        ),
+        "ref": "RFC 6066 (TLS Extension) · RFC 6960 (OCSP)"
+    },
+    {
+        "keywords": ["caa", "certification authority authorization"],
+        "title": "Registro CAA DNS ausente",
+        "description": (
+            "O domínio não possui registro DNS CAA (Certification Authority Authorization). "
+            "Sem CAA, qualquer CA (Certificate Authority) do mundo pode emitir certificados "
+            "para o domínio, facilitando ataques de certificate misissuance que podem "
+            "habilitar interceptação HTTPS por terceiros."
+        ),
+        "remediation": (
+            "<ol><li>Crie registros CAA no DNS especificando as CAs autorizadas: "
+            "<code>dominio.com. CAA 0 issue \"letsencrypt.org\"</code></li>"
+            "<li>Adicione <code>iodef</code> para ser notificado de tentativas de emissão: "
+            "<code>CAA 0 iodef \"mailto:security@bee2pay.com\"</code></li>"
+            "<li>Verifique quais CAs emitem seus certificados atuais antes de restringir.</li></ol>"
+        ),
+        "ref": "RFC 8659 · CA/Browser Forum Baseline Requirements"
+    },
+]
+
+def match_vuln(finding_name):
+    name_lower = finding_name.lower()
+    for entry in VULN_KB:
+        if any(k in name_lower for k in entry["keywords"]):
+            return entry
+    return None
+
+def read_criths(outdir):
+    if not outdir or not os.path.exists(outdir):
+        return []
+    fj = os.path.join(outdir, "findings.json")
+    if not os.path.exists(fj):
+        return []
+    try:
+        data = json.load(open(fj))
+        findings = data.get("findings", [])
+        return [f for f in findings if f.get("severity","").upper() in ("CRITICAL","HIGH")]
+    except:
+        return []
+
+# ── Seção 2: accordion de vulnerabilidades críticas e altas ──────────────────
+vuln_accordion = ""
+for r in results:
+    if r["status"] != "OK" or not r["outdir"]:
+        continue
+    criths = read_criths(r["outdir"])
+    if not criths:
+        continue
+    domain = r["url"].replace("https://","").replace("http://","")
+    items_html = ""
+    seen = set()
+    for f in criths:
+        name = f.get("name") or f.get("template_id","?")
+        if name in seen:
+            continue
+        seen.add(name)
+        sev  = f.get("severity","").upper()
+        sev_color = "#7a2e2e" if sev == "CRITICAL" else "#b34e4e"
+        kb   = match_vuln(name)
+        desc = kb["description"] if kb else html.escape(f.get("description","Sem descrição disponível.")[:500])
+        rem  = kb["remediation"] if kb else "<p>Consulte o relatório técnico individual para recomendações detalhadas.</p>"
+        ref  = kb.get("ref","") if kb else ""
+        items_html += f"""<details style="margin:0 0 10px;border:1px solid #dde3ea;border-radius:8px;overflow:hidden">
+          <summary style="padding:13px 16px;cursor:pointer;background:#f8f9fb;list-style:none;
+            display:flex;align-items:center;gap:10px">
+            <span style="background:{sev_color};color:#fff;padding:2px 9px;border-radius:4px;
+              font-size:11px;font-weight:700;white-space:nowrap;flex-shrink:0">{sev}</span>
+            <span style="font-weight:600;font-size:13.5px;flex:1;color:#1a2b3c">{html.escape(name)}</span>
+            <span style="color:#aaa;font-size:11px;flex-shrink:0">▼ detalhes</span>
+          </summary>
+          <div style="padding:18px 20px;border-top:1px solid #dde3ea;background:#fff">
+            <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#1a3a4f;
+              text-transform:uppercase;letter-spacing:.5px">Descrição</p>
+            <p style="margin:0 0 18px;font-size:13px;line-height:1.65;color:#444">{desc}</p>
+            <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#1a3a4f;
+              text-transform:uppercase;letter-spacing:.5px">Remediação Recomendada</p>
+            <div style="font-size:13px;line-height:1.7;color:#444">{rem}</div>
+            {'<p style="margin:14px 0 0;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:10px"><strong>Referência:</strong> ' + html.escape(ref) + '</p>' if ref else ''}
+          </div>
+        </details>"""
+    if items_html:
+        # contar criticos e altos para o badge
+        n_crit = sum(1 for f in criths if f.get("severity","").upper()=="CRITICAL" and (f.get("name") or "") not in set())
+        badges = ""
+        nc = sum(1 for f in criths if f.get("severity","").upper()=="CRITICAL")
+        nh = sum(1 for f in criths if f.get("severity","").upper()=="HIGH")
+        if nc: badges += f'<span style="background:#7a2e2e;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:700;margin-left:8px">{nc} Crítico</span>'
+        if nh: badges += f'<span style="background:#b34e4e;color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:700;margin-left:4px">{nh} Alto</span>'
+        vuln_accordion += f"""<details style="margin-bottom:14px;border:2px solid #d0d7e0;
+          border-radius:10px;overflow:hidden">
+          <summary style="padding:15px 20px;cursor:pointer;background:#f0f4f8;list-style:none;
+            display:flex;align-items:center;justify-content:space-between">
+            <span style="font-weight:700;font-size:14.5px;color:#1a3a4f">{html.escape(domain)}{badges}</span>
+            <span style="font-size:12px;color:#777;flex-shrink:0;margin-left:12px">▼ expandir</span>
+          </summary>
+          <div style="padding:16px 20px 8px">{items_html}</div>
+        </details>"""
+
+vuln_section = ""
+if vuln_accordion:
+    vuln_section = f"""<h2 style="margin-top:40px">Vulnerabilidades Críticas e Altas — Detalhamento</h2>
+<p style="font-size:13px;color:#555;margin-bottom:20px">
+  Clique em cada alvo para expandir. Clique em cada vulnerabilidade para ver a descrição
+  técnica e a remediação recomendada.
+</p>
+{vuln_accordion}"""
+
 page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
-<title>Stiglitz — Relatório Consolidado {html.escape(batch_ts)}</title>
+<title>Relatório de Segurança — {html.escape(batch_ts)}</title>
 <style>
 *{{box-sizing:border-box}}
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5;color:#333}}
@@ -456,11 +763,12 @@ tr:hover td{{background:#f0f7ff}}
 .footer{{background:#f5f5f5;padding:20px;text-align:center;font-size:12px;color:#888;
   border-top:1px solid #e0e0e0}}
 a{{color:#388bfd;text-decoration:none}}a:hover{{text-decoration:underline}}
+details summary::-webkit-details-marker{{display:none}}
 </style></head>
 <body><div class="container">
 <div class="header">
-  <h1>🕷️ Stiglitz — Relatório Consolidado de Segurança</h1>
-  <p>Batch: {html.escape(batch_ts)} &nbsp;·&nbsp; {passed}/{total} scans concluídos &nbsp;·&nbsp; Duração total: {dur_str}</p>
+  <h1>Relatório Consolidado de Segurança</h1>
+  <p>Bee2Pay · {html.escape(batch_ts)} &nbsp;·&nbsp; {passed}/{total} scans concluídos &nbsp;·&nbsp; Duração: {dur_str}</p>
   <p>Gerado em: {rdate} &nbsp;·&nbsp; <strong>CONFIDENCIAL — USO INTERNO</strong></p>
 </div>
 <div class="content">
@@ -508,12 +816,13 @@ a{{color:#388bfd;text-decoration:none}}a:hover{{text-decoration:underline}}
   <strong>Legenda:</strong> C=Crítico &nbsp;A=Alto &nbsp;M=Médio &nbsp;B=Baixo &nbsp;I=Info
   &nbsp;·&nbsp; Contadores exibem tipos únicos de vulnerabilidade (não ocorrências brutas).
   &nbsp;·&nbsp; Clique em "📄 Abrir" para acessar o relatório completo de cada alvo.
-  Os relatórios ficam nas subpastas deste diretório.
 </div>
+
+{vuln_section}
 
 </div>
 <div class="footer">
-  <p>Stiglitz — Scanner Automatizado de Segurança &nbsp;·&nbsp; CONFIDENCIAL</p>
+  <p>Bee2Pay · Avaliação de Segurança &nbsp;·&nbsp; CONFIDENCIAL</p>
 </div>
 </div></body></html>"""
 
