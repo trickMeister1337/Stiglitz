@@ -1882,6 +1882,74 @@ fi
 echo -e "  ${BLUE}[…]${NC} Testando rate limiting em endpoints de login..."
 python3 "$SCRIPT_DIR/lib/ratelimit_check.py" "$OUTDIR" "$TARGET"
 
+# ── CORS Preflight Check ─────────────────────────────────────────
+# Testa OPTIONS preflight contra TARGET + paths /api e URLs descobertas pelo
+# ffuf/katana. Detecta Access-Control-Allow-Origin: * ou eco da origem —
+# que o template nuclei cors-misconfig (GET-only) não pega em ASP.NET/Express.
+echo -e "  ${BLUE}[…]${NC} Testando CORS via OPTIONS preflight..."
+python3 "$SCRIPT_DIR/lib/cors_check.py" "$OUTDIR" "$TARGET"
+
+# ── Nuclei targeted info pass (descoberta passiva alto valor) ────
+# Roda templates info-severity de alto sinal contra URLs descobertas pelo
+# ffuf + katana. Cobre swagger/openapi expostos, debug endpoints, config
+# files e exposures que ficaram fora do filtro severity da fase 4.
+if command -v nuclei &>/dev/null; then
+    _info_urls="$OUTDIR/raw/nuclei_info_targets.txt"
+    : > "$_info_urls"
+
+    # 1. URL raiz sempre incluída
+    echo "$TARGET" >> "$_info_urls"
+
+    # 2. Endpoints descobertos pelo ffuf (paths que retornaram 200/301/401/403)
+    if [ -s "$OUTDIR/raw/ffuf.json" ]; then
+        python3 -c "
+import json
+try:
+    d = json.load(open('$OUTDIR/raw/ffuf.json'))
+    for r in d.get('results', []):
+        url = r.get('url', '').strip()
+        if url.startswith('http'):
+            print(url)
+except: pass
+" >> "$_info_urls" 2>/dev/null || true
+    fi
+
+    # 3. URLs do katana (até 50 mais relevantes — limita custo)
+    if [ -s "$OUTDIR/raw/katana_urls.txt" ]; then
+        head -50 "$OUTDIR/raw/katana_urls.txt" >> "$_info_urls" 2>/dev/null || true
+    fi
+
+    sort -u "$_info_urls" -o "$_info_urls"
+    _info_url_count=$(wc -l < "$_info_urls" | tr -d ' ')
+
+    if [ "$_info_url_count" -gt 0 ]; then
+        echo -e "  ${BLUE}[…]${NC} Nuclei info-pass: ${_info_url_count} URL(s) · tags: exposure,api,debug,config,technologies,backup"
+        # Tags focadas em info-severity de alto sinal — evita ruído de banner/lang
+        _info_tags="exposure,api,debug,config,technologies,backup,disclosure"
+        # NÃO usar NUCLEI_TEMPLATES_FLAGS aqui: passar -t direciona o nuclei a
+        # carregar APENAS aquele diretório (desativa auto-load do default). O
+        # diretório custom tem poucos templates que não casam com nossos tags.
+        timeout 300 nuclei -l "$_info_urls" \
+            -tags "$_info_tags" \
+            -severity info \
+            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
+            -timeout 10 -no-interactsh \
+            -jsonl -o "$OUTDIR/raw/nuclei_info.json" \
+            > /dev/null 2>>"$OUTDIR/raw/nuclei_error.log" || true
+
+        if [ -s "$OUTDIR/raw/nuclei_info.json" ]; then
+            _info_count=$(grep -c . "$OUTDIR/raw/nuclei_info.json" 2>/dev/null); _info_count=${_info_count:-0}
+            echo -e "  ${GREEN}[✓]${NC} Nuclei info-pass: ${_info_count} achado(s) extra"
+            # Anexar ao nuclei.json principal (mantém compatibilidade do pipeline)
+            cat "$OUTDIR/raw/nuclei_info.json" >> "$OUTDIR/raw/nuclei.json"
+        else
+            echo -e "  ${BLUE}[○]${NC} Nuclei info-pass: nenhum achado adicional"
+        fi
+        unset _info_count _info_tags
+    fi
+    unset _info_urls _info_url_count
+fi
+
 export SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER
 phase_end "P10_5"
 phase_done "FASE_10_5"

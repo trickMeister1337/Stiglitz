@@ -287,6 +287,7 @@ errors = []
 
 # Nuclei
 findings = []
+_seen_nuclei = set()  # dedup: (template-id, host) — info-pass + main pass podem duplicar
 nuclei_file = os.path.join(OUTDIR,"raw","nuclei.json")
 if os.path.exists(nuclei_file) and os.path.getsize(nuclei_file) > 0:
     with open(nuclei_file,"r",encoding="utf-8") as f:
@@ -299,6 +300,16 @@ if os.path.exists(nuclei_file) and os.path.getsize(nuclei_file) > 0:
                 sev  = info.get("severity","info").lower()
                 cl   = info.get("classification",{}) or {}
                 cves = cl.get("cve-id",[]) or []
+
+                # Dedup por (template-id, host): mesma vulnerabilidade no mesmo host
+                # aparece uma vez só, mesmo se bater em vários paths/matchers.
+                _tid = data.get("template-id","")
+                _host = data.get("host", "")
+                _dedup_key = (_tid, _host)
+                if _dedup_key in _seen_nuclei:
+                    continue
+                _seen_nuclei.add(_dedup_key)
+
                 # Evidência: montar a partir de request/response/matcher do nuclei
                 ev_parts = []
                 if data.get("request"): ev_parts.append("REQUEST:\n" + str(data["request"]))
@@ -314,7 +325,7 @@ if os.path.exists(nuclei_file) and os.path.getsize(nuclei_file) > 0:
                     "evidence":ev,
                     "param":str(meta.get("username","") or meta.get("param","") or ""),
                     "attack":str(meta.get("password","") or ""),
-                    "other":data.get("template-id","") or ""})
+                    "other":_tid})
             except json.JSONDecodeError as e: errors.append(f"Nuclei L{ln}: {e}")
             except Exception as e: errors.append(f"Nuclei L{ln}: {type(e).__name__}: {e}")
 
@@ -867,6 +878,7 @@ _HDR_REM = {
     "x-xss-protection":          "Remove or replace with Content-Security-Policy — X-XSS-Protection is legacy and ignored by modern browsers.",
 }
 header_findings = []
+_seen_subdir = set()  # dedup subdirective issues por (header, description)
 for _shd in security_headers_data:
     _url = _shd.get("url", TARGET)
     for _hdr, _hinfo in _shd.get("missing", {}).items():
@@ -883,6 +895,60 @@ for _shd in security_headers_data:
             "remediation": _HDR_REM.get(_hdr, f"Configure the {_hdr} header on the web server or reverse proxy."),
             "evidence": "", "param": "", "attack": "", "other": "",
         })
+
+    # Validações de subdiretivas (HSTS preload, CSP unsafe-inline, etc.)
+    for _sub in _shd.get("subdirective_issues", []):
+        _hdr = _sub.get("header", "")
+        _desc = _sub.get("description", "")
+        _dedup_key = (_hdr, _desc)
+        if _dedup_key in _seen_subdir:
+            continue
+        _seen_subdir.add(_dedup_key)
+        header_findings.append({
+            "id":   f"weak-{_hdr}-{abs(hash(_desc)) % 10000}",
+            "name": f"Weak {_hdr}: {_desc.split(' — ')[0] if ' — ' in _desc else _desc[:60]}",
+            "severity": _sub.get("severity", "low"),
+            "severity_orig": _sub.get("severity", "low"),
+            "severity_reclassified": False,
+            "source": "Security Headers",
+            "url": _url,
+            "cve": _HDR_CWE.get(_hdr, ("CWE-693", "info"))[0],
+            "cve_ids": [],
+            "description": _desc,
+            "remediation": _HDR_REM.get(_hdr, f"Revise as subdiretivas do header {_hdr}."),
+            "evidence": f"{_hdr}: {_sub.get('value','')[:200]}",
+            "param": "", "attack": "", "other": "",
+        })
+
+# ── CORS Findings (preflight OPTIONS via lib/cors_check.py) ─────
+_cors_path = os.path.join(OUTDIR, 'raw', 'cors_findings.json')
+if os.path.exists(_cors_path):
+    try:
+        for _cf in json.load(open(_cors_path)):
+            header_findings.append({
+                "id": f"cors-{abs(hash(_cf.get('url','')+_cf.get('name',''))) % 100000}",
+                "name": _cf.get("name", "CORS Misconfiguration"),
+                "severity": _cf.get("severity", "medium"),
+                "severity_orig": _cf.get("severity", "medium"),
+                "severity_reclassified": False,
+                "source": "CORS Check",
+                "url": _cf.get("url", TARGET),
+                "cve": "CWE-942",  # Permissive Cross-domain Policy
+                "cve_ids": [],
+                "description": _cf.get("description", ""),
+                "remediation": (
+                    "1. Substituir wildcard '*' por allowlist explícita de origens confiáveis. "
+                    "2. Validar Origin contra um conjunto fixo antes de ecoar. "
+                    "3. Nunca combinar Access-Control-Allow-Origin reflexivo com "
+                    "Access-Control-Allow-Credentials: true. "
+                    "Exemplo nginx: map $http_origin $cors_origin { default ''; "
+                    "'~^https://(app|admin)\\.exemplo\\.com$' $http_origin; }"
+                ),
+                "evidence": _cf.get("evidence", ""),
+                "param": "", "attack": "", "other": "",
+            })
+    except Exception as e:
+        errors.append(f"cors_findings: {e}")
 
 # ── Tech Profile ─────────────────────────────────────────────
 tech_profile  = {}
