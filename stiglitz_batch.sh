@@ -716,7 +716,6 @@ for r in results:
         </details>"""
     if items_html:
         # contar criticos e altos para o badge
-        n_crit = sum(1 for f in criths if f.get("severity","").upper()=="CRITICAL" and (f.get("name") or "") not in set())
         badges = ""
         nc = sum(1 for f in criths if f.get("severity","").upper()=="CRITICAL")
         nh = sum(1 for f in criths if f.get("severity","").upper()=="HIGH")

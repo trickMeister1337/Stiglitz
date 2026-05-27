@@ -25,6 +25,13 @@ Uso standalone: python3 lib/poc_validator.py <outdir>
 import json, subprocess, re, sys, os, time, shlex, xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
+# OOB/OAST é opcional — degrada sem erro se o módulo não carregar.
+try:
+    from oob import OOBSession, inject_oob_url
+    _OOB_AVAILABLE = True
+except Exception:
+    _OOB_AVAILABLE = False
+
 # ── Threshold mínimo para considerar um achado "confirmado" ──────
 MIN_CONFIRM_CONFIDENCE = 60   # abaixo disso → force confirmed=False
 
@@ -606,11 +613,20 @@ def _clamp_confidence(confirmed, confidence, note=""):
 # ══════════════════════════════════════════════════════════════════
 
 def confirm_nuclei(outdir):
-    """Confirma achados Nuclei — curl sempre reconstruído de método+URL+body."""
+    """Confirma achados Nuclei — curl sempre reconstruído de método+URL+body.
+    SSRF/RCE/SSTI não confirmados por conteúdo recebem tentativa de confirmação
+    OOB (interactsh) quando habilitado via INTERACTSH_SERVER."""
     nuclei_file = os.path.join(outdir, "raw", "nuclei.json")
     confirmations = []
     if not os.path.exists(nuclei_file):
         return confirmations
+
+    profile   = os.environ.get("PROFILE", "lab")
+    oob       = OOBSession(out_dir=os.path.join(outdir, "raw")) if _OOB_AVAILABLE else None
+    oob_ready = bool(oob and oob.start())
+    if oob_ready:
+        print(f"  [OOB] interactsh ativo ({oob.domain}) — confirmação cega habilitada")
+    oob_pending = []   # [(idx_em_confirmations, token, oob_url)]
 
     with open(nuclei_file, encoding="utf-8") as f:
         for line in f:
@@ -708,8 +724,40 @@ def confirm_nuclei(outdir):
                     resp_headers, resp_body, curl_cmd, clean_curl, safe_curl,
                     diff_changed, diff_note, method_results, auth_ev, dc, "nuclei"))
 
+                # OOB: SSRF/RCE/SSTI não confirmados por conteúdo recebem um
+                # payload único; o callback (assíncrono) é resolvido após o loop.
+                if oob_ready and not confirmed and vuln_type in ("ssrf", "rce", "ssti"):
+                    token, oob_url = oob.new_payload(vuln_type)
+                    inj = inject_oob_url(url, oob_url, vuln_type, profile)
+                    if inj:
+                        run_cmd(inj, timeout=12, retries=1)
+                        oob_pending.append((len(confirmations) - 1, token, oob_url))
+
             except Exception as e:
                 print(f"  [!] Nuclei parse error: {e}")
+
+    # ── Resolução OOB: espera a janela de callback e eleva os confirmados ──
+    if oob_ready and oob_pending:
+        wait_s = int(os.environ.get("OOB_WAIT", "20"))
+        print(f"  [OOB] Aguardando callbacks por {wait_s}s ({len(oob_pending)} payload(s))...")
+        time.sleep(wait_s)
+        for idx, token, oob_url in oob_pending:
+            hits = oob.matches(token)
+            if not hits:
+                continue
+            proto = str(hits[0].get("protocol", "dns")).upper()
+            src   = hits[0].get("remote-address", "?")
+            entry = confirmations[idx]
+            entry["confirmed"]     = True
+            entry["confidence"]    = 98
+            entry["oob_confirmed"] = True
+            entry["poc_note"]      = f"OOB confirmado: callback {proto} de {src}"
+            entry["response_snippet"] += (
+                f"\n\n--- OOB CALLBACK ({proto}) via {oob_url} ---\n"
+                + str(hits[0].get("raw-request", "(sem raw-request)"))[:800])
+            print(f"  [CONFIRMADO-OOB] {entry['template_id']} ← {proto} de {src}")
+    if oob:
+        oob.stop()
 
     return confirmations
 
@@ -1088,6 +1136,7 @@ def _entry(tid, url, sev, vtype, confirmed, confidence, poc_note, status,
         "methods_tested":    {m: r[0] for m, r in (method_results or {}).items()},
         "auth_evidence":     auth_ev or [],
         "double_checked":    dc is not None,
+        "oob_confirmed":     False,
         "timestamp":         datetime.now(timezone.utc).isoformat(),
     }
 

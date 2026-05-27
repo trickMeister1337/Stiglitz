@@ -706,6 +706,70 @@ class TestPocValidator(unittest.TestCase):
         self.assertGreaterEqual(conf, 60)
 
 
+class TestOOB(unittest.TestCase):
+    """Confirmação Out-of-Band (lib/oob.py)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_disabled_without_server(self):
+        import oob
+        # Sem INTERACTSH_SERVER no env e sem arg → sessão desabilitada.
+        old = os.environ.pop("INTERACTSH_SERVER", None)
+        try:
+            s = oob.OOBSession()
+            self.assertFalse(s.enabled)
+            self.assertFalse(s.start(), "start() deve falhar sem servidor configurado")
+        finally:
+            if old is not None:
+                os.environ["INTERACTSH_SERVER"] = old
+
+    def test_new_payload_unique_and_scoped(self):
+        import oob
+        s = oob.OOBSession(out_dir=self.tmpdir)
+        s.domain = "abcdef0123456789abcd.oast.test"
+        t1, u1 = s.new_payload("ssrf")
+        t2, u2 = s.new_payload("ssrf")
+        self.assertNotEqual(t1, t2, "tokens devem ser únicos por payload")
+        self.assertIn(s.domain, u1)
+        self.assertTrue(u1.startswith("http://") and u1.endswith("/"))
+
+    def test_matches_correlation(self):
+        import oob
+        s = oob.OOBSession(out_dir=self.tmpdir)
+        s.domain = "abcdef0123456789abcd.oast.test"
+        token = "ssrfdeadbeefcafe"
+        interaction = {
+            "protocol": "dns", "unique-id": "u1", "timestamp": "t1",
+            "full-id": f"{token}.{s.domain}", "remote-address": "203.0.113.5",
+            "raw-request": "",
+        }
+        with open(s._jsonl, "w") as f:
+            f.write(json.dumps(interaction) + "\n")
+        self.assertEqual(len(s.matches(token)), 1, "callback do token deve casar")
+        # collect() já marcou como visto; outro token não casa em nova leitura
+        self.assertEqual(s.matches("outrotoken000000"), [])
+
+    def test_inject_ssrf_uses_candidate_param(self):
+        import oob
+        cmd = oob.inject_oob_url("http://alvo/api?url=orig&x=1",
+                                 "http://tok.oast.test/", "ssrf")
+        self.assertIsNotNone(cmd)
+        self.assertIn("tok.oast.test", cmd)
+        self.assertTrue(cmd.startswith("curl "))
+
+    def test_inject_rce_blocked_in_production(self):
+        import oob
+        self.assertIsNone(
+            oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "production"))
+        # lab permite
+        self.assertIsNotNone(
+            oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "lab"))
+
+
 class TestDomainFilter(unittest.TestCase):
     """Fix do _strip_www: lstrip removia caracteres soltos, quebrando o filtro."""
 
