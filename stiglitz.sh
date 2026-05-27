@@ -181,8 +181,9 @@ AUTH_HEADER=""     # Header customizado (ex: "Cookie: session=abc")
 OSINT_DIR=""       # Diretório de output do osint.sh (reaproveita descoberta)
 OUTDIR_OVERRIDE="" # Reutiliza um diretório de scan fixo (orquestrador pipeline.py)
 ONLY_PHASES=""     # Lista de fases a executar (ex: "P4"); vazio = todas
+DRY_RUN=false      # Simular: imprime o plano e sai sem executar ferramentas
 
-# Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase
+# Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase, --dry-run
 _args=("$@")
 for _i in "${!_args[@]}"; do
     case "${_args[$_i]}" in
@@ -191,6 +192,7 @@ for _i in "${!_args[@]}"; do
         --osint-dir|--osint) OSINT_DIR="${_args[$((${_i}+1))]}" ;;
         --outdir)            OUTDIR_OVERRIDE="${_args[$((${_i}+1))]}" ;;
         --only-phase)        ONLY_PHASES="${_args[$((${_i}+1))]}" ;;
+        --dry-run)           DRY_RUN=true ;;
     esac
 done
 
@@ -262,11 +264,31 @@ unset _domain_valid _dns_check
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SCAN_START_TS=$(date +%s)
 if [ -n "$OUTDIR_OVERRIDE" ]; then
+    # Restringir a um charset seguro — OUTDIR é interpolado em heredocs Python
+    if ! echo "$OUTDIR_OVERRIDE" | grep -qE '^[A-Za-z0-9._/-]+$'; then
+        echo -e "${RED}[✗] --outdir contém caracteres inválidos: ${OUTDIR_OVERRIDE}${NC}"
+        echo -e "${YELLOW}    Permitido: letras, números, . _ - /${NC}"
+        exit 1
+    fi
     OUTDIR="$OUTDIR_OVERRIDE"   # diretório fixo reutilizado entre fases (orquestrador)
 else
     OUTDIR="scan_${DOMAIN}_${TIMESTAMP}"
 fi
 mkdir -p "$OUTDIR/raw"
+
+# ── DRY-RUN: imprime o plano e sai sem executar nenhuma ferramenta ──
+if [ "$DRY_RUN" = true ]; then
+    echo -e "${YELLOW}[DRY-RUN] Nenhuma ferramenta será executada.${NC}"
+    echo -e "  Alvo:    ${TARGET}"
+    echo -e "  Domínio: ${DOMAIN}"
+    echo -e "  Output:  ${OUTDIR}"
+    echo -e "  Fases:   P1 subdomains → P2 surface → P3 TLS → P4 nuclei → P5 confirm →"
+    echo -e "           P6 CVE/EPSS → P7 WAF → P8 email → P9 ZAP → P10 JS → P10.5 extra → P11 report"
+    [ -n "$ONLY_PHASES" ] && echo -e "  Apenas:  ${ONLY_PHASES}"
+    [ -n "$OSINT_DIR" ]   && echo -e "  OSINT:   ${OSINT_DIR}"
+    echo -e "${GREEN}[DRY-RUN] Plano impresso — encerrando.${NC}"
+    exit 0
+fi
 
 # ── Lockfile: evitar execuções simultâneas no mesmo diretório ────
 LOCKFILE="$OUTDIR/raw/.stiglitz.lock"

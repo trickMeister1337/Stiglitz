@@ -79,7 +79,7 @@ Output lands in `scan_<domain>_<timestamp>/` — open `stiglitz_report.html`
 
 | Tool | Role | When to use |
 |---|---|---|
-| `osint.sh` | Passive pre-engagement intelligence (10 phases) | Before any active scan |
+| `osint.sh` | Pre-engagement intelligence (10 phases) — passive by default; cloud/takeover probes opt-in via `--active-cloud` | Before any active scan |
 | `stiglitz.sh` | Recon & adaptive vulnerability scanning (11 phases) | Map the attack surface |
 | `pipeline.py` | Phase-level orchestrator for the scan — real checkpoint, retry, resume | Long/flaky scans you want to resume |
 | `stiglitz_red.sh` | Automated exploitation engine (8 phases) | After recon, or standalone |

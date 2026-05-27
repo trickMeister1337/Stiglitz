@@ -2,6 +2,19 @@
 
 All notable changes to Stiglitz are documented here. Dates are approximate.
 
+## v7.6 — Safety, scope & injection hardening
+
+Security-focused pass closing gaps that mattered most for an offensive tool.
+
+- **Scope enforcement in RED** — `stiglitz_red.sh` now hard-filters `targets_scored.txt` by `SCOPE_DOMAINS` (host == domain or subdomain). Out-of-scope hosts captured from scan output (external redirects, partner CDNs) can no longer become sqlmap/dalfox/hydra targets.
+- **Profiles consolidated + production hardened** — removed the dead `profiles/*.conf` (never sourced; only `lib/profiles.conf` is). Production now genuinely restricts: sqlmap technique `BEU` (no stacked/time, read-only; staging `BEUT`), Metasploit runs `check`-only (no exploit/auxiliary firing) when payload is `NONE`, and nmap uses `-T2`.
+- **Authorization gate hardened** — env-var bypass renamed/standardized to `STIGLITZ_AUTHORIZED` and now **requires a `--roe <file>`** (signed Rules of Engagement; SHA-256 logged to the audit trail). Non-interactive runs without orchestration abort. `stiglitz_full.sh` requires `--roe` for any non-dry exploitation.
+- **Command-injection fixes** — `poc_validator` no longer runs nuclei/ZAP-derived data through an unsanitized `shell=True`: all target-controlled values are `shlex.quote`d and Nuclei `curl-command` strings with shell metacharacters are rejected. Bash heredocs in `stiglitz_full.sh` switched to env-passed values (no string interpolation); `TARGET`/`OUTDIR`/scope domains are validated against a strict charset.
+- **`--dry-run` is honest end-to-end** — `stiglitz.sh` and `osint.sh` now understand `--dry-run` (print plan, run no tools); previously `stiglitz_full.sh --dry-run` silently launched real scans.
+- **False-positive reduction in confirmation** — size-only response diffs no longer confirm SQLi/XSS/LFI on their own (they require double-check corroboration); `build_safe_baseline` now neutralizes double-quoted payloads too; removed a duplicate `_clamp_confidence`; TLS findings without active re-verification are labeled testssl-derived rather than independently confirmed.
+- **Misc correctness** — `parsers.py` domain filter fixed (`lstrip("www.")` corrupted hosts like `web.com`); `stiglitz_diff.py` keys no longer include severity (eliminating phantom new/fixed) and the risk-score regex matches the current English label; PCI SLA age now measured from discovery (`first_seen`) instead of CVE publication year; `epss_bonus` capped; batch ZAP `pgrep` pattern fixed.
+- **Tests** — new coverage for poc_validator confidence/injection, the domain filter, and RED scope enforcement.
+
 ## v7.5 — Report & risk-score quality
 
 - **Non-saturating risk score** — previously summed per-URL occurrences (the same alert across N URLs blew up the number; almost every scan hit 100/100). Now uses unique types with a base tier from the highest severity present + a quantity bonus with diminishing returns. The CRITICAL band requires a real critical finding or a KEV CVE — soft bonuses (EPSS/JS) cannot manufacture a CRITICAL on their own.

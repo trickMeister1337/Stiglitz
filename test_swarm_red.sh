@@ -198,6 +198,23 @@ else
     assert "cves_found.txt created" "1"
 fi
 
+# ─── 11.5 Scope enforcement (URLs fora de escopo são filtradas) ──────────────
+echo -e "${YLW}▸ 11.5 Scope enforcement${RST}"
+SCOPE_DIR="$TMPDIR_TEST/scan_testsite.com_20260514_130000"
+mkdir -p "$SCOPE_DIR/raw"
+cat > "$SCOPE_DIR/raw/nuclei.json" << 'JSON'
+{"template-id":"t1","info":{"name":"In scope","severity":"high"},"matched-at":"https://testsite.com/api?id=1","host":"testsite.com"}
+{"template-id":"t2","info":{"name":"Out of scope","severity":"high"},"matched-at":"https://evil-external.com/api?id=1","host":"evil-external.com"}
+JSON
+scope_out="$TMPDIR_TEST/scope_out"
+echo "EU AUTORIZO" | bash "$SCRIPT" -d "$SCOPE_DIR" --dry-run --output-dir "$scope_out" 2>&1 | head -60 > /dev/null
+if [ -f "$scope_out/data/targets_scored.txt" ]; then
+    assert "In-scope URL mantida"     "$(grep -q 'testsite.com' "$scope_out/data/targets_scored.txt" && echo 0 || echo 1)"
+    assert "Out-of-scope URL filtrada" "$(grep -q 'evil-external.com' "$scope_out/data/targets_scored.txt" && echo 1 || echo 0)"
+else
+    assert "targets_scored.txt criado" "1"
+fi
+
 # ─── 12. Python module syntax ────────────────────────────────────────────────
 echo -e "${YLW}▸ 12. Python modules${RST}"
 LIBDIR="$(dirname "$SCRIPT")/lib"

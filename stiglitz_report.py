@@ -1100,6 +1100,9 @@ for ev in cve_enrichment.values():
     if epss >= 0.5:    epss_bonus += 15   # exploit muito provável (>50%)
     elif epss >= 0.1:  epss_bonus += 7    # exploit provável (>10%)
     elif epss >= 0.01: epss_bonus += 2    # exploit possível (>1%)
+# Cap próprio (como kev_bonus/js_bonus) — evita que muitos CVEs EPSS-altos
+# saturem o componente sozinhos.
+epss_bonus = min(epss_bonus, 30)
 # Bônus JS: secrets e frameworks vulneráveis agravam o risco
 HIGH_JS_TYPES = {"AWS Access Key","AWS Secret","Private Key","Stripe Live Key","GitHub Token","GitLab PAT","OpenAI Key","Anthropic Key","Hardcoded Password","DB Connection String"}
 js_high   = [s for s in js_secrets if s.get("type","") in HIGH_JS_TYPES]

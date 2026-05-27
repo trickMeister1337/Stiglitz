@@ -129,7 +129,8 @@ run_sequential() {
         local _log="$BATCH_DIR/logs/${_domain}.log"
 
         # Garantir que ZAP da rodada anterior foi encerrado
-        if pgrep -f "zaproxy\|zap-.*jar" > /dev/null 2>&1; then
+        # (pgrep -f usa ERE: alternância é "|", não "\|")
+        if pgrep -f "zaproxy|zap-.*jar" > /dev/null 2>&1; then
             echo -e "${YELLOW}[!] ZAP ainda rodando — aguardando encerramento...${NC}"
             pkill -f "zaproxy" 2>/dev/null; pkill -f "zap-.*jar" 2>/dev/null
             sleep "$DELAY_BETWEEN"

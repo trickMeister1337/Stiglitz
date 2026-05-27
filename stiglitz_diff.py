@@ -44,7 +44,9 @@ def load_findings(scan_dir):
                 name = d.get("info", {}).get("name", "")
                 sev  = d.get("info", {}).get("severity", "info").lower()
                 url  = d.get("matched-at", "")
-                key  = f"nuclei::{name}::{sev}"
+                # Chave NÃO inclui severidade: ela pode mudar entre scans
+                # (atualização de template) e geraria falso new/fixed do mesmo finding.
+                key  = f"nuclei::{name}"
                 if key not in findings:
                     findings[key] = {"name": name, "severity": sev,
                                      "source": "Nuclei", "urls": set()}
@@ -61,7 +63,7 @@ def load_findings(scan_dir):
                 name = a.get("name", "")
                 sev  = sev_map.get(a.get("risk","").lower(), "info")
                 url  = a.get("url", "")
-                key  = f"zap::{name}::{sev}"
+                key  = f"zap::{name}"
                 if key not in findings:
                     findings[key] = {"name": name, "severity": sev,
                                      "source": "ZAP", "urls": set()}
@@ -79,7 +81,8 @@ def load_risk(scan_dir):
     rep = os.path.join(scan_dir, "stiglitz_report.html")
     if not os.path.exists(rep): return None, None
     content = open(rep, encoding="utf-8", errors="replace").read()
-    m = re.search(r'Índice de Risco.*?(\d+)', content[:5000])
+    # Suporta o rótulo atual ("Risk Score") e o antigo PT ("Índice de Risco")
+    m = re.search(r'(?:Risk Score|Índice de Risco)[^0-9]*?(\d+)', content[:6000])
     score = int(m.group(1)) if m else None
     ts_m = re.search(r'(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})', content[:3000])
     ts = ts_m.group(1) if ts_m else "?"
@@ -166,7 +169,7 @@ if HTML_OUT:
                 urls_html += f'<br><span style="color:#888">... +{len(f["urls"])-5}</span>'
             rows += (f'<tr><td>{sev_badge(f["severity"])}</td>'
                      f'<td><strong>{_html.escape(f["name"])}</strong></td>'
-                     f'<td style="font-size:12px;color:#666">{f["source"]}</td>'
+                     f'<td style="font-size:12px;color:#666">{_html.escape(f["source"])}</td>'
                      f'<td style="font-size:11px">{urls_html}</td></tr>')
         return rows
 

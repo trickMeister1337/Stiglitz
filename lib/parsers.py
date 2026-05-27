@@ -108,9 +108,17 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
     urls_with_params: Set[str] = set()
     all_urls: Set[str] = set()
 
-    # Extrair domínio base do target para filtrar URLs externas
-    target_domain = target.lower().lstrip("www.")
     from urllib.parse import urlparse as _urlparse
+
+    def _strip_www(h: str) -> str:
+        # Remove o PREFIXO "www." (não usar lstrip, que remove caracteres soltos)
+        h = (h or "").lower()
+        return h[4:] if h.startswith("www.") else h
+
+    # Extrair domínio base do target — aceita URL completa ou domínio puro
+    _t = target.lower().strip()
+    _t_host = _urlparse(_t).hostname if "://" in _t else _t.split("/")[0].split(":")[0]
+    target_domain = _strip_www(_t_host or _t)
 
     def add_url(url: str):
         if not url or not isinstance(url, str):
@@ -122,10 +130,10 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
         try:
             host = _urlparse(url).hostname
             if host:
-                host = host.lower().lstrip("www.")
+                host = _strip_www(host)
                 if host != target_domain and not host.endswith(f".{target_domain}"):
                     return  # URL externa — ignorar
-        except:
+        except Exception:
             return
         all_urls.add(url)
         if "?" in url and "=" in url:

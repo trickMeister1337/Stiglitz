@@ -74,6 +74,14 @@ run_sqli_phase() {
     fi
 
     local tamper; tamper=$(_tamper_for_waf)
+    # Técnica por perfil: production NUNCA usa Stacked queries (S),
+    # que permitem INSERT/UPDATE/DROP. Só técnicas read-only de confirmação.
+    local technique
+    case "${PROFILE:-lab}" in
+        production) technique="BEU" ;;     # boolean, error, union — somente leitura
+        staging)    technique="BEUT" ;;    # + time-based, sem stacked
+        *)          technique="BEUSTQ" ;;  # lab — todas as técnicas
+    esac
     local tested=0 vuln=0
 
     while IFS= read -r url; do
@@ -100,7 +108,7 @@ run_sqli_phase() {
             --output-dir="$out_dir"
             --random-agent
             --flush-session
-            --technique=BEUSTQ
+            --technique="$technique"
             --tamper="$tamper"
             --timeout=30
             --retries=1

@@ -17,15 +17,32 @@ _generate_rc() {
     local rc_file="$1" target="$2" lhost="$3" lport="$4" payload="$5"
     shift 5; local modules=("$@")
 
+    # Modo não intrusivo (production / payload NONE): só `check`, sem disparar
+    # exploits nem módulos auxiliares — apenas confirma se o alvo é vulnerável.
+    local check_only=false
+    [ "$payload" = "NONE" ] && check_only=true
+
     {
         echo "# Stiglitz RED — Resource Script gerado automaticamente"
         echo "# Alvo: $target | $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "# Modo: $([ "$check_only" = true ] && echo 'CHECK-ONLY (não intrusivo)' || echo 'EXPLOIT')"
         echo "workspace -a stiglitz_red_$$"
         echo ""
         for mod in "${modules[@]}"; do
+            if [ "$check_only" = true ]; then
+                # Em check-only só exploits suportam `check`; auxiliares são pulados
+                [[ "$mod" == exploit/* ]] || continue
+                echo "use $mod"
+                echo "set RHOSTS $target"
+                echo "set ConnectTimeout 10"
+                echo "set VERBOSE false"
+                echo "check"
+                echo ""
+                continue
+            fi
             echo "use $mod"
             echo "set RHOSTS $target"
-            if [[ "$mod" == exploit/* ]] && [ "$payload" != "NONE" ]; then
+            if [[ "$mod" == exploit/* ]]; then
                 echo "set PAYLOAD $payload"
                 echo "set LHOST $lhost"
                 echo "set LPORT $lport"

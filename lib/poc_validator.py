@@ -22,7 +22,7 @@ Melhorias v3 (redução de falsos positivos):
 Uso standalone: python3 lib/poc_validator.py <outdir>
 """
 
-import json, subprocess, re, sys, os, time, xml.etree.ElementTree as ET
+import json, subprocess, re, sys, os, time, shlex, xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 # ── Threshold mínimo para considerar um achado "confirmado" ──────
@@ -56,6 +56,20 @@ PATTERNS = load_patterns()
 # UTILITÁRIOS
 # ══════════════════════════════════════════════════════════════════
 
+# Sinais inequívocos de injeção de comando — usados para rejeitar curl-commands
+# vindos do Nuclei (que derivam de respostas potencialmente hostis do alvo).
+_CMD_INJECTION_RE = re.compile(r'\$\(|`|;|\n|\r|&&|\|\||>\s|<\s')
+
+def _sanitize_nuclei_curl(curl_cmd):
+    """Aceita o curl-command do Nuclei só se for um curl benigno, sem
+    encadeamento/substituição de comando. Caso contrário retorna None
+    e o chamador reconstrói o curl a partir de método+URL citados."""
+    if not curl_cmd or not curl_cmd.strip().startswith("curl"):
+        return None
+    if _CMD_INJECTION_RE.search(curl_cmd):
+        return None
+    return curl_cmd
+
 def run_cmd(cmd, timeout=20, retries=2, backoff=5):
     for attempt in range(retries):
         try:
@@ -64,6 +78,8 @@ def run_cmd(cmd, timeout=20, retries=2, backoff=5):
         except subprocess.TimeoutExpired:
             if attempt < retries - 1:
                 time.sleep(backoff)
+        except (OSError, ValueError) as e:
+            return "", f"EXEC_ERROR:{e}"
     return "", "TIMEOUT"
 
 def parse_http_response(raw):
@@ -187,9 +203,15 @@ def build_safe_baseline(curl_cmd, matched_at):
     for rm in ['-x http://127.0.0.1:8080', '--proxy http://127.0.0.1:8080']:
         clean = clean.replace(rm, '').strip()
 
+    _sqli_kw = r"(?:OR|AND|UNION|SELECT|DROP|INSERT|UPDATE|DELETE|EXEC|CAST)"
+    # Payload entre aspas simples
     safe_curl = re.sub(
-        r"'[^']*(?:OR|AND|UNION|SELECT|DROP|INSERT|UPDATE|DELETE|EXEC|CAST)[^']*'",
+        rf"'[^']*{_sqli_kw}[^']*'",
         f"'{safe}'", clean, flags=re.IGNORECASE)
+    # Payload entre aspas duplas (antes só aspas simples eram tratadas → FN)
+    safe_curl = re.sub(
+        rf'"[^"]*{_sqli_kw}[^"]*"',
+        f'"{safe}"', safe_curl, flags=re.IGNORECASE)
     safe_curl = re.sub(
         r"<script[^>]*>.*?</script>|javascript:[^\s\"'&]+",
         safe, safe_curl, flags=re.IGNORECASE | re.DOTALL)
@@ -271,16 +293,6 @@ def classify_vuln(template_id, name, tags=""):
     if any(x in tid for x in ["spf", "dmarc", "dkim", "email", "mx"]):          return "email"
     return "generic"
 
-def _clamp_confidence(confirmed, confidence):
-    """
-    Garante que achados 'confirmados' com confiança baixa sejam rebaixados.
-    Evita falsos positivos onde a lógica retorna confirmed=True mas com < 60%.
-    """
-    if confirmed and confidence < MIN_CONFIRM_CONFIDENCE:
-        return False, confidence
-    # Cap máximo em 99
-    return confirmed, min(confidence, 99)
-
 def validate(vuln_type, url, resp_body, resp_headers, status,
              method_results=None, diff_changed=False, diff_conf=0,
              diff_note="", auth_ev=None, dc_result=None):
@@ -312,9 +324,19 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
                                              f"Erro SQL: '{pat}'")
             except Exception:
                 pass
-        if diff_changed and diff_conf >= 15:
+        # Diff por mensagens de erro novas (diff_conf>=20) — sinal forte
+        if diff_changed and diff_conf >= 20:
             return _clamp_confidence(True, 70 + dc_bonus + diff_conf,
-                                     f"Payload alterou resposta: {diff_note}")
+                                     f"Payload disparou erro/anomalia: {diff_note}")
+        # Diff só por tamanho (diff_conf~15) — sinal fraco. Só confirma se o
+        # double-check corroborar (mesmo status nas 2 execuções). Conteúdo
+        # dinâmico legítimo varia de tamanho e era a maior fonte de FP aqui.
+        if diff_changed and diff_conf >= 15:
+            if dc_result and dc_result[0]:
+                return _clamp_confidence(True, 62 + dc_bonus,
+                                         f"Diferença de tamanho corroborada por double-check: {diff_note}")
+            return _clamp_confidence(False, 45,
+                                     f"Diferença de tamanho sem corroboração (possível conteúdo dinâmico): {diff_note}")
         if status.startswith("5") and diff_changed:
             return _clamp_confidence(True, 65 + dc_bonus, "5xx + diff — possível crash SQLi")
         return _clamp_confidence(False, 30, "Sem indicador SQLi")
@@ -328,9 +350,15 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
                                              f"XSS refletido: '{pat}'")
             except Exception:
                 pass
-        # Verificar se o payload bruto está refletido sem encode
+        # XSS exige reflexão do payload; diff só por tamanho não confirma sozinho.
+        if diff_changed and diff_conf >= 20:
+            return _clamp_confidence(True, 68 + dc_bonus, f"Anomalia com payload: {diff_note}")
         if diff_changed and diff_conf >= 15:
-            return _clamp_confidence(True, 68 + dc_bonus, f"Response alterado com payload: {diff_note}")
+            if dc_result and dc_result[0]:
+                return _clamp_confidence(True, 60 + dc_bonus,
+                                         f"Diferença de tamanho corroborada: {diff_note}")
+            return _clamp_confidence(False, 40,
+                                     f"Diferença de tamanho sem reflexão confirmada: {diff_note}")
         return _clamp_confidence(False, 20, "Payload não refletido ou encodado")
 
     # ── LFI ──────────────────────────────────────────────────────
@@ -342,9 +370,15 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
                                              f"Conteúdo de sistema: '{pat}'")
             except Exception:
                 pass
-        if diff_changed and diff_conf >= 15:
+        if diff_changed and diff_conf >= 20:
             return _clamp_confidence(True, 72 + dc_bonus,
-                                     f"Inclusão alterou resposta: {diff_note}")
+                                     f"Inclusão disparou anomalia: {diff_note}")
+        if diff_changed and diff_conf >= 15:
+            if dc_result and dc_result[0]:
+                return _clamp_confidence(True, 62 + dc_bonus,
+                                         f"Diferença de tamanho corroborada: {diff_note}")
+            return _clamp_confidence(False, 42,
+                                     f"Diferença de tamanho sem conteúdo de sistema: {diff_note}")
         return _clamp_confidence(False, 25, "Sem conteúdo de sistema no response")
 
     # ── SSRF ─────────────────────────────────────────────────────
@@ -606,10 +640,12 @@ def confirm_nuclei(outdir):
                 url         = data.get("matched-at", "")
                 name        = data.get("info", {}).get("name", "")
                 tags        = " ".join(data.get("info", {}).get("tags", []) or [])
-                curl_cmd    = data.get("curl-command", "")
+                curl_cmd    = _sanitize_nuclei_curl(data.get("curl-command", ""))
                 vuln_type   = classify_vuln(template_id, name, tags)
 
-                # Reconstruir curl — tentar preservar o método e body originais
+                # Reconstruir curl — tentar preservar o método e body originais.
+                # Variáveis derivadas do alvo são citadas com shlex.quote para
+                # impedir injeção de comando no shell do operador.
                 if not curl_cmd:
                     raw_req = data.get("request", "") or ""
                     first_line = raw_req.split("\n")[0].strip() if raw_req else ""
@@ -624,9 +660,9 @@ def confirm_nuclei(outdir):
                         req_body = raw_req.split("\r\n\r\n", 1)[1].strip()
                     elif "\n\n" in raw_req:
                         req_body = raw_req.split("\n\n", 1)[1].strip()
-                    curl_cmd = f"curl -sk -L -X {method} --max-time 15 '{url}'"
+                    curl_cmd = f"curl -sk -L -X {shlex.quote(method)} --max-time 15 {shlex.quote(url)}"
                     if req_body and method in ("POST", "PUT", "PATCH"):
-                        curl_cmd += f" --data '{req_body[:500]}'"
+                        curl_cmd += f" --data {shlex.quote(req_body[:500])}"
 
                 clean_curl, safe_curl = build_safe_baseline(curl_cmd, url)
                 exec_cmd = (clean_curl
@@ -656,7 +692,7 @@ def confirm_nuclei(outdir):
                 method_results = {}
                 for m in ["GET", "POST"]:
                     o, e = run_cmd(
-                        f"curl -sk -L -X {m} --max-time 10 '{url}'"
+                        f"curl -sk -L -X {m} --max-time 10 {shlex.quote(url)}"
                         f" -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}==='",
                         timeout=12, retries=1)
                     if not e and o:
@@ -835,16 +871,17 @@ def _zap_request_to_curl(url, req_headers, req_body):
                 continue
             if line_lower.startswith("connection:"):
                 continue
-            # Manter cookies e auth (importantes para contexto)
-            headers_to_add.append(f"-H '{line}'")
+            # Manter cookies e auth (importantes para contexto).
+            # Citado com shlex.quote — o header vem do alvo (não confiável).
+            headers_to_add.append(f"-H {shlex.quote(line)}")
 
-    cmd = f"curl -sk -L -X {method} --max-time 15"
+    cmd = f"curl -sk -L -X {shlex.quote(method)} --max-time 15"
     if headers_to_add:
         # Limit para 12 headers (era 8) para preservar mais contexto
         cmd += " " + " ".join(headers_to_add[:12])
     if req_body and method in ("POST", "PUT", "PATCH"):
-        cmd += f" --data '{req_body[:1000]}'"
-    cmd += f" '{url}'"
+        cmd += f" --data {shlex.quote(req_body[:1000])}"
+    cmd += f" {shlex.quote(url)}"
     return cmd
 
 
@@ -885,7 +922,7 @@ def confirm_tls(outdir, domain):
 
         # Verificar conectividade básica
         raw_out, err = run_cmd(
-            f"curl -sk --max-time 15 -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}===' '{url}'",
+            f"curl -sk --max-time 15 -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}===' {shlex.quote(url)}",
             timeout=20, retries=1)
         if err == "TIMEOUT":
             confirmations.append(
@@ -894,9 +931,14 @@ def confirm_tls(outdir, domain):
 
         status, resp_headers, resp_body = parse_http_response(raw_out)
 
-        confirmed  = True
-        confidence = 82
-        poc_note   = label
+        # Default: sem reverificação ativa, o finding é "verificado pelo testssl"
+        # (categoria hardening), não um exploit independentemente confirmado.
+        # Endpoint precisa ao menos estar acessível para sustentar o finding.
+        reachable  = status.startswith("2") or status in ("301", "302", "403")
+        confirmed  = reachable
+        confidence = 75 if reachable else 20
+        poc_note   = (f"{label} (verificado via testssl; conectividade {status})"
+                      if reachable else f"{label} — endpoint inacessível (HTTP {status})")
 
         # Verificações específicas por tipo
         if "hsts" in finding_id.lower():
@@ -908,7 +950,7 @@ def confirm_tls(outdir, domain):
 
         elif any(x in finding_id.lower() for x in ["certificate", "cert", "expired", "selfsigned"]):
             cert_out, _ = run_cmd(
-                f"echo | openssl s_client -connect {domain}:443 -servername {domain} 2>/dev/null"
+                f"echo | openssl s_client -connect {shlex.quote(domain)}:443 -servername {shlex.quote(domain)} 2>/dev/null"
                 f" | openssl x509 -noout -dates 2>/dev/null",
                 timeout=12, retries=1)
             if cert_out.strip():
@@ -932,7 +974,7 @@ def confirm_tls(outdir, domain):
                                if k in finding_id.lower()), "")
             if proto_flag:
                 check_out, _ = run_cmd(
-                    f"echo | openssl s_client -connect {domain}:443 {proto_flag} 2>&1",
+                    f"echo | openssl s_client -connect {shlex.quote(domain)}:443 {proto_flag} 2>&1",
                     timeout=10, retries=1)
                 if "handshake failure" in check_out.lower():
                     confirmed  = False
@@ -953,7 +995,7 @@ def confirm_tls(outdir, domain):
         state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
         print(f"  [{state}] {confidence}% | {poc_note}")
 
-        curl_cmd = f"curl -sk -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}===' '{url}'"
+        curl_cmd = f"curl -sk -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}===' {shlex.quote(url)}"
         confirmations.append(_entry(
             finding_id, url, "medium", "tls",
             confirmed, confidence, poc_note, status,
@@ -983,11 +1025,12 @@ def confirm_email(outdir, domain):
     recheck = {}
 
     # SPF
-    spf_out, _ = run_cmd(f"dig TXT {domain} +short 2>/dev/null", timeout=10, retries=1)
+    dq = shlex.quote(domain)
+    spf_out, _ = run_cmd(f"dig TXT {dq} +short 2>/dev/null", timeout=10, retries=1)
     recheck["spf"] = "v=spf1" in spf_out.lower()
 
     # DMARC
-    dmarc_out, _ = run_cmd(f"dig TXT _dmarc.{domain} +short 2>/dev/null", timeout=10, retries=1)
+    dmarc_out, _ = run_cmd(f"dig TXT _dmarc.{dq} +short 2>/dev/null", timeout=10, retries=1)
     recheck["dmarc"] = "v=dmarc1" in dmarc_out.lower()
 
     # DKIM — seletores mais comuns
@@ -995,7 +1038,7 @@ def confirm_email(outdir, domain):
     for sel in ["default", "google", "mail", "selector1", "selector2",
                  "k1", "smtp", "dkim", "email", "s1", "s2"]:
         dkim_out, _ = run_cmd(
-            f"dig TXT {sel}._domainkey.{domain} +short 2>/dev/null",
+            f"dig TXT {sel}._domainkey.{dq} +short 2>/dev/null",
             timeout=5, retries=1)
         if "v=dkim1" in dkim_out.lower():
             dkim_found = True

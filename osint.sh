@@ -137,6 +137,7 @@ usage() {
     echo -e "  --github-token TOKEN  GitHub token    (ou GITHUB_TOKEN no env)"
     echo -e "  --hunter-key KEY      Hunter.io key   (ou HUNTER_API_KEY no env)"
     echo -e "  --org NAME            Nome da org no GitHub (padrão: 1º segmento do domínio)"
+    echo -e "  --active-cloud        Habilita Fase 8 (probes HTTP de buckets/takeover — ATIVO)"
     echo -e "  --out DIR             Diretório de output customizado"
     echo -e "  --no-roe              Pular confirmação RoE (CI/CD)"
     echo -e "  --help, -h            Mostrar este help"
@@ -171,6 +172,8 @@ parse_args() {
     HIBP_KEY="${HIBP_API_KEY:-${HIBP_KEY:-}}"
     GITHUB_TOKEN="${GITHUB_TOKEN:-}"
     HUNTER_KEY="${HUNTER_API_KEY:-${HUNTER_KEY:-}}"
+    ACTIVE_CLOUD="${ACTIVE_CLOUD:-false}"   # Fase 8 (probes HTTP a buckets/takeover)
+    DRY_RUN="${DRY_RUN:-false}"
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -182,6 +185,8 @@ parse_args() {
             --hunter-key)      HUNTER_KEY="$2"; shift ;;
             --out)             OUTDIR="$2"; shift ;;
             --org)             ORG_NAME="$2"; shift ;;
+            --active-cloud)    ACTIVE_CLOUD=true ;;
+            --dry-run)         DRY_RUN=true ;;
             --*)               warn "Flag desconhecida: $1 (ignorada)" ;;
             *)
                 [ -z "$TARGET" ] && TARGET="$1"
@@ -256,7 +261,9 @@ confirm_roe() {
     echo -e "  ${YLW}${BLD}║  • URLs históricas (Wayback Machine / GAU)             ║${RST}"
     echo -e "  ${YLW}${BLD}║  • GitHub dorking em repositórios públicos             ║${RST}"
     echo -e "  ${YLW}${BLD}║  • Verificação de vazamentos (HIBP)                    ║${RST}"
-    echo -e "  ${YLW}${BLD}║  • Enumeração de buckets S3/Azure (nomes derivados)    ║${RST}"
+    echo -e "  ${YLW}${BLD}║  Opcional (--active-cloud, ATIVO):                     ║${RST}"
+    echo -e "  ${YLW}${BLD}║  • Probes HTTP de buckets S3/Azure + takeover          ║${RST}"
+    echo -e "  ${YLW}${BLD}║    (toca o alvo e provedores cloud)                    ║${RST}"
     echo -e "  ${YLW}${BLD}║                                                        ║${RST}"
     echo -e "  ${YLW}${BLD}║  Domínio: ${domain_padded}  ║${RST}"
     echo -e "  ${YLW}${BLD}║                                                        ║${RST}"
@@ -831,6 +838,16 @@ phase_cloud_surface() {
     phase "FASE 8 — CLOUD SURFACE"
     [ "$ABORT" = true ] && return 130
 
+    # Esta fase faz probes HTTP ativos (S3/Azure/takeover) que TOCAM o alvo e
+    # provedores cloud — não é passiva. Só roda com opt-in explícito.
+    if [ "${ACTIVE_CLOUD:-false}" != "true" ]; then
+        warn "Fase 8 (Cloud Surface) pulada — probes ativos. Use --active-cloud para habilitar."
+        mkdir -p "$OUTDIR/cloud"
+        echo "bucket_name,cloud,status,url" > "$OUTDIR/cloud/buckets_found.csv"
+        echo "subdomain,cname,service,status" > "$OUTDIR/cloud/takeover_candidates.csv"
+        return 0
+    fi
+
     local base
     base=$(echo "$BASE_DOMAIN" | cut -d. -f1)
 
@@ -1282,6 +1299,18 @@ summary() {
 main() {
     banner
     parse_args "$@"
+
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+        warn "[DRY-RUN] Nenhuma coleta será executada."
+        echo -e "  Alvo:    ${TARGET}"
+        echo -e "  Domínio: ${DOMAIN}"
+        echo -e "  Fases:   domain-intel → subdomains → email → historical-urls →"
+        echo -e "           github-dorking → leaked-creds → shodan → cloud-surface → report"
+        echo -e "  Cloud ativo (Fase 8): ${ACTIVE_CLOUD}"
+        echo -e "${GRN}[DRY-RUN] Plano impresso — encerrando.${RST}"
+        exit 0
+    fi
+
     validate_tools
     confirm_roe
     setup_output

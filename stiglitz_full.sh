@@ -28,6 +28,7 @@ TARGET=""
 DOMAIN=""
 PROFILE="staging"
 SCOPE_FILE=""
+ROE_FILE=""
 AUTH_COOKIE=""
 AUTH_HEADER=""
 SKIP_OSINT=false
@@ -77,6 +78,7 @@ OPÇÕES PRINCIPAIS:
   -t, --target URL        URL do alvo (obrigatório)
   -p, --profile PROFILE   lab | staging | production  (padrão: staging)
   --scope-file FILE       Arquivo com domínios/IPs em escopo
+  --roe FILE              Documento de RoE (obrigatório p/ exploração não-dry)
   --auth-cookie COOKIE    Cookie de autenticação
   --auth-header HEADER    Header de autenticação
 
@@ -106,6 +108,7 @@ parse_args() {
             -t|--target)      TARGET="$2";          shift 2 ;;
             -p|--profile)     PROFILE="$2";          shift 2 ;;
             --scope-file)     SCOPE_FILE="$2";       shift 2 ;;
+            --roe)            ROE_FILE="$2";         shift 2 ;;
             --auth-cookie)    AUTH_COOKIE="$2";      shift 2 ;;
             --auth-header)    AUTH_HEADER="$2";      shift 2 ;;
             --skip-osint)     SKIP_OSINT=true;       shift ;;
@@ -125,6 +128,14 @@ validate() {
     DOMAIN=$(echo "$TARGET" | sed 's|https\?://||' | cut -d'/' -f1 | cut -d':' -f1)
     [ -z "$DOMAIN" ] && { fail "Não foi possível extrair o domínio de '$TARGET'"; exit 1; }
 
+    # Validar domínio/IP — impede caracteres de injeção a jusante (heredocs, args)
+    if ! echo "$DOMAIN" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && \
+       ! echo "$DOMAIN" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'; then
+        fail "Domínio inválido: ${DOMAIN}"
+        echo "  Exemplos válidos: example.com, api.example.com.br, 192.168.1.1"
+        exit 1
+    fi
+
     case "$PROFILE" in
         lab|staging|production) ;;
         *) fail "Perfil inválido: '$PROFILE'. Use: lab|staging|production"; exit 1 ;;
@@ -132,6 +143,18 @@ validate() {
 
     [ -n "$SCOPE_FILE" ] && [ ! -f "$SCOPE_FILE" ] && \
         { fail "scope-file não encontrado: $SCOPE_FILE"; exit 1; }
+
+    if [ -n "$ROE_FILE" ]; then
+        [ -f "$ROE_FILE" ] || { fail "RoE não encontrado: $ROE_FILE"; exit 1; }
+        [ -s "$ROE_FILE" ] || { fail "RoE vazio: $ROE_FILE"; exit 1; }
+    fi
+
+    # Exploração ativa orquestrada exige RoE assinado (documento de autorização).
+    if [ "$SKIP_RED" = false ] && [ "$DRY_RUN" = false ] && [ -z "$ROE_FILE" ]; then
+        fail "Pipeline com exploração (RED) exige --roe <arquivo> (RoE assinado)."
+        echo "  Use --skip-red para apenas OSINT+scan, ou --dry-run para simular."
+        exit 1
+    fi
 }
 
 banner() {
@@ -173,9 +196,11 @@ authorization_gate() {
     echo -e "  Uso não autorizado é crime (Art. 154-A CP / CFAA)."
     echo ""
 
+    [ -n "$ROE_FILE" ] && echo -e "  ${BLD}RoE:${RST}     ${ROE_FILE}\n"
+
     if [ "$DRY_RUN" = true ]; then
         warn "[DRY-RUN] Autorização simulada."
-        export Stiglitz_AUTHORIZED=1
+        export STIGLITZ_AUTHORIZED=1
         return 0
     fi
 
@@ -187,8 +212,8 @@ authorization_gate() {
     fi
 
     # Propagar autorização para os scripts filhos (evita prompts redundantes)
-    export Stiglitz_AUTHORIZED=1
-    log "AUTORIZADO. Pipeline completo. Alvo=${TARGET} Perfil=${PROFILE}"
+    export STIGLITZ_AUTHORIZED=1
+    log "AUTORIZADO. Pipeline completo. Alvo=${TARGET} Perfil=${PROFILE} RoE=${ROE_FILE:-none}"
 }
 
 # ── Captura do diretório criado por um script filho ───────────────────────────
@@ -319,6 +344,7 @@ run_red() {
     [ -n "$AUTH_COOKIE" ]   && red_args+=("--auth-cookie" "$AUTH_COOKIE")
     [ -n "$AUTH_HEADER" ]   && red_args+=("--auth-header" "$AUTH_HEADER")
     [ -n "$SCOPE_FILE" ]    && red_args+=("--scope-file"  "$SCOPE_FILE")
+    [ -n "$ROE_FILE" ]      && red_args+=("--roe"         "$ROE_FILE")
 
     bash "$SCRIPT_DIR/stiglitz_red.sh" "${red_args[@]}" 2>&1 | tee -a "$LOG" || \
         warn "stiglitz_red.sh terminou com erro (não crítico)"
@@ -350,29 +376,40 @@ generate_index() {
     local ts_str; ts_str=$(date '+%d/%m/%Y %H:%M')
     local total_red=$(( RED_SQLI + RED_XSS + RED_BRUTE ))
 
-    python3 - << PYEOF
+    STG_DOMAIN="$DOMAIN" STG_TARGET="$TARGET" STG_PROFILE="$PROFILE" \
+    STG_TS="$ts_str" STG_TOTAL_TIME="$(fmt_time "$total_elapsed")" STG_VERSION="$VERSION" \
+    STG_FULL_DIR="$FULL_DIR" STG_OSINT_DIR="$OSINT_DIR" STG_SCAN_DIR="$SCAN_DIR" \
+    STG_RED_DIR="$RED_DIR" STG_OSINT_SUB="$OSINT_SUBDOMAINS" STG_OSINT_LEAKS="$OSINT_LEAKS" \
+    STG_SCAN_FIND="$SCAN_FINDINGS" STG_SCAN_CONF="$SCAN_CONFIRMED" STG_SCAN_CVES="$SCAN_CVES" \
+    STG_RED_SQLI="$RED_SQLI" STG_RED_XSS="$RED_XSS" STG_RED_BRUTE="$RED_BRUTE" \
+    STG_RED_TOTAL="$total_red" \
+    python3 - << 'PYEOF'
 import html, os
 
-domain      = "${DOMAIN}"
-target      = "${TARGET}"
-profile     = "${PROFILE}"
-ts_str      = "${ts_str}"
-total_time  = "$(fmt_time $total_elapsed)"
-version     = "${VERSION}"
-full_dir    = "${FULL_DIR}"
+def _int(name):
+    try:    return int(os.environ.get(name, "0") or "0")
+    except ValueError: return 0
 
-osint_dir   = "${OSINT_DIR}"
-scan_dir    = "${SCAN_DIR}"
-red_dir     = "${RED_DIR}"
-osint_sub   = ${OSINT_SUBDOMAINS}
-osint_leaks = ${OSINT_LEAKS}
-scan_find   = ${SCAN_FINDINGS}
-scan_conf   = ${SCAN_CONFIRMED}
-scan_cves   = ${SCAN_CVES}
-red_sqli    = ${RED_SQLI}
-red_xss     = ${RED_XSS}
-red_brute   = ${RED_BRUTE}
-red_total   = ${total_red}
+domain      = os.environ.get("STG_DOMAIN", "")
+target      = os.environ.get("STG_TARGET", "")
+profile     = os.environ.get("STG_PROFILE", "")
+ts_str      = os.environ.get("STG_TS", "")
+total_time  = os.environ.get("STG_TOTAL_TIME", "")
+version     = os.environ.get("STG_VERSION", "")
+full_dir    = os.environ.get("STG_FULL_DIR", "")
+
+osint_dir   = os.environ.get("STG_OSINT_DIR", "")
+scan_dir    = os.environ.get("STG_SCAN_DIR", "")
+red_dir     = os.environ.get("STG_RED_DIR", "")
+osint_sub   = _int("STG_OSINT_SUB")
+osint_leaks = _int("STG_OSINT_LEAKS")
+scan_find   = _int("STG_SCAN_FIND")
+scan_conf   = _int("STG_SCAN_CONF")
+scan_cves   = _int("STG_SCAN_CVES")
+red_sqli    = _int("STG_RED_SQLI")
+red_xss     = _int("STG_RED_XSS")
+red_brute   = _int("STG_RED_BRUTE")
+red_total   = _int("STG_RED_TOTAL")
 
 def rpath(d, filename):
     """Caminho relativo de full_dir até filename em d."""

@@ -29,6 +29,7 @@ TARGET=""
 SCAN_DIR=""
 SCOPE_DOMAINS=()
 SCOPE_FILE=""
+ROE_FILE=""
 AUTH_COOKIE=""
 AUTH_HEADER=""
 SKIP_PHASES=()
@@ -79,6 +80,8 @@ OPÇÕES PRINCIPAIS:
   -p, --profile PROFILE   Perfil: lab|staging|production (padrão: lab)
   --scope DOMAIN          Domínio em escopo (padrão: derivado do alvo)
   --scope-file FILE       Arquivo com domínios/IPs em escopo (um por linha)
+  --roe FILE              Documento de RoE (autorização). Registra SHA-256 no
+                          audit trail; obrigatório para bypass do orquestrador.
   --auth-cookie COOKIE    Cookie de autenticação ("session=abc123")
   --auth-header HEADER    Header de auth ("Authorization: Bearer token")
 
@@ -120,6 +123,7 @@ parse_args() {
             -p|--profile)   PROFILE="$2";           shift 2 ;;
             --scope)        SCOPE_DOMAINS+=("$2");  shift 2 ;;
             --scope-file)   SCOPE_FILE="$2";        shift 2 ;;
+            --roe)          ROE_FILE="$2";          shift 2 ;;
             --auth-cookie)  AUTH_COOKIE="$2";       shift 2 ;;
             --auth-header)  AUTH_HEADER="$2";       shift 2 ;;
             --skip)         IFS=',' read -ra SKIP_PHASES <<< "$2"; shift 2 ;;
@@ -172,6 +176,23 @@ validate() {
         while IFS= read -r line; do
             [[ -n "$line" && ! "$line" =~ ^# ]] && SCOPE_DOMAINS+=("$line")
         done < "$SCOPE_FILE"
+    fi
+
+    # Validar cada domínio de escopo — alimenta nmap, RC do Metasploit e hydra.
+    # Bloqueia metacaracteres que permitiriam injeção a jusante.
+    local _d
+    for _d in "${SCOPE_DOMAINS[@]}"; do
+        if ! echo "$_d" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && \
+           ! echo "$_d" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'; then
+            fail "Domínio de escopo inválido: '$_d'"
+            exit 1
+        fi
+    done
+
+    # Validar OUTDIR_OVERRIDE (interpolado em paths/heredocs)
+    if [ -n "$OUTDIR_OVERRIDE" ] && ! echo "$OUTDIR_OVERRIDE" | grep -qE '^[A-Za-z0-9._/-]+$'; then
+        fail "--output-dir contém caracteres inválidos: $OUTDIR_OVERRIDE"
+        exit 1
     fi
 
     # LHOST auto-detect
@@ -320,10 +341,17 @@ run_surface() {
     fi
 
     local _timeout="${PROFILE_TIMEOUT_NMAP[$PROFILE]:-600}"
-    log "Nmap em $(wc -l < "$targets_file") host(s)..."
+    # Timing por perfil — production é deliberadamente discreto (menos carga/ruído)
+    local _nmap_timing _nmap_rate
+    case "$PROFILE" in
+        production) _nmap_timing="-T2"; _nmap_rate="100" ;;
+        staging)    _nmap_timing="-T3"; _nmap_rate="200" ;;
+        *)          _nmap_timing="-T4"; _nmap_rate="300" ;;
+    esac
+    log "Nmap em $(wc -l < "$targets_file") host(s)... (timing=$_nmap_timing)"
 
     dry_cmd timeout "$_timeout" nmap -iL "$targets_file" \
-        -sV -O --open -T4 --min-rate 300 \
+        -sV -O --open "$_nmap_timing" --min-rate "$_nmap_rate" \
         -oN "$OUTDIR/data/nmap.txt" \
         -oG "$OUTDIR/data/nmap_grep.txt" \
         2>&1 | tee -a "$LOG" || true
@@ -424,8 +452,22 @@ _build_scored_targets() {
     # Score + filtro
     python3 - "$tmp_raw" "$OUTDIR/data/targets_scored.txt" "${SCOPE_DOMAINS[@]}" << 'PYEOF'
 import sys, re
+from urllib.parse import urlparse
 raw_f, scored_f = sys.argv[1], sys.argv[2]
-scope_domains = sys.argv[3:]
+scope_domains = [d.strip().lower().lstrip('*.') for d in sys.argv[3:] if d.strip()]
+
+def in_scope(url):
+    # Sem escopo definido => não filtra (fail-open só quando o operador não delimitou)
+    if not scope_domains:
+        return True
+    try:
+        host = (urlparse(url).hostname or '').lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    # In-scope se o host for igual ou subdomínio de algum domínio do escopo
+    return any(host == d or host.endswith('.' + d) for d in scope_domains)
 
 crit_params = re.compile(
     r'[?&](id|user|account|token|pass|password|key|secret|admin|cmd|exec|'
@@ -450,6 +492,7 @@ try:
             url = line.strip()
             if not url or url in seen: continue
             if media_ext.search(url): continue
+            if not in_scope(url): continue
             seen.add(url)
             s = 0
             if crit_params.search(url):                       s += 5
@@ -866,17 +909,39 @@ authorization_gate() {
     echo -e "  Uso não autorizado é crime (Art. 154-A CP / CFAA)."
     echo ""
 
+    # RoE (Rules of Engagement): se informado, valida e registra no audit trail.
+    local roe_sha="(não informado)"
+    if [ -n "$ROE_FILE" ]; then
+        [ -f "$ROE_FILE" ] || { fail "RoE não encontrado: $ROE_FILE"; exit 1; }
+        [ -s "$ROE_FILE" ] || { fail "RoE vazio: $ROE_FILE"; exit 1; }
+        roe_sha=$(sha256sum "$ROE_FILE" 2>/dev/null | cut -d' ' -f1)
+        echo -e "  ${BLD}RoE:${RST}     $ROE_FILE  (sha256: ${roe_sha:0:16}…)"
+        echo ""
+    fi
+    local _op="${USER:-$(id -un 2>/dev/null || echo unknown)}"
+
     if [ "$DRY_RUN" = true ]; then
         warn "[DRY-RUN] Autorização simulada — nenhum teste real será executado"
-        log "DRY-RUN autorizado. Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]}"
+        log "DRY-RUN autorizado. Operador=${_op} Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]} RoE=${roe_sha}"
         return 0
     fi
 
-    # Bypass para execução encadeada pelo stiglitz_full.sh
-    if [ "${Stiglitz_AUTHORIZED:-0}" = "1" ]; then
-        info "Autorizado pelo orquestrador Stiglitz FULL."
-        log "AUTORIZADO (Stiglitz_FULL). Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]}"
+    # Bypass para execução encadeada pelo stiglitz_full.sh.
+    # Só é aceito acompanhado de um RoE válido — o env var sozinho não basta.
+    if [ "${STIGLITZ_AUTHORIZED:-0}" = "1" ]; then
+        if [ -z "$ROE_FILE" ]; then
+            fail "Bypass do orquestrador requer --roe <arquivo> (RoE assinado). Abortando."
+            exit 1
+        fi
+        info "Autorizado pelo orquestrador Stiglitz FULL (RoE validado)."
+        log "AUTORIZADO (orquestrador). Operador=${_op} Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]} RoE=${roe_sha}"
         return 0
+    fi
+
+    # Não interativo (sem TTY) e sem orquestrador → não há como confirmar: aborta.
+    if [ ! -t 0 ]; then
+        fail "Sem terminal interativo e sem autorização do orquestrador. Abortando."
+        exit 1
     fi
 
     echo -e "  Digite ${BLD}EU AUTORIZO${RST} para confirmar e iniciar os testes:"
@@ -885,7 +950,7 @@ authorization_gate() {
         fail "Autorização não confirmada. Abortando."
         exit 1
     fi
-    log "AUTORIZADO. Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]}"
+    log "AUTORIZADO (interativo). Operador=${_op} Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]} RoE=${roe_sha}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
