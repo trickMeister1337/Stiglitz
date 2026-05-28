@@ -88,6 +88,11 @@ class TestVerdict(unittest.TestCase):
         v = esp.compute_verdict(self._records(), "spoof@example.com")
         self.assertEqual(v["forged_envelope"]["header_from"], "spoof@example.com")
 
+    def test_verdict_invalid_dmarc_is_indeterminate(self):
+        import email_spoof_poc as esp
+        v = esp.compute_verdict(self._records(dmarc_status="INVALID", dmarc_policy="unknown"), "x@example.com")
+        self.assertEqual(v["status"], "INDETERMINATE")
+
 
 class TestMessage(unittest.TestCase):
     def test_build_message_sets_forged_from(self):
@@ -262,6 +267,39 @@ class TestGateAndOutput(unittest.TestCase):
                 data = json.load(f)
             self.assertNotIn("send", data)
             self.assertFalse(os.path.exists(os.path.join(d, "smtp_transcript.txt")))
+
+    def test_roe_gate_interactive_accepts_on_sim(self):
+        import builtins
+        from unittest import mock
+        import email_spoof_poc as esp
+        with mock.patch.object(builtins, "input", return_value="SIM"):
+            self.assertTrue(esp.roe_gate("a@b.com", "c@d.com", "direct",
+                                         assume_yes=False, interactive=True))
+
+    def test_roe_gate_interactive_rejects_other_input(self):
+        import builtins
+        from unittest import mock
+        import email_spoof_poc as esp
+        with mock.patch.object(builtins, "input", return_value="nao"):
+            self.assertFalse(esp.roe_gate("a@b.com", "c@d.com", "direct",
+                                          assume_yes=False, interactive=True))
+
+    def test_main_dry_run_writes_analytical_evidence(self):
+        import json
+        import tempfile
+        from unittest import mock
+        import email_spoof_poc as esp
+        fake_records = {"spf": {"status": "MISSING", "severity": "high"},
+                        "dmarc": {"status": "MISSING", "severity": "high"},
+                        "dkim": {"status": "NOT_FOUND", "severity": "low"}}
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch("email_security.analyze", return_value=fake_records):
+                rc = esp.main(["example.com", "--dry-run", "--to", "x@test.com", "--outdir", d])
+            self.assertEqual(rc, 0)
+            with open(os.path.join(d, "spoof_evidence.json")) as f:
+                data = json.load(f)
+            self.assertEqual(data["verdict"]["status"], "SPOOFABLE_INBOX")
+            self.assertNotIn("send", data)
 
 
 if __name__ == "__main__":

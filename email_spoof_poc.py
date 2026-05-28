@@ -88,8 +88,9 @@ def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
     for host in mx_hosts:
         s = None
         try:
+            transcript.append(f"CONNECTING {host}:25")
             s = smtp_factory(host, 25, timeout=timeout)
-            transcript.append(f"CONNECT {host}:25")
+            transcript.append(f"CONNECTED {host}:25")
             code, resp = s.ehlo(helo)
             transcript.append(f"EHLO {helo} -> {code} {_decode(resp)}")
             code, resp = s.mail(mail_from)
@@ -120,13 +121,15 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
     transcript = []
     s = None
     try:
+        transcript.append(f"CONNECTING relay {host}:{port}")
         s = smtp_factory(host, port, timeout=timeout)
-        transcript.append(f"CONNECT relay {host}:{port}")
+        transcript.append(f"CONNECTED relay {host}:{port}")
         code, resp = s.ehlo(helo)
         transcript.append(f"EHLO {helo} -> {code} {_decode(resp)}")
         if user:
             s.starttls()
-            s.ehlo(helo)
+            code, resp = s.ehlo(helo)
+            transcript.append(f"EHLO (post-STARTTLS) {helo} -> {code} {_decode(resp)}")
             s.login(user, password)
             transcript.append("STARTTLS + AUTH")
         code, resp = s.mail(mail_from)
@@ -209,14 +212,15 @@ def parse_args(argv=None):
     p.add_argument("--smtp-pass")
     p.add_argument("--helo", default=None, help="Nome no EHLO/HELO (default: hostname local)")
     p.add_argument("--roe-accept", action="store_true", help="Confirma autorização sem prompt")
-    p.add_argument("--no-roe", action="store_true", help="Pula o prompt RoE (CI)")
+    p.add_argument("--no-roe", action="store_true",
+                   help="Aceita o gate RoE sem prompt (CI com autorização prévia — AUTORIZA o envio)")
     p.add_argument("--outdir", default=None)
     return p.parse_args(argv)
 
 
 def main(argv=None):
     import socket
-    from email_security import analyze
+    from email_security import analyze, dig
 
     args = parse_args(argv)
     domain = args.domain
@@ -238,6 +242,9 @@ def main(argv=None):
         if not args.to:
             print("  [!] --to é obrigatório com --send/--dry-run.")
             return 2
+        if "@" not in args.to:
+            print("  [!] --to requer o formato usuario@dominio.")
+            return 2
         body = args.body
         if args.body_file:
             with open(args.body_file) as f:
@@ -257,7 +264,6 @@ def main(argv=None):
                         assume_yes=args.roe_accept or args.no_roe):
             return 1
 
-        from email_security import dig
         recipient_domain = args.to.split("@", 1)[1]
         mx_hosts = parse_mx(dig("MX", recipient_domain))
         msg_bytes = msg.as_bytes()
