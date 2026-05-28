@@ -38,6 +38,7 @@
 !/test_e2e.py
 !/test_email_spoof.py
 !/test_fixtures
+!/email_spoof_poc.py
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
 __pycache__/
