@@ -144,6 +144,9 @@ class FakeSMTP:
     def quit(self):
         self.commands.append(("quit", None))
 
+    def close(self):
+        self.commands.append(("close", None))
+
 
 class TestDelivery(unittest.TestCase):
     def setUp(self):
@@ -187,6 +190,31 @@ class TestDelivery(unittest.TestCase):
         inst = FakeSMTP.instances[-1]
         self.assertIn(("starttls", None), inst.commands)
         self.assertIn(("login", "user"), inst.commands)
+
+    def test_deliver_direct_closes_socket_on_midconversation_failure(self):
+        import email_spoof_poc as esp
+
+        class FailOnMail(FakeSMTP):
+            def mail(self, addr):
+                raise OSError("boom")
+
+        result = esp.deliver_direct(["mx1.example.com"], "h",
+                                    "a@b.com", "c@d.com", b"RAW", smtp_factory=FailOnMail)
+        self.assertFalse(result["accepted"])
+        inst = FakeSMTP.instances[-1]
+        self.assertIn(("close", None), inst.commands)
+
+    def test_deliver_relay_reports_host_on_error(self):
+        import email_spoof_poc as esp
+
+        class FailConnect(FakeSMTP):
+            def __init__(self, host, port, timeout=15):
+                raise OSError("refused")
+
+        result = esp.deliver_relay("relay.test", 587, None, None, "h",
+                                   "a@b.com", "c@d.com", b"RAW", smtp_factory=FailConnect)
+        self.assertFalse(result["accepted"])
+        self.assertEqual(result["mx_used"], "relay.test")
 
 
 if __name__ == "__main__":

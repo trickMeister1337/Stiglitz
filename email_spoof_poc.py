@@ -84,6 +84,7 @@ def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
     transcript = []
     last_err = None
     for host in mx_hosts:
+        s = None
         try:
             s = smtp_factory(host, 25, timeout=timeout)
             transcript.append(f"CONNECT {host}:25")
@@ -101,6 +102,11 @@ def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
         except Exception as e:
             transcript.append(f"ERROR {host}: {e}")
             last_err = e
+            if s is not None:
+                try:
+                    s.close()
+                except Exception:
+                    pass
             continue
     return {"method": "direct", "mx_used": None, "accepted": False,
             "transcript": transcript, "error": str(last_err) if last_err else None}
@@ -110,10 +116,12 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
                   timeout=15, smtp_factory=smtplib.SMTP):
     """Entrega via relay configurado (STARTTLS+login se user fornecido)."""
     transcript = []
+    s = None
     try:
         s = smtp_factory(host, port, timeout=timeout)
         transcript.append(f"CONNECT relay {host}:{port}")
-        s.ehlo(helo)
+        code, resp = s.ehlo(helo)
+        transcript.append(f"EHLO {helo} -> {code} {_decode(resp)}")
         if user:
             s.starttls()
             s.ehlo(helo)
@@ -130,5 +138,10 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
                 "transcript": transcript}
     except Exception as e:
         transcript.append(f"ERROR relay {host}: {e}")
-        return {"method": "relay", "mx_used": None, "accepted": False,
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
+        return {"method": "relay", "mx_used": host, "accepted": False,
                 "transcript": transcript, "error": str(e)}
