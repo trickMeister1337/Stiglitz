@@ -18,9 +18,8 @@
 !stiglitz_full.sh
 !stiglitz_red.sh
 !stiglitz_report.py
-!test_lib.py
-!test_swarm_modules.py
-!test_swarm_red.sh
+!pipeline.py
+!tests
 
 # never copy these even if under an allowed dir
 **/__pycache__

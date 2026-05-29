@@ -1,8 +1,12 @@
 """Testes do orquestrador pipeline.py (lógica pura, sem invocar ferramentas)."""
 import json
 import os
+import sys
 
 import pytest
+
+# Os testes vivem em tests/; expõe a raiz do repo para importar pipeline.py.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline import Phase, Pipeline, PipelineConfig, PipelineState, parse_args, _domain_of
 

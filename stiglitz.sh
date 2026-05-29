@@ -1009,7 +1009,6 @@ if [ -s "$OUTDIR/raw/nuclei.json" ]; then
         "$(dirname "$0")/lib/poc_validator.py" \
         "$(cd "$(dirname "$0")" && pwd)/lib/poc_validator.py" \
         "$(dirname "$(readlink -f "$0")")/lib/poc_validator.py" \
-        "$HOME/swarm/lib/poc_validator.py" \
         "$(pwd)/lib/poc_validator.py" \
         "$HOME/lib/poc_validator.py"; do
         [ -f "$_candidate" ] && _poc_lib="$_candidate" && break
@@ -1197,15 +1196,15 @@ if command -v zaproxy &>/dev/null; then
                        "/swagger-ui/swagger.json" "/docs/swagger.json")
         for _oapath in "${OPENAPI_PATHS[@]}"; do
             _oa_url="${TARGET%/}${_oapath}"
-            _oa_resp=$(curl -s --max-time 8 -w "%{http_code}" -o "$OUTDIR/raw/swarm_oa_check.tmp" "$_oa_url" 2>/dev/null)
+            _oa_resp=$(curl -s --max-time 8 -w "%{http_code}" -o "$OUTDIR/raw/oa_check.tmp" "$_oa_url" 2>/dev/null)
             if echo "$_oa_resp" | grep -q "^2"; then
                 # Validar que é um spec OpenAPI/Swagger REAL (JSON com chave de topo
                 # openapi/swagger), não uma página HTML/JS que apenas contém a palavra.
                 if python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if isinstance(d,dict) and ('openapi' in d or 'swagger' in d) else 1)" \
-                        "$OUTDIR/raw/swarm_oa_check.tmp" 2>/dev/null; then
+                        "$OUTDIR/raw/oa_check.tmp" 2>/dev/null; then
                     _oa_spec_seen=1
                     echo -e "  ${GREEN}[✓] OpenAPI spec encontrado: $_oapath${NC}"
-                    cp "$OUTDIR/raw/swarm_oa_check.tmp" "$OUTDIR/raw/openapi_spec.json"
+                    cp "$OUTDIR/raw/oa_check.tmp" "$OUTDIR/raw/openapi_spec.json"
                     # Importar spec no ZAP via API
                     _oa_encoded=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$_oa_url")
                     _oa_result=$(zap_api_call "openapi/action/importUrl" "url=${_oa_encoded}&targetUrl=${ENCODED_URL}")
@@ -1219,7 +1218,7 @@ if command -v zaproxy &>/dev/null; then
                 fi
             fi
         done
-        rm -f "$OUTDIR/raw/swarm_oa_check.tmp"
+        rm -f "$OUTDIR/raw/oa_check.tmp"
         if [ "$OPENAPI_FOUND" -eq 0 ] && [ "$_oa_spec_seen" -eq 0 ]; then
             echo -e "  ${YELLOW}[○] Nenhum endpoint OpenAPI/Swagger encontrado${NC}"
         fi
@@ -2088,7 +2087,7 @@ echo ""
 # Slack/generic: export STIGLITZ_NOTIFY_WEBHOOK=https://hooks.slack.com/...
 # Teams:         export STIGLITZ_TEAMS_WEBHOOK=https://outlook.office.com/webhook/...
 #                (ou URL do Power Automate Workflow)
-_swarm_notify() {
+_stiglitz_notify() {
     local msg="$1"
     local token="${STIGLITZ_TELEGRAM_TOKEN:-}"
     local chat="${STIGLITZ_TELEGRAM_CHAT:-}"
@@ -2117,7 +2116,7 @@ _swarm_notify() {
 }
 
 _n_findings=$(grep -c '"severity":\s*"\(critical\|high\)"' "${OUTDIR}/findings.json" 2>/dev/null); _n_findings=${_n_findings:-0}
-_swarm_notify "[Stiglitz] Scan concluído
+_stiglitz_notify "[Stiglitz] Scan concluído
 Alvo: ${TARGET:-${DOMAIN}}
 Findings críticos/altos: ${_n_findings}
 Relatório: ${OUTDIR}/stiglitz_report.html"

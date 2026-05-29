@@ -16,7 +16,7 @@ import tempfile
 import subprocess
 import unittest
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIB = os.path.join(ROOT, "lib")
 TARGET = os.environ.get("STIGLITZ_TEST_TARGET", "").rstrip("/")
 

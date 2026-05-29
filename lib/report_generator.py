@@ -2,10 +2,10 @@
 """
 Stiglitz RED v7.0 — Gerador de Relatório Red Team (Big4 Style).
 
-Uso: python3 report_generator.py <outdir> <target> <profile> <total> <success> <failed> <version> [--swarm-dir <scan_dir>]
+Uso: python3 report_generator.py <outdir> <target> <profile> <total> <success> <failed> <version> [--scan-dir <scan_dir>]
 
 Lê dados consolidados de evidence.py e gera stiglitz_red_report.html.
---swarm-dir: integra findings.json do Stiglitz scan de origem no relatório.
+--scan-dir: integra findings.json do Stiglitz scan de origem no relatório.
 """
 import sys
 import os
@@ -20,9 +20,9 @@ from poc_generator import collect_pocs, generate_verify_script
 esc = lambda s: H.escape(str(s)) if s else ""
 
 
-def _load_swarm_findings(swarm_dir: str) -> list:
+def _load_scan_findings(scan_dir: str) -> list:
     """Load and convert findings.json from a Stiglitz scan directory."""
-    fpath = os.path.join(swarm_dir, "findings.json")
+    fpath = os.path.join(scan_dir, "findings.json")
     if not os.path.exists(fpath):
         return []
     try:
@@ -55,10 +55,10 @@ def _load_swarm_findings(swarm_dir: str) -> list:
             detail_parts.append(f"\nRemediation: {item['remediation']}")
         converted.append({
             "sev":    sev,
-            "tool":   "swarm",
+            "tool":   "stiglitz",
             "title":  item.get("name", item.get("id", "Stiglitz Finding")),
             "target": item.get("url", ""),
-            "type":   "swarm",
+            "type":   "stiglitz",
             "detail": "\n".join(detail_parts),
             "count":  1,
             "endpoints": [item.get("url", "")] if item.get("url") else [],
@@ -70,7 +70,7 @@ def _load_swarm_findings(swarm_dir: str) -> list:
 def generate_report(
     outdir: str, target: str, profile: str,
     total: int, success: int, failed: int, version: str,
-    swarm_dir: str = ""
+    scan_dir: str = ""
 ) -> str:
     now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     data = collect_and_consolidate(outdir)
@@ -93,11 +93,11 @@ def generate_report(
     subdomains    = data["subdomains"]
 
     # Merge Stiglitz findings when scan directory is provided
-    swarm_findings = []
-    if swarm_dir and os.path.isdir(swarm_dir):
-        swarm_findings = _load_swarm_findings(swarm_dir)
+    scan_findings = []
+    if scan_dir and os.path.isdir(scan_dir):
+        scan_findings = _load_scan_findings(scan_dir)
         # Append after RED findings so they render in their own block
-        findings = findings + swarm_findings
+        findings = findings + scan_findings
 
     st = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Info": 0}
     for f in findings:
@@ -124,7 +124,7 @@ def generate_report(
         total=total, success=success, st=st, tf=tf, rs=rs, rl_=rl_, rc_=rc_,
         pl=pl, sqli_vc=sqli_vc, xss_vc=xss_vc, msf_sess=msf_sess,
         total_endpoints=total_endpoints,
-        findings=findings, swarm_findings=swarm_findings,
+        findings=findings, scan_findings=scan_findings,
         sqli_results=sqli_results, xss_results=xss_results,
         msf_log=msf_log, hydra_results=hydra_results, nikto_findings=nikto_findings,
         cves=cves, services=services, log_content=log_content,
@@ -344,7 +344,7 @@ def _section_narrative(**k) -> str:
 def _render_finding_card(i: int, f: dict, prefix: str = "RED") -> str:
     sv, tl = f["sev"], f["tool"]
     tc = {"sqlmap": "t-sq", "metasploit": "t-ms", "hydra": "t-hy",
-          "nikto": "t-nk", "dalfox": "t-df", "swarm": "t-sw"}.get(tl, "t-sq")
+          "nikto": "t-nk", "dalfox": "t-df", "stiglitz": "t-sw"}.get(tl, "t-sq")
     sc = {"Critical": "sb-cr", "High": "sb-hi", "Medium": "sb-me", "Low": "sb-lo"}.get(sv, "sb-in")
     cnt = f.get("count", 1)
     cnt_html = f' <span class="cnt-badge">{cnt} endpoint{"s" if cnt>1 else ""}</span>' if cnt > 1 else ""
@@ -354,17 +354,17 @@ def _render_finding_card(i: int, f: dict, prefix: str = "RED") -> str:
         "xss":         "T1059.007 — JavaScript Execution",
         "bruteforce":  "T1110 — Brute Force",
         "exploit":     "T1210 — Exploitation of Remote Services",
-        "swarm":       "T1046/T1190 — Recon + Vulnerability Scan",
+        "stiglitz":    "T1046/T1190 — Recon + Vulnerability Scan",
     }
     impact = {
         "sqli":       "Read, modify or delete data. Possible escalation to RCE.",
         "xss":        "Session theft, defacement, phishing, data exfiltration via JS.",
         "bruteforce": "Unauthorized access. Possible lateral movement.",
         "exploit":    "Remote code execution or privileged access.",
-        "swarm":      "Identified by the automated Stiglitz scan — requires analysis and remediation.",
+        "stiglitz":   "Identified by the automated Stiglitz scan — requires analysis and remediation.",
     }
 
-    source_label = esc(f.get("source", tl) if tl == "swarm" else tl)
+    source_label = esc(f.get("source", tl) if tl == "stiglitz" else tl)
     h  = f'<div class="fd {sv}"><h3>{prefix}-{i:03d}: {esc(f["title"])}{cnt_html} <span class="sb {sc}">{sv.upper()}</span> <span class="tb {tc}">{source_label}</span></h3>\n'
     h += f'<table><tr><th style="width:130px">Target</th><td><code>{esc(f["target"][:200])}</code></td></tr>\n'
     h += f'<tr><th>MITRE ATT&CK</th><td>{mitre.get(f.get("type",""), "T1210")}</td></tr>\n'
@@ -386,9 +386,9 @@ def _render_finding_card(i: int, f: dict, prefix: str = "RED") -> str:
 
 def _section_findings(**k) -> str:
     all_findings    = k["findings"]
-    swarm_findings  = k.get("swarm_findings", [])
+    scan_findings   = k.get("scan_findings", [])
     # RED findings are those that are NOT from the merged Stiglitz list
-    red_findings    = [f for f in all_findings if f not in swarm_findings]
+    red_findings    = [f for f in all_findings if f not in scan_findings]
 
     h = '<h2 id="s5">5. Findings &amp; Vulnerabilities</h2>\n'
     if not all_findings:
@@ -406,12 +406,12 @@ def _section_findings(**k) -> str:
         h += '<div class="ib g"><p>No exploits confirmed by the Red Team in this phase.</p></div>\n'
 
     # ── Stiglitz findings ──
-    if swarm_findings:
-        h += f'<h3>Stiglitz Context — Source Scan ({len(swarm_findings)})</h3>\n'
+    if scan_findings:
+        h += f'<h3>Stiglitz Context — Source Scan ({len(scan_findings)})</h3>\n'
         h += '<div class="ib n"><p>Vulnerabilities identified by the Stiglitz scan preceding this engagement. '
         h += 'Included for context and remediation prioritization.</p></div>\n'
-        for i, f in enumerate(swarm_findings, 1):
-            h += _render_finding_card(i, f, prefix="SWM")
+        for i, f in enumerate(scan_findings, 1):
+            h += _render_finding_card(i, f, prefix="STG")
 
     # ── Nikto ──
     if k["nikto_findings"]:
@@ -553,13 +553,13 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(1)
 
-    # Parse optional --swarm-dir <path>
+    # Parse optional --scan-dir <path>
     args = sys.argv[8:]
-    swarm_dir_arg = ""
+    scan_dir_arg = ""
     i = 0
     while i < len(args):
-        if args[i] == "--swarm-dir" and i + 1 < len(args):
-            swarm_dir_arg = args[i + 1]
+        if args[i] == "--scan-dir" and i + 1 < len(args):
+            scan_dir_arg = args[i + 1]
             i += 2
         else:
             i += 1
@@ -568,6 +568,6 @@ if __name__ == "__main__":
         outdir=sys.argv[1], target=sys.argv[2], profile=sys.argv[3],
         total=int(sys.argv[4]), success=int(sys.argv[5]),
         failed=int(sys.argv[6]), version=sys.argv[7],
-        swarm_dir=swarm_dir_arg,
+        scan_dir=scan_dir_arg,
     )
     print(f"REPORT_OK:{path}")

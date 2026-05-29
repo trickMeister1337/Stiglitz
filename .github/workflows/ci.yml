@@ -70,10 +70,10 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: python3 -m pytest test_lib.py test_swarm_modules.py test_pipeline.py test_e2e.py test_email_spoof.py -v --tb=short
+        run: python3 -m pytest tests/test_lib.py tests/test_stiglitz_modules.py tests/test_pipeline.py tests/test_e2e.py tests/test_email_spoof.py -v --tb=short
 
       - name: Run RED shell suite (dry-run, no external tools)
-        run: bash test_swarm_red.sh
+        run: bash tests/test_stiglitz_red.sh
 
   integration:
     name: Integration scan (Juice Shop)
@@ -104,4 +104,4 @@ jobs:
       - name: Run end-to-end integration scan
         env:
           STIGLITZ_TEST_TARGET: http://localhost:3000
-        run: python3 -m pytest test_integration.py -v --tb=short
+        run: python3 -m pytest tests/test_integration.py -v --tb=short

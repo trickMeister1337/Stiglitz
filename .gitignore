@@ -30,16 +30,8 @@
 !/stiglitz_red.sh
 !/stiglitz_report.py
 !/pipeline.py
-!/test_lib.py
-!/test_swarm_modules.py
-!/test_swarm_red.sh
-!/test_integration.py
-!/test_pipeline.py
-!/test_e2e.py
-!/test_email_spoof.py
-!/test_fixtures
+!/tests
 !/email_spoof_poc.py
-!/verify_audit.py
 !/stiglitz_trend.py
 !/stiglitz_red_batch.sh
 

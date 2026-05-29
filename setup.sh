@@ -1048,8 +1048,8 @@ verify_install() {
 
     echo ""
     echo -e "  ${DIM}Próximo passo:${RST}  ${BLD}bash stiglitz_red.sh --help${RST}"
-    echo -e "  ${DIM}Testar:${RST}         ${BLD}bash test_stiglitz_red.sh${RST}"
-    echo -e "  ${DIM}Integração:${RST}     ${BLD}bash test_integration.sh${RST}"
+    echo -e "  ${DIM}Testar:${RST}         ${BLD}bash tests/test_stiglitz_red.sh${RST}"
+    echo -e "  ${DIM}Integração:${RST}     ${BLD}python3 -m pytest tests/test_integration.py${RST}"
     echo ""
 }
 

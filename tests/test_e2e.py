@@ -19,8 +19,8 @@ import sys
 
 import pytest
 
-REPO = os.path.dirname(os.path.abspath(__file__))
-FIXTURE = os.path.join(REPO, "test_fixtures", "sample_scan")
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_fixtures", "sample_scan")
 
 
 @pytest.fixture

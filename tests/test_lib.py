@@ -2,7 +2,7 @@
 """
 Stiglitz RED — Testes unitários dos módulos Python.
 
-Uso: python3 test_lib.py
+Uso: python3 tests/test_lib.py  |  python3 -m pytest tests/test_lib.py
 """
 import sys
 import os
@@ -11,8 +11,11 @@ import tempfile
 import shutil
 import unittest
 
-# Add lib/ to path
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+# Os testes vivem em tests/; expõe a raiz do repo, lib/ e o próprio tests/
+# (módulos irmãos como verify_audit) no sys.path para imports em pytest e unittest.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+sys.path[:0] = [_ROOT, os.path.join(_ROOT, "lib"), _HERE]
 
 from parsers import parse_nuclei, parse_zap, extract_all_urls, _normalize_zap_alerts
 from evidence import extract_sqlmap_evidence, format_evidence, collect_and_consolidate, is_valid_url, strip_ansi
@@ -821,7 +824,7 @@ class TestRedBatch(unittest.TestCase):
     """stiglitz_red_batch.sh — multi-target paralelo."""
 
     def setUp(self):
-        self.root = os.path.dirname(os.path.abspath(__file__))
+        self.root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.script = os.path.join(self.root, "stiglitz_red_batch.sh")
 
     def test_script_exists_and_executable(self):
@@ -1348,7 +1351,7 @@ class TestFindingShape(unittest.TestCase):
     title/detail e o agregador entregava finding vazio no relatório."""
 
     def setUp(self):
-        self.root = os.path.dirname(os.path.abspath(__file__))
+        self.root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     def test_secscan_emits_name_description_not_title_detail(self):
         path = os.path.join(self.root, "lib", "secscan.py")
@@ -1381,7 +1384,7 @@ class TestProductionProfile(unittest.TestCase):
     """Asserts que o perfil production aplica restrições reais nos scripts."""
 
     def setUp(self):
-        self.root = os.path.dirname(os.path.abspath(__file__))
+        self.root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     def test_sqli_production_uses_readonly_techniques(self):
         # lib/sqli.sh em production NUNCA pode emitir stacked queries (S)

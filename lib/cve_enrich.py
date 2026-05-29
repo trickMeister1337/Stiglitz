@@ -15,7 +15,7 @@ cve_db_file = os.path.join(outdir, "raw", "cve_enrichment.json")
 kev_set = set()
 kev_meta = {}  # cve_id -> {date_added, due_date, vendor, product, notes}
 import tempfile, time as _time
-_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "swarm")
+_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "stiglitz")
 os.makedirs(_cache_dir, exist_ok=True)
 _kev_cache = os.path.join(_cache_dir, "kev_cache.json")
 _kev_max_age = 86400  # 24 horas em segundos

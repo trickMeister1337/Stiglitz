@@ -182,7 +182,7 @@ validate() {
     if [ -n "$TARGET" ]; then
         MODE="blackbox"
     elif [ -n "$SCAN_DIR" ]; then
-        MODE="swarm"
+        MODE="scan"
         [ -d "$SCAN_DIR" ] || { fail "Diretório não encontrado: $SCAN_DIR"; exit 1; }
     else
         fail "Informe -t <url> (blackbox) ou -d <scan_dir> (Stiglitz integração)."
@@ -336,7 +336,7 @@ run_recon() {
 
     if [ "$MODE" != "blackbox" ]; then
         info "Modo Stiglitz — recon ignorado (dados existem em $SCAN_DIR)"
-        audit "PHASE_END name=recon result=skipped reason=swarm-mode"
+        audit "PHASE_END name=recon result=skipped reason=scan-mode"
         return 0
     fi
     phase_enabled "recon"   || { warn "Fase 'recon' ignorada (--skip)"; audit "PHASE_END name=recon result=skipped reason=filter"; return 0; }
@@ -371,7 +371,7 @@ run_surface() {
     checkpoint_skip "surface" && { info "Surface: retomado de checkpoint — pulando"; return 0; }
 
     # Modo Stiglitz: reusar nmap existente
-    if [ "$MODE" = "swarm" ] && [ -f "$SCAN_DIR/raw/nmap.txt" ]; then
+    if [ "$MODE" = "scan" ] && [ -f "$SCAN_DIR/raw/nmap.txt" ]; then
         cp "$SCAN_DIR/raw/nmap.txt" "$OUTDIR/data/nmap.txt"
         grep -E '^[0-9]+/tcp.*open' "$OUTDIR/data/nmap.txt" \
             | awk '{print $1, $3, $4, $5, $6}' > "$OUTDIR/data/open_services.txt"
@@ -433,7 +433,7 @@ run_ingest() {
           "$OUTDIR/data/zap_high_crit.txt" \
           "$OUTDIR/data/open_services.txt"
 
-    if [ "$MODE" = "swarm" ]; then
+    if [ "$MODE" = "scan" ]; then
         # Extrair CVEs do nuclei
         if [ -f "$SCAN_DIR/raw/nuclei.json" ]; then
             python3 - "$SCAN_DIR/raw/nuclei.json" > "$OUTDIR/data/cves_found.txt" 2>/dev/null << 'PYEOF'
@@ -492,7 +492,7 @@ _build_scored_targets() {
     [ -f "$OUTDIR/crawl/ffuf_urls.txt" ]    && cat "$OUTDIR/crawl/ffuf_urls.txt"    >> "$tmp_raw"
 
     # 2. URLs do Stiglitz — apenas arquivos estruturados, filtrando domínios de advisory externos
-    if [ "$MODE" = "swarm" ] && [ -d "$SCAN_DIR" ]; then
+    if [ "$MODE" = "scan" ] && [ -d "$SCAN_DIR" ]; then
         local _advisory_domains='github\.com/security|github\.com/advisories|nvd\.nist\.gov|cve\.org|vercel\.com/changelog|cve\.mitre\.org|first\.org|exploit-db\.com|packetstormsecurity'
         # Lê apenas raw/ e findings.json — evita capturar URLs de advisories em logs
         for _sf in "$SCAN_DIR/findings.json" "$SCAN_DIR/raw/nuclei.json" \
@@ -1051,7 +1051,7 @@ run_report() {
     local report_out
     report_out=$(python3 "$LIB/report_generator.py" \
         "$OUTDIR" "$target_domain" "$PROFILE" "$total_urls" "$n_confirmed" "$failed" "$VERSION" \
-        ${SCAN_DIR:+--swarm-dir "$SCAN_DIR"} 2>&1)
+        ${SCAN_DIR:+--scan-dir "$SCAN_DIR"} 2>&1)
 
     if echo "$report_out" | grep -q "REPORT_OK:"; then
         local report_file
@@ -1071,7 +1071,7 @@ run_report() {
     if [ -n "$prev_scan" ] && [ -f "${SCRIPT_DIR}/stiglitz_diff.py" ]; then
         log "Diff com scan anterior: $prev_scan"
         python3 "${SCRIPT_DIR}/stiglitz_diff.py" "$prev_scan" "$OUTDIR" --html 2>/dev/null \
-            && info "Diff gerado: ver stiglitz_diff_*.html" || warn "swarm_diff: falhou (não crítico)"
+            && info "Diff gerado: ver stiglitz_diff_*.html" || warn "scan_diff: falhou (não crítico)"
     fi
 
     log "Fase Report concluída — $(($(date +%s)-_t0))s"

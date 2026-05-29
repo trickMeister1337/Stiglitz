@@ -24,7 +24,7 @@ info:
     max-request: 2
     vendor: grafana
     product: grafana
-  tags: tech,grafana,version,outdated,exposure,swarm
+  tags: tech,grafana,version,outdated,exposure,stiglitz
 
 http:
   - method: GET

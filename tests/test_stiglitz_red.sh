@@ -4,7 +4,7 @@
 # ═══════════════════════════════════════════════════════════════
 set -uo pipefail
 
-SCRIPT="$(cd "$(dirname "$0")" && pwd)/stiglitz_red.sh"
+SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/stiglitz_red.sh"
 PASS=0; FAIL=0; TOTAL=0
 TMPDIR_TEST=$(mktemp -d /tmp/stiglitz_red_test_XXXXXX)
 
@@ -35,7 +35,7 @@ assert_contains() {
 skip() { echo -e "  ${YLW}[SKIP]${RST} $1"; }
 
 # ── Mock Stiglitz scan dir ───────────────────────────────────────────────────────
-setup_mock_swarm() {
+setup_mock_scan() {
     local dir="$TMPDIR_TEST/scan_testsite.com_20260514_120000"
     mkdir -p "$dir/raw"
 
@@ -139,7 +139,7 @@ assert_contains "Blackbox handles port in URL"       "$out" "api.company.com"
 
 # ─── 5. Stiglitz mode ───────────────────────────────────────────────────────────
 echo -e "${YLW}▸ 5. Stiglitz integration mode${RST}"
-MOCK_DIR=$(setup_mock_swarm)
+MOCK_DIR=$(setup_mock_scan)
 out=$(echo "EU AUTORIZO" | bash "$SCRIPT" -d "$MOCK_DIR" --dry-run 2>&1)
 assert_contains "Stiglitz derives target from dir"      "$out" "testsite.com"
 assert_contains "Stiglitz mode shown in banner"         "$out" "Stiglitz"

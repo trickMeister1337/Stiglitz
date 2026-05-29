@@ -13,8 +13,8 @@ ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode 
 LOGIN_PATHS = ["/login", "/api/login", "/api/auth/login", "/auth/login", "/api/user/login",
                "/admin/login", "/api/v1/login", "/signin", "/api/signin"]
 
-JSON_BODY   = b'{"user":"swarmtest","password":"swarmtest_probe_ratelimit"}'
-FORM_BODY   = b"user=swarmtest&password=swarmtest_probe_ratelimit"
+JSON_BODY   = b'{"user":"stiglitztest","password":"stiglitztest_probe_ratelimit"}'
+FORM_BODY   = b"user=stiglitztest&password=stiglitztest_probe_ratelimit"
 N_REQUESTS  = 20
 
 def post(url, body, content_type, attempts=2, backoff=3):

@@ -71,8 +71,6 @@ def load_patterns(patterns_path=None):
             os.path.join(script_dir, "vuln_patterns.json"),
             os.path.join(script_dir, "..", "vuln_patterns.json"),
             os.path.join(os.path.expanduser("~"), "vuln_patterns.json"),
-            os.path.join(os.path.expanduser("~"), "swarm", "vuln_patterns.json"),
-            "/swarm/vuln_patterns.json",
         ]
         for c in candidates:
             if os.path.isfile(c):

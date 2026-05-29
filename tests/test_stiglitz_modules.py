@@ -15,7 +15,7 @@ import tempfile
 import shutil
 import unittest
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIB = os.path.join(ROOT, "lib")
 
 
