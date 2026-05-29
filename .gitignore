@@ -12,6 +12,7 @@
 !/.dockerignore
 !/.github
 !/assets
+!/docs
 !/CHANGELOG.md
 !/Dockerfile
 !/docker-compose.yml
