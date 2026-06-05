@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax:
+    name: Bash syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check main scripts
+        run: |
+          bash -n stiglitz.sh
+          bash -n stiglitz_red.sh
+          bash -n osint.sh
+          bash -n setup.sh
+          bash -n stiglitz_batch.sh
+          bash -n stiglitz_full.sh
+
+      - name: Check lib/ shell modules
+        run: |
+          for f in lib/*.sh; do
+            echo "Checking $f..."
+            bash -n "$f"
+          done
+
+      - name: ShellCheck (warnings gate)
+        run: |
+          shellcheck --severity=warning \
+            stiglitz.sh stiglitz_red.sh stiglitz_full.sh stiglitz_batch.sh \
+            osint.sh setup.sh lib/*.sh
+
+      - name: Check Python modules (compile)
+        run: |
+          python3 -m py_compile stiglitz_report.py
+          for f in lib/*.py; do
+            echo "Compiling $f..."
+            python3 -m py_compile "$f"
+          done
+
+      - name: Smoke test (dry-run, no tools)
+        run: |
+          set -e
+          echo "── Stiglitz RED dry-run ──"
+          bash stiglitz_red.sh -t https://example.com --standalone --dry-run -p staging
+          ls stiglitz_red_example.com_*/stiglitz_red_report.html
+          echo "── Stiglitz FULL dry-run ──"
+          bash stiglitz_full.sh -t https://example.com --dry-run \
+            --skip-osint --skip-scan --skip-red --output-dir /tmp/full_ci
+          test -f /tmp/full_ci/index.html
+          echo "── pipeline.py dry-run (orquestrador) ──"
+          python3 pipeline.py https://example.com --dry-run --outdir /tmp/pipe_ci | grep -q "dry-run"
+
+  unit-tests:
+    name: Python unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python3 -m pytest tests/test_lib.py tests/test_stiglitz_modules.py tests/test_pipeline.py tests/test_e2e.py tests/test_email_spoof.py tests/test_criticality.py tests/test_bizlogic.py -v --tb=short
+
+      - name: Run RED shell suite (dry-run, no external tools)
+        run: bash tests/test_stiglitz_red.sh
+
+  integration:
+    name: Integration scan (Juice Shop)
+    runs-on: ubuntu-latest
+    services:
+      juiceshop:
+        image: bkimminich/juice-shop
+        ports:
+          - 3000:3000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Wait for Juice Shop to be ready
+        run: |
+          for i in $(seq 1 40); do
+            curl -sf -o /dev/null http://localhost:3000 && { echo "ready"; exit 0; }
+            sleep 3
+          done
+          echo "Juice Shop did not become ready"; exit 1
+
+      - name: Run end-to-end integration scan
+        env:
+          STIGLITZ_TEST_TARGET: http://localhost:3000
+        run: python3 -m pytest tests/test_integration.py -v --tb=short

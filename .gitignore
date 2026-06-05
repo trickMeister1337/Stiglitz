@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────────────────
+# This repository lives in $HOME, alongside many unrelated files and other
+# projects (CNPJ-STATUS, PCI-GAP, SWARM-PCI, venvs, caches, downloads, …).
+# Strategy: ignore EVERYTHING by default, then explicitly allow only the
+# Stiglitz project files. This prevents `git add -A` from ever staging junk.
+# (Note: already-tracked files stay tracked regardless of these rules.)
+# ─────────────────────────────────────────────────────────────────────────
+/*
+
+# ── Allowed: Stiglitz project files ──────────────────────────────────────
+!/.gitignore
+!/.dockerignore
+!/.github
+!/assets
+!/docs
+!/CHANGELOG.md
+!/Dockerfile
+!/docker-compose.yml
+!/LICENSE
+!/README.md
+!/bizlogic.example.yaml
+!/requirements-dev.txt
+!/lib
+!/profiles
+!/nuclei-custom-templates
+!/osint.sh
+!/setup.sh
+!/stiglitz.sh
+!/stiglitz_batch.sh
+!/stiglitz_diff.py
+!/stiglitz_full.sh
+!/stiglitz_red.sh
+!/stiglitz_report.py
+!/pipeline.py
+!/tests
+!/email_spoof_poc.py
+!/stiglitz_trend.py
+!/stiglitz_red_batch.sh
+
+# ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
+__pycache__/
+*.pyc
+*:Zone.Identifier
+
+# nuclei-custom-templates: keep only the project's own template
+nuclei-custom-templates/*
+!nuclei-custom-templates/grafana-version-outdated.yaml

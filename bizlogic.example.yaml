@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# bizlogic.example.yaml — template de configuração da fase de lógica de negócio/authz
+#
+# Copie para bizlogic.yaml (ou aponte $BIZLOGIC_CONFIG) e preencha com as contas
+# de teste DESCARTÁVEIS e os endpoints do alvo autorizado (RoE).
+#
+# Uso:
+#   python3 lib/bizlogic.py --config bizlogic.yaml --scope app.example.com \
+#       --profile staging --outdir scan_dir/
+#
+# Profiles: lab/staging → mutação real contra a sentinela; production → dry-run
+# (verdito sem alterar estado). Mutação exige confirmar "EU AUTORIZO" (gate RoE).
+# ─────────────────────────────────────────────────────────────────────────────
+
+base_url: https://app.example.com
+
+# Contas de teste descartáveis. auth.type ∈ {bearer, cookie, header}.
+accounts:
+  A:     { auth: { type: bearer, token: "eyJ..." }, id: "user-123", tenant: "org-1" }
+  B:     { auth: { type: bearer, token: "eyJ..." }, id: "user-456", tenant: "org-2" }
+  admin: { auth: { type: cookie, cookie: "session=..." } }      # opcional
+  # header → { type: header, headers: { X-Auth: "..." } }
+
+# Operação sentinela: valor mínimo e destinatário de teste para os testes mutantes.
+sentinel: { amount: "0.01", recipient: "test-recipient-id" }
+
+endpoints:
+  # IDOR read — B tenta ler o recurso da conta A (object_of: A).
+  - name: get_account
+    method: GET
+    path: /api/accounts/{id}
+    owner_param: id            # param que identifica o dono do recurso
+    object_of: A               # o recurso pertence à conta A
+    tests: [idor_read]
+
+  # IDOR write — B tenta mutar o recurso de A (só em lab/staging; canary reversível).
+  - name: update_account
+    method: PUT
+    path: /api/accounts/{id}
+    owner_param: id
+    object_of: A
+    body: { nickname: "stiglitz-canary" }
+    tests: [idor_write]
+
+  # Amount tampering + race + idempotency contra a sentinela.
+  - name: transfer
+    method: POST
+    path: /api/transfer
+    body: { amount: "{amount}", to: "{recipient}", from_account: "{owner}" }
+    money_params: [amount]
+    idempotency_header: Idempotency-Key
+    tests: [amount_tampering, race, idempotency]
+
+  # Privilege escalation — A (não-admin) tenta acessar endpoint privilegiado.
+  - name: admin_users
+    method: GET
+    path: /admin/users
+    tests: [privesc]

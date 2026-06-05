@@ -1,0 +1,26 @@
+# Build context is $HOME — ignore everything, then allow only project files
+# (keeps the context tiny instead of sending gigabytes of unrelated home dirs).
+*
+
+!.github
+!CHANGELOG.md
+!LICENSE
+!README.md
+!requirements-dev.txt
+!lib
+!profiles
+!nuclei-custom-templates
+!osint.sh
+!setup.sh
+!stiglitz.sh
+!stiglitz_batch.sh
+!stiglitz_diff.py
+!stiglitz_full.sh
+!stiglitz_red.sh
+!stiglitz_report.py
+!pipeline.py
+!tests
+
+# never copy these even if under an allowed dir
+**/__pycache__
+**/*.pyc

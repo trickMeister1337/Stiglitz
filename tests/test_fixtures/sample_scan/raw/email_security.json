@@ -1,0 +1,1 @@
+{"spf": {"severity": "high", "record": "none", "detail": "synthetic no SPF"}, "dmarc": {"severity": "low", "record": "p=none"}}

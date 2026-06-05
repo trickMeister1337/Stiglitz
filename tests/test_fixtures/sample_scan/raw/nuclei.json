@@ -1,0 +1,3 @@
+{"template-id":"sample-critical","info":{"name":"Sample Critical Finding","severity":"critical","description":"Synthetic critical finding for the e2e test fixture.","classification":{"cve-id":["CVE-2024-00001"]}},"matched-at":"https://localhost/admin","matcher-name":"status"}
+{"template-id":"sample-high","info":{"name":"Sample High Finding","severity":"high","description":"Synthetic high finding for the e2e test fixture."},"matched-at":"https://localhost/api/v1"}
+{"template-id":"sample-medium","info":{"name":"Sample Medium Finding","severity":"medium","description":"Synthetic medium finding for the e2e test fixture."},"matched-at":"https://localhost/config.json"}

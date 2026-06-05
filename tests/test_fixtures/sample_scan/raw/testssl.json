@@ -1,0 +1,5 @@
+[
+  {"id": "cert_expiration", "severity": "HIGH", "finding": "Synthetic: certificate expired"},
+  {"id": "BEAST_CBC_TLS1", "severity": "WARN", "finding": "Synthetic: BEAST attack possible"},
+  {"id": "TLS1_0", "severity": "INFO", "finding": "Synthetic: TLS 1.0 offered"}
+]

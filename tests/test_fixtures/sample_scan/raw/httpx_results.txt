@@ -1,0 +1,2 @@
+https://localhost [200] [Sample App] [nginx]
+https://api.localhost [200] [API] [nginx]
