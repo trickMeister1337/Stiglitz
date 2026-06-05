@@ -8,6 +8,9 @@ via sys.argv, idêntico à invocação original do stiglitz.sh.
 import urllib.request, urllib.parse, re, os, sys, json, ssl, hashlib, time
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pii_detect import extract_pii, build_pii_findings
+
 OUTDIR, TARGET, DOMAIN = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(os.path.join(OUTDIR,"raw","js_files"), exist_ok=True)
 
@@ -132,6 +135,14 @@ def _looks_like_password(v):
 
 all_secrets, all_endpoints, all_frameworks, all_comments, js_stats = [], set(), [], [], []
 
+# PII (e-mail corporativo, CPF/CNPJ, telefone BR) — domínio(s) corporativo(s)
+# derivado(s) do alvo; extra via STIGLITZ_CORP_DOMAINS (CSV) p/ orgs multi-domínio.
+pii_agg = {"emails_corporate": set(), "emails_external": set(),
+           "cpf": set(), "cnpj": set(), "phones": set()}
+pii_source = None
+_corp_domains = [DOMAIN] + [d.strip() for d in
+                 os.environ.get("STIGLITZ_CORP_DOMAINS", "").split(",") if d.strip()]
+
 for js_url in js_list:
     print(f"  [>] {js_url[:80]}")
     content, status = fetch(js_url)
@@ -175,6 +186,12 @@ for js_url in js_list:
         for m in re.finditer(cp, content, re.IGNORECASE):
             all_comments.append({"url":js_url,"comment":m.group(0).strip()[:200]})
 
+    _pii = extract_pii(content, _corp_domains)
+    for _k in pii_agg:
+        pii_agg[_k].update(_pii.get(_k, []))
+    if pii_source is None and (_pii["emails_corporate"] or _pii["cpf"] or _pii["cnpj"]):
+        pii_source = js_url
+
     time.sleep(0.2)
 
 # ── Fase 8c: Verificação de endpoints ────────────────────────────
@@ -196,12 +213,20 @@ for ep in list(all_endpoints)[:30]:
         "is_json":"json" in ct,"body_preview":body[:200] if st==200 else ""})
     time.sleep(0.1)
 
+# ── Fase 8d: PII (e-mail corporativo, CPF/CNPJ, telefone BR) ──────
+pii = {k: sorted(v) for k, v in pii_agg.items()}
+pii_findings = build_pii_findings(pii, TARGET, pii_source or "")
+with open(os.path.join(OUTDIR,"raw","pii_findings.json"),"w",encoding="utf-8") as f:
+    json.dump(pii_findings, f, ensure_ascii=False, indent=2)
+
 results = {"target":TARGET,"domain":DOMAIN,"js_files":js_stats,
     "secrets":all_secrets,"endpoints":sorted(all_endpoints),
     "frameworks":all_frameworks,"sensitive_comments":all_comments[:30],
-    "endpoint_probes":probed}
+    "endpoint_probes":probed,"pii":pii}
 with open(os.path.join(OUTDIR,"raw","js_analysis.json"),"w",encoding="utf-8") as f:
     json.dump(results, f, ensure_ascii=False, indent=2)
 
 print(f"  [✓] {len(all_secrets)} secret(s) | {len(all_endpoints)} endpoint(s) | {len(all_frameworks)} framework(s)")
+print(f"  [✓] PII: {len(pii['emails_corporate'])} e-mail corp | {len(pii['cpf'])} CPF | "
+      f"{len(pii['cnpj'])} CNPJ | {len(pii['phones'])} tel → {len(pii_findings)} finding(s)")
 print(f"  [✓] {len(probed)} endpoint(s) verificado(s)")

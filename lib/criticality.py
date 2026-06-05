@@ -120,7 +120,10 @@ def enrich_findings(findings, overrides=None):
     """
     for f in findings:
         host, path = _host_path(f)
-        ac = asset_classifier.classify_asset(host, path, overrides)
+        # Dica explícita do produtor (ex.: findings de PII sabem que a classe de
+        # dado é 'pii' independentemente da URL — um vazamento de dado pessoal num
+        # asset estático NÃO deve herdar a classe 'public'/CR:L da URL).
+        ac = f.get("data_class") or asset_classifier.classify_asset(host, path, overrides)
         scored = score_finding(
             f,
             asset_class=ac,

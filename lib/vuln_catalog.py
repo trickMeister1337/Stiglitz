@@ -38,6 +38,14 @@ CATALOG = {
                            "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N"},
     "rate_limit_missing": {"cwe": "CWE-307", "title": "Falta de rate limiting",
                            "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:L"},
+    "pii_email_exposure": {"cwe": "CWE-359", "title": "Exposição de e-mail corporativo (PII) em asset client-side",
+                           "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"},
+    "pii_cpf_exposure":   {"cwe": "CWE-359", "title": "Exposição de CPF (dado pessoal sensível) em asset client-side",
+                           "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"},
+    "pii_cnpj_exposure":  {"cwe": "CWE-200", "title": "Exposição de CNPJ em asset client-side",
+                           "vector": "AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N"},
+    "pii_phone_exposure": {"cwe": "CWE-359", "title": "Exposição de telefone (PII) em asset client-side",
+                           "vector": "AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N"},
 }
 
 # Índice secundário por CWE (primeira classe que mapeia para o CWE).

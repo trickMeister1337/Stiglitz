@@ -876,6 +876,7 @@ for _vf_file, _vf_label in [
     ('service_findings.json',    'service_findings'),
     ('pan_findings.json',        'pan_findings'),
     ('payment_findings.json',    'payment_findings'),
+    ('pii_findings.json',        'pii_findings'),
 ]:
     _vff = os.path.join(OUTDIR, 'raw', _vf_file)
     if os.path.exists(_vff):
