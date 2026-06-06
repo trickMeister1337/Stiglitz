@@ -54,6 +54,15 @@ BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 # Diretório do script — usado para localizar lib/ e stiglitz_report.py
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# OAST (#2): por padrão -no-interactsh (sem callbacks externos — evita vazar para
+# servidores públicos). Se INTERACTSH_SERVER estiver setado (interactsh self-hosted,
+# ver lib/oob.py), liga o OAST do Nuclei para CONFIRMAR SSRF/RCE/SSTI/XXE CEGOS.
+if [ -n "${INTERACTSH_SERVER:-}" ]; then
+    NUCLEI_OAST_FLAGS=(-interactsh-server "$INTERACTSH_SERVER")
+else
+    NUCLEI_OAST_FLAGS=(-no-interactsh)
+fi
+
 ZAP_PORT=${ZAP_PORT:-8080}
 ZAP_HOST="127.0.0.1"
 ZAP_STARTED_BY_SCRIPT=0
@@ -897,7 +906,9 @@ if command -v nuclei &>/dev/null; then
     [ -d "$_custom_tpl_dir" ] && NUCLEI_TEMPLATES_FLAGS+=(-t "$_custom_tpl_dir")
 
     # Tags adaptativas: base + extras por stack tecnológica detectada no tech profile
-    _nuclei_base_tags="cve,tech,detect,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect"
+    # (#1/#5) sqli,xss,rce,ssti,xxe,nosqli agora nas base tags (antes só no fallback) —
+    # injeção ativa em todo scan, não só quando o RED roda.
+    _nuclei_base_tags="cve,tech,detect,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect,sqli,xss,rce,ssti,xxe,nosqli"
     _tech_profile_nuc="$OUTDIR/raw/tech_profile.json"
     if [ -f "$_tech_profile_nuc" ]; then
         _extra_tags=$(python3 -c "
@@ -949,7 +960,7 @@ except: pass
                 -tags "$_nuclei_base_tags" \
                 -severity critical,high,medium,low \
                 -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
-                -timeout 10 -no-interactsh \
+                -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" \
                 "${NUCLEI_TEMPLATES_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
                 -jsonl -o "${_batch}.json" \
                 > /dev/null 2>/dev/null &
@@ -976,7 +987,7 @@ except: pass
            -tags "$_nuclei_base_tags" \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
-           -timeout 10 -no-interactsh \
+           -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" \
            "${NUCLEI_TEMPLATES_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
            -jsonl -o "$OUTDIR/raw/nuclei.json" \
            > /dev/null 2>"$OUTDIR/raw/nuclei_error.log"
@@ -1001,7 +1012,7 @@ if os.path.exists(mf):
                -tags cve,exposure,misconfig,default-login,takeover,xss,sqli \
                -severity critical,high,medium \
                -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
-               -timeout 10 -no-interactsh \
+               -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" \
                "${NUCLEI_TEMPLATES_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
                -jsonl -o "$OUTDIR/raw/nuclei.json" \
                > /dev/null 2>>"$OUTDIR/raw/nuclei_error.log"
@@ -1280,6 +1291,27 @@ if command -v zaproxy &>/dev/null; then
             echo -e "  ${YELLOW}[○] Nenhum endpoint OpenAPI/Swagger encontrado${NC}"
         fi
 
+        # ── JWT audit (#6): testa o token fornecido (alg=none/weak-secret/exp) ──
+        if [ -n "${AUTH_TOKEN:-}" ]; then
+            echo -e "  ${BLUE}[…]${NC} JWT audit: analisando token autenticado..."
+            python3 "$SCRIPT_DIR/lib/jwt_audit.py" "$OUTDIR" "$TARGET" "$AUTH_TOKEN" || true
+        fi
+
+        # ── GraphQL audit (#7): introspection nos endpoints /graphql conhecidos ──
+        _gql_q='{"query":"query IntrospectionQuery { __schema { queryType { name } mutationType { name } types { name fields { name } } } }"}'
+        for _gql in "$TARGET/graphql" "$TARGET/api/graphql" "$TARGET/v1/graphql" "$TARGET/query"; do
+            _gql_resp=$(curl -s -m 10 -X POST -H "Content-Type: application/json" \
+                ${AUTH_TOKEN:+-H "Authorization: Bearer $AUTH_TOKEN"} \
+                -d "$_gql_q" "$_gql" 2>/dev/null)
+            if echo "$_gql_resp" | grep -q '"__schema"'; then
+                echo -e "  ${GREEN}[✓]${NC} GraphQL introspection respondeu em ${_gql}"
+                echo "$_gql_resp" > "$OUTDIR/raw/graphql_resp.json"
+                python3 "$SCRIPT_DIR/lib/graphql_audit.py" "$OUTDIR" "$_gql" || true
+                break
+            fi
+        done
+        unset _gql_q _gql _gql_resp
+
         # ── Katana: injetar URLs descobertas em P2 no contexto ZAP ───────
         # (o crawl já foi feito na Fase 2 para alimentar o Nuclei)
         if [ -s "$OUTDIR/raw/katana_urls.txt" ]; then
@@ -1307,6 +1339,29 @@ if command -v zaproxy &>/dev/null; then
         SPIDER_ID=$(zap_api_call "spider/action/scan" "url=${ENCODED_URL}" \
                     | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan','0'))" 2>/dev/null)
         wait_for_zap_progress "spider/view/status" "${SPIDER_ID:-0}" "$ZAP_SPIDER_TIMEOUT" "Spider"
+
+        # ── AJAX Spider (#4): crawl headless para SPAs (React/Vue/Angular) ──
+        # O spider clássico não executa JS pós-carga; o AJAX Spider navega via
+        # browser headless e descobre rotas client-side/XHR invisíveis ao spider.
+        if [ "${STIGLITZ_AJAX_SPIDER:-1}" = "1" ]; then
+            echo -e "  ${BLUE}[…] AJAX Spider (SPA crawl headless)...${NC}"
+            _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=true" 2>/dev/null)
+            if echo "$_ajax_start" | grep -q "OK"; then
+                _ajax_waited=0
+                while [ "$_ajax_waited" -lt "${ZAP_AJAX_TIMEOUT:-180}" ]; do
+                    _ajax_st=$(zap_api_call "ajaxSpider/view/status" "" 2>/dev/null \
+                        | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+                    [ "$_ajax_st" = "stopped" ] && break
+                    sleep 5; _ajax_waited=$((_ajax_waited+5))
+                done
+                _ajax_n=$(zap_api_call "ajaxSpider/view/numberOfResults" "" 2>/dev/null \
+                    | python3 -c "import sys,json; print(json.load(sys.stdin).get('numberOfResults','0'))" 2>/dev/null || echo 0)
+                echo -e "  ${GREEN}[✓] AJAX Spider: ${_ajax_n:-0} rota(s) client-side descoberta(s)${NC}"
+            else
+                echo -e "  ${YELLOW}[○] AJAX Spider indisponível (add-on/browser ausente) — seguindo${NC}"
+            fi
+            unset _ajax_start _ajax_st _ajax_waited _ajax_n
+        fi
 
         # ── Verificar total de URLs no contexto ZAP ───────────────────
         SPIDER_URLS=$(zap_api_call "spider/view/results" "scanId=${SPIDER_ID:-0}" \
@@ -2084,7 +2139,7 @@ except: pass
             -tags "$_info_tags" \
             -severity info \
             -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
-            -timeout 10 -no-interactsh \
+            -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" \
             -jsonl -o "$OUTDIR/raw/nuclei_info.json" \
             > /dev/null 2>>"$OUTDIR/raw/nuclei_error.log" || true
 
