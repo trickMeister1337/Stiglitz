@@ -2181,6 +2181,22 @@ else
     echo -e "  ${YELLOW}    Instale: go install github.com/trufflesecurity/trufflehog/v3@latest${NC}"
 fi
 
+# ── retire.js: bibliotecas JS vulneráveis (SCA client-side, P1) ──
+if command -v retire &>/dev/null; then
+    if [ -d "$OUTDIR/raw/js_files" ] && \
+       [ "$(find "$OUTDIR/raw/js_files" -name "*.js" 2>/dev/null | wc -l)" -gt 0 ]; then
+        echo -e "  ${BLUE}[…]${NC} retire.js: verificando libs JS vulneráveis..."
+        timeout 60 retire --jspath "$OUTDIR/raw/js_files" --outputformat json \
+            --outputpath "$OUTDIR/raw/retire_raw.json" 2>/dev/null || true
+        python3 "$SCRIPT_DIR/lib/retire_parse.py" "$OUTDIR" "$TARGET" || true
+    else
+        echo -e "  ${YELLOW}[○]${NC} retire.js: sem arquivos JS coletados"
+    fi
+else
+    echo -e "  ${YELLOW}[○]${NC} retire.js não instalado — pulando SCA client-side"
+    echo -e "  ${YELLOW}    Instale: npm install -g retire${NC}"
+fi
+
 # ── Rate Limiting Check ──────────────────────────────────────────
 # Sends 20 rapid login attempts and checks for 429 / Retry-After / delays.
 # Tests common login paths: /login, /api/login, /api/auth/login, /auth/login.
