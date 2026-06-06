@@ -140,6 +140,46 @@ wait_for_zap() {
     return 1
 }
 
+# urlencode de UMA string (helper p/ a API do ZAP)
+_url_quote() { python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$1"; }
+
+# ── ZAP Context com autenticação form/JSON + loggedInIndicator (#3) ──────────
+# Opt-in via STIGLITZ_AUTH_LOGIN_URL + STIGLITZ_AUTH_USER (+ _PASS). Cria contexto,
+# coloca o alvo no escopo, configura jsonBasedAuthentication com re-login automático
+# (forced user) e exporta ZAP_CONTEXT_ID/ZAP_USER_ID para o spider/ascan rodarem
+# AUTENTICADOS. Sequência validada ao vivo contra ZAP 2.17 + OWASP Juice Shop.
+ZAP_CONTEXT_ID=""; ZAP_USER_ID=""
+zap_setup_auth_context() {
+    [ -z "${STIGLITZ_AUTH_LOGIN_URL:-}" ] && return 0
+    [ -z "${STIGLITZ_AUTH_USER:-}" ] && return 0
+    echo -e "  ${BLUE}[…] ZAP Context: configurando scan autenticado (JSON login + re-login)...${NC}"
+    local uf="${STIGLITZ_AUTH_USER_FIELD:-email}" pf="${STIGLITZ_AUTH_PASS_FIELD:-password}"
+    local indicator="${STIGLITZ_AUTH_INDICATOR:-\"token\"}"
+    local ctx uid login_data auth_cfg creds
+    ctx=$(zap_api_call "context/action/newContext" "contextName=stiglitz-auth" \
+          | python3 -c "import sys,json;print(json.load(sys.stdin).get('contextId',''))" 2>/dev/null)
+    [ -z "$ctx" ] && { echo -e "  ${YELLOW}[○] ZAP newContext falhou — seguindo sem auth${NC}"; return 0; }
+    zap_api_call "context/action/includeInContext" \
+        "contextName=stiglitz-auth&regex=$(_url_quote "${TARGET}.*")" >/dev/null
+    login_data=$(python3 "$SCRIPT_DIR/lib/zap_auth.py" login-data "$uf" "$pf")
+    auth_cfg=$(python3 "$SCRIPT_DIR/lib/zap_auth.py" json-auth "$STIGLITZ_AUTH_LOGIN_URL" "$login_data")
+    zap_api_call "authentication/action/setAuthenticationMethod" \
+        "contextId=${ctx}&authMethodName=jsonBasedAuthentication&authMethodConfigParams=$(_url_quote "$auth_cfg")" >/dev/null
+    zap_api_call "authentication/action/setLoggedInIndicator" \
+        "contextId=${ctx}&loggedInIndicatorRegex=$(_url_quote "$indicator")" >/dev/null
+    uid=$(zap_api_call "users/action/newUser" "contextId=${ctx}&name=stiglitz" \
+          | python3 -c "import sys,json;print(json.load(sys.stdin).get('userId',''))" 2>/dev/null)
+    [ -z "$uid" ] && { echo -e "  ${YELLOW}[○] ZAP newUser falhou — seguindo sem auth${NC}"; return 0; }
+    creds=$(python3 "$SCRIPT_DIR/lib/zap_auth.py" creds "$STIGLITZ_AUTH_USER" "${STIGLITZ_AUTH_PASS:-}")
+    zap_api_call "users/action/setAuthenticationCredentials" \
+        "contextId=${ctx}&userId=${uid}&authCredentialsConfigParams=$(_url_quote "$creds")" >/dev/null
+    zap_api_call "users/action/setUserEnabled" "contextId=${ctx}&userId=${uid}&enabled=true" >/dev/null
+    zap_api_call "forcedUser/action/setForcedUser" "contextId=${ctx}&userId=${uid}" >/dev/null
+    zap_api_call "forcedUser/action/setForcedUserModeEnabled" "boolean=true" >/dev/null
+    ZAP_CONTEXT_ID="$ctx"; ZAP_USER_ID="$uid"
+    echo -e "  ${GREEN}[✓] ZAP Context autenticado (ctx=${ctx} user=${uid}) — spider/ascan rodarão logados${NC}"
+}
+
 wait_for_zap_progress() {
     local status_endpoint=$1 scan_id=$2 timeout_secs=$3 label=$4
     local elapsed=0 interval=10 progress
@@ -1334,10 +1374,19 @@ if command -v zaproxy &>/dev/null; then
             echo -e "  ${YELLOW}[○] Sem URLs do Katana para injetar — ZAP usará spider próprio${NC}"
         fi
 
+        # ── ZAP Context autenticado (#3): configura scan logado se STIGLITZ_AUTH_* setado
+        zap_setup_auth_context
+
         # ── ZAP Spider: complementa o Katana ou age sozinho ────────────
         echo -e "  ${BLUE}[…] Iniciando ZAP Spider (complementa crawl)...${NC}"
-        SPIDER_ID=$(zap_api_call "spider/action/scan" "url=${ENCODED_URL}" \
-                    | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan','0'))" 2>/dev/null)
+        if [ -n "$ZAP_CONTEXT_ID" ]; then
+            SPIDER_ID=$(zap_api_call "spider/action/scanAsUser" \
+                        "contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&url=${ENCODED_URL}&recurse=true" \
+                        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('scanAsUser', d.get('scan','0')))" 2>/dev/null)
+        else
+            SPIDER_ID=$(zap_api_call "spider/action/scan" "url=${ENCODED_URL}" \
+                        | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan','0'))" 2>/dev/null)
+        fi
         wait_for_zap_progress "spider/view/status" "${SPIDER_ID:-0}" "$ZAP_SPIDER_TIMEOUT" "Spider"
 
         # ── AJAX Spider (#4): crawl headless para SPAs (React/Vue/Angular) ──
@@ -1345,7 +1394,13 @@ if command -v zaproxy &>/dev/null; then
         # browser headless e descobre rotas client-side/XHR invisíveis ao spider.
         if [ "${STIGLITZ_AJAX_SPIDER:-1}" = "1" ]; then
             echo -e "  ${BLUE}[…] AJAX Spider (SPA crawl headless)...${NC}"
-            _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=true" 2>/dev/null)
+            # inScope=true exige escopo definido (senão internal_error — validado);
+            # com contexto autenticado usamos scanAsUser+inScope, senão inScope=false.
+            if [ -n "$ZAP_CONTEXT_ID" ]; then
+                _ajax_start=$(zap_api_call "ajaxSpider/action/scanAsUser" "contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&url=${ENCODED_URL}&inScope=true" 2>/dev/null)
+            else
+                _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=false" 2>/dev/null)
+            fi
             if echo "$_ajax_start" | grep -q "OK"; then
                 _ajax_waited=0
                 while [ "$_ajax_waited" -lt "${ZAP_AJAX_TIMEOUT:-180}" ]; do
@@ -1477,7 +1532,11 @@ except: pass
         # Usar URL do site tree se encontrada, senão ENCODED_URL
         _scan_url="${_zap_site_url:-$ENCODED_URL}"
 
-        SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${_scan_url}&recurse=true" 2>/dev/null)
+        if [ -n "$ZAP_CONTEXT_ID" ]; then
+            SCAN_RESPONSE=$(zap_api_call "ascan/action/scanAsUser" "url=${_scan_url}&contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&recurse=true" 2>/dev/null)
+        else
+            SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${_scan_url}&recurse=true" 2>/dev/null)
+        fi
         SCAN_ID=$(echo "$SCAN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan',''))" 2>/dev/null)
 
         # Se ainda falhar, buscar URL do site tree e tentar novamente

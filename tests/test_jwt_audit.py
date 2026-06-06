@@ -59,3 +59,13 @@ def test_static_findings_flags_alg_none_token():
     tok = J.forge_alg_none(J.encode_hs256(HDR, PAY, "s3cr3t"))
     fnds = J.static_findings(tok, target="http://t")
     assert any(f["type"] == "jwt_alg_none" for f in fnds)
+
+
+def test_forge_with_claims_overrides_payload_and_alg_none():
+    tok = J.encode_hs256(HDR, {"sub": "1", "role": "user"}, "s3cr3t")
+    forged = J.forge_with_claims(tok, {"role": "admin"})
+    header, payload = J.decode_jwt(forged)
+    assert header["alg"] == "none"
+    assert payload["role"] == "admin"   # claim escalada
+    assert payload["sub"] == "1"        # claims originais preservadas
+    assert forged.endswith(".")
