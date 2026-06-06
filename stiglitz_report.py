@@ -985,6 +985,7 @@ except Exception as _e_crit:
 # a severidade original da ferramenta.
 import prioritization as _prio
 import compliance_map as _comp_map
+import fingerprint as _fp
 import datetime as _dt_sla
 import shutil as _shutil
 
@@ -1017,6 +1018,7 @@ _today_sla = _dt_sla.date.today()
 for _f_tag in all_f:
     _f_tag["sla"] = _prio.sla_for_finding(_f_tag, _today_sla)
     _comp_map.tag_finding(_f_tag)
+    _f_tag["fingerprint"] = _fp.fingerprint(_f_tag)  # (P1) identidade estável cross-scan
 
 # ── PCI DSS CDE tagging ───────────────────────────────────────
 import cde_scope as _cde, pci_verdicts as _pv
@@ -2027,11 +2029,14 @@ if _prev_dir:
     try: _prev_findings = json.load(open(_prev_fj, encoding="utf-8")).get("findings", [])
     except Exception: _prev_findings = None
     if _prev_findings is not None:
-        def _fkey(n): return re.sub(r'\s+', ' ', str(n).strip().lower())
+        # (P1) Cruza por fingerprint estável (classe+host+path-template+param);
+        # fallback p/ nome normalizado se o scan anterior não tiver fingerprint.
+        def _fkey(f):
+            return f.get("fingerprint") or re.sub(r'\s+', ' ', str(f.get("name","")).strip().lower())
         _ACT = ("critical", "high", "medium", "low")
-        _cur_map  = {_fkey(f.get("name","")): (f.get("name",""), f.get("severity",""))
+        _cur_map  = {_fkey(f): (f.get("name",""), f.get("severity",""))
                      for f in all_f if f.get("severity") in _ACT and f.get("name")}
-        _prev_map = {_fkey(f.get("name","")): (f.get("name",""), f.get("severity",""))
+        _prev_map = {_fkey(f): (f.get("name",""), f.get("severity",""))
                      for f in _prev_findings if f.get("severity") in _ACT and f.get("name")}
         _novos      = set(_cur_map)  - set(_prev_map)
         _corrigidos = set(_prev_map) - set(_cur_map)
@@ -2300,6 +2305,7 @@ try:
                 "risk_priority": f.get("risk_priority"),
                 "reachability": f.get("reachability"),
                 "exploit_intel": f.get("exploit_intel"),
+                "fingerprint": f.get("fingerprint"),
             }.items() if v is not None or k in ("id","name","severity","source","url",
                                                   "cve_ids","cvss","in_kev","description",
                                                   "remediation","risk_score","epss")}
