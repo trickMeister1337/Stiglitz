@@ -29,6 +29,25 @@ for _tool in subfinder httpx nuclei katana; do
 done
 unset _tool _found _found_dir
 
+# ── httpx: resolver colisão de nome com a CLI do pacote Python httpx ───────────
+# O pip instala um console-script "httpx" (ex.: ~/.local/bin/httpx) que pode
+# sombrear o httpx da ProjectDiscovery quando ~/.local/bin precede ~/go/bin no
+# PATH. O da PD lê hosts via stdin e entende -silent; a CLI Python rejeita as
+# flags e o mapeamento de superfície (Fase 2) falha silenciosamente. Se o httpx
+# do PATH não entender -silent, prioriza o binário da ProjectDiscovery.
+if command -v httpx &>/dev/null && ! printf '' | httpx -silent >/dev/null 2>&1; then
+    _pd_httpx=""
+    while IFS= read -r _cand; do
+        if printf '' | "$_cand" -silent >/dev/null 2>&1; then _pd_httpx="$_cand"; break; fi
+    done < <(type -aP httpx 2>/dev/null)
+    [ -z "$_pd_httpx" ] && [ -x "$HOME/go/bin/httpx" ] && _pd_httpx="$HOME/go/bin/httpx"
+    if [ -n "$_pd_httpx" ]; then
+        _pd_dir="$(dirname "$_pd_httpx")"
+        export PATH="$_pd_dir:$PATH"
+    fi
+    unset _pd_httpx _pd_dir _cand
+fi
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
