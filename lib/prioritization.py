@@ -31,14 +31,16 @@ def _f(v, default=0.0):
 def risk_sort_key(f):
     """Chave de ordenação: cvss_environmental desc, epss desc, KEV, banda.
 
-    cvss_environmental já incorpora o sinal KEV via Temporal (E:H/RC:C em
-    criticality.py), então é o score unificado; KEV entra como desempate.
+    Usa risk_priority (reachability + exploit-availability, risk_context.py) quando
+    presente — senão cvss_environmental, que já incorpora o sinal KEV via Temporal
+    (E:H/RC:C em criticality.py). KEV entra como desempate.
     Retorna tupla para sorted() ascendente (menor = mais prioritário)."""
-    env = _f(f.get("cvss_environmental"))
+    rp = f.get("risk_priority")
+    primary = _f(rp) if rp is not None else _f(f.get("cvss_environmental"))
     epss = _f(f.get("epss") if f.get("epss") is not None else f.get("epss_score"))
     in_kev = bool(f.get("in_kev"))
     band = SEV_BAND.get(f.get("severity", ""), 5)
-    return (-env, -epss, 0 if in_kev else 1, band)
+    return (-primary, -epss, 0 if in_kev else 1, band)
 
 
 def days_until_due(due_date, today):

@@ -986,7 +986,31 @@ except Exception as _e_crit:
 import prioritization as _prio
 import compliance_map as _comp_map
 import datetime as _dt_sla
-# (#8) Ordena por risco unificado (cvss_environmental→epss→KEV→banda), não só banda.
+import shutil as _shutil
+
+# (P1) Reachability + exploit-availability → risk_priority, ANTES do sort (governa a ordem).
+import risk_context as _rc
+import re as _re_exp
+_behind_waf = bool(WAF_DETECTED)
+_has_searchsploit = _shutil.which("searchsploit") is not None
+try:
+    import exploit_lookup as _expl
+except Exception:
+    _expl = None
+
+
+def _exploit_for_finding(f):
+    if not (_has_searchsploit and _expl):
+        return False
+    blob = str(f.get("cve", "")) + " " + " ".join(f.get("cve_ids", []) or [])
+    cves = _re_exp.findall(r'CVE-\d{4}-\d{4,7}', blob, _re_exp.I)
+    return any(_expl.searchsploit_has(c) for c in cves)
+
+
+for _f_rc in _all_f_raw:
+    _rc.annotate(_f_rc, behind_waf=_behind_waf, exploitdb=_exploit_for_finding(_f_rc))
+
+# (#8/P1) Ordena por risco: risk_priority (reachability+exploit) → epss → KEV → banda.
 all_f = sorted(_all_f_raw, key=_prio.risk_sort_key)
 # (#9/#10) Anexa SLA/aging (KEV due_date→prazo CISA) e compliance crosswalk a cada finding.
 _today_sla = _dt_sla.date.today()
@@ -2273,6 +2297,9 @@ try:
                 "requirements": f.get("requirements"),
                 "sla": f.get("sla"),
                 "compliance": f.get("compliance"),
+                "risk_priority": f.get("risk_priority"),
+                "reachability": f.get("reachability"),
+                "exploit_intel": f.get("exploit_intel"),
             }.items() if v is not None or k in ("id","name","severity","source","url",
                                                   "cve_ids","cvss","in_kev","description",
                                                   "remediation","risk_score","epss")}

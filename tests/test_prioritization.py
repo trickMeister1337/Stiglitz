@@ -25,6 +25,13 @@ def test_risk_sort_handles_missing_fields():
     assert sorted([a, b], key=P.risk_sort_key) == [b, a]
 
 
+def test_risk_sort_prefers_risk_priority_over_environmental():
+    # 'a' tem env menor mas risk_priority maior (exploit público/alcançável) → vem antes
+    a = {"cvss_environmental": 6.0, "risk_priority": 9.5}
+    b = {"cvss_environmental": 9.0, "risk_priority": 5.0}
+    assert sorted([b, a], key=P.risk_sort_key) == [a, b]
+
+
 # ── SLA / aging (#9: dirigido pelo due_date da CISA KEV) ──
 def test_days_until_due():
     today = datetime.date(2026, 6, 6)
