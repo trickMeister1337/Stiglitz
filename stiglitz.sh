@@ -1059,6 +1059,46 @@ if os.path.exists(mf):
         NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null); NUCLEI_COUNT=${NUCLEI_COUNT:-0}
         echo -e "  ${GREEN}[✓] $NUCLEI_COUNT vulnerabilidade(s) encontrada(s)${NC}"
     fi
+
+    # ── DAST fuzzing ativo (#1/#5): nuclei -dast sobre parâmetros ──────────────
+    # Injeção ATIVA (SQLi/XSS/SSTI/redirect/prototype-pollution) em parâmetros — o
+    # que o scan por-template não pega em app custom. arjun (se presente) descobre
+    # params ocultos; dast_prep.py monta a lista parametrizada (dedupe por endpoint+
+    # params); os hits anexam ao nuclei.json e fluem pela agregação existente.
+    _dast_tpl_ok=0
+    { [ -d "$HOME/nuclei-templates/dast" ] || [ -d "/root/nuclei-templates/dast" ]; } && _dast_tpl_ok=1
+    if [ "${STIGLITZ_DAST:-1}" = "1" ] && [ "$_dast_tpl_ok" = "1" ]; then
+        _arjun_out=""
+        if command -v arjun &>/dev/null && [ -s "$OUTDIR/raw/katana_inscope.txt" ]; then
+            echo -e "  ${BLUE}[…] arjun: descobrindo parâmetros ocultos...${NC}"
+            arjun -i "$OUTDIR/raw/katana_inscope.txt" -oJ "$OUTDIR/raw/arjun.json" -t 10 \
+                  >/dev/null 2>&1 || true
+            [ -s "$OUTDIR/raw/arjun.json" ] && _arjun_out="$OUTDIR/raw/arjun.json"
+        fi
+        _dast_n=$(python3 "$SCRIPT_DIR/lib/dast_prep.py" "$OUTDIR/raw/katana_urls.txt" \
+                  "$OUTDIR/raw/dast_urls.txt" "$_arjun_out" 2>/dev/null || echo 0)
+        if [ "${_dast_n:-0}" -gt 0 ]; then
+            echo -e "  ${BLUE}[…] nuclei -dast: fuzzing ativo em ${_dast_n} endpoint(s) parametrizado(s)...${NC}"
+            timeout "$NUCLEI_TIMEOUT" nuclei -l "$OUTDIR/raw/dast_urls.txt" -dast -silent \
+                   -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
+                   -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
+                   -jsonl -o "$OUTDIR/raw/nuclei_dast.json" \
+                   > /dev/null 2>>"$OUTDIR/raw/nuclei_error.log" || true
+            if [ -s "$OUTDIR/raw/nuclei_dast.json" ]; then
+                _dast_hits=$(grep -c . "$OUTDIR/raw/nuclei_dast.json" 2>/dev/null); _dast_hits=${_dast_hits:-0}
+                cat "$OUTDIR/raw/nuclei_dast.json" >> "$OUTDIR/raw/nuclei.json"
+                NUCLEI_COUNT=$(( ${NUCLEI_COUNT:-0} + _dast_hits ))
+                echo -e "  ${GREEN}[✓] DAST fuzzing: ${_dast_hits} finding(s) ativo(s) (injeção em parâmetros)${NC}"
+            else
+                echo -e "  ${YELLOW}[○] DAST fuzzing: sem injeção confirmada nos parâmetros${NC}"
+            fi
+            unset _dast_hits
+        else
+            echo -e "  ${YELLOW}[○] DAST fuzzing: sem endpoints parametrizados para fuzzar${NC}"
+        fi
+        unset _arjun_out _dast_n
+    fi
+    unset _dast_tpl_ok
 else
     echo -e "  ${YELLOW}[○] nuclei não disponível — pulando scan de templates${NC}"
 fi
