@@ -980,7 +980,16 @@ except Exception as _e_crit:
 # NOTA: f["severity"] é a banda FINAL (Environmental) já reescrita por
 # criticality.enrich_findings acima. O campo f["severity_tool"] guarda
 # a severidade original da ferramenta.
-all_f = sorted(_all_f_raw, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3,"info":4}.get(x["severity"],5))
+import prioritization as _prio
+import compliance_map as _comp_map
+import datetime as _dt_sla
+# (#8) Ordena por risco unificado (cvss_environmental→epss→KEV→banda), não só banda.
+all_f = sorted(_all_f_raw, key=_prio.risk_sort_key)
+# (#9/#10) Anexa SLA/aging (KEV due_date→prazo CISA) e compliance crosswalk a cada finding.
+_today_sla = _dt_sla.date.today()
+for _f_tag in all_f:
+    _f_tag["sla"] = _prio.sla_for_finding(_f_tag, _today_sla)
+    _comp_map.tag_finding(_f_tag)
 
 # ── PCI DSS CDE tagging ───────────────────────────────────────
 import cde_scope as _cde, pci_verdicts as _pv
@@ -2053,6 +2062,42 @@ if _pci_findings:
         "<table><tr><th>Req</th><th>Sev</th><th>Finding</th><th>Asset</th></tr>"
         + rows + "</table>")
 
+# ── Compliance Mapping section (#10) ─────────────────────────
+_comp_summary = _comp_map.compliance_summary(all_f)
+compliance_section_html = ""
+if any(_comp_summary.get(fw) for fw in _comp_summary):
+    _fw_labels = {"owasp": "OWASP Top 10 2021", "pci": "PCI DSS 4.0.1",
+                  "iso": "ISO 27001:2022", "nist": "NIST 800-53 Rev5", "asvs": "OWASP ASVS 4.0"}
+    _blocks = ""
+    for _fw in ("owasp", "pci", "iso", "nist", "asvs"):
+        _ctrls = _comp_summary.get(_fw, {})
+        if not _ctrls:
+            continue
+        _rows = "".join(f"<tr><td>{html.escape(c)}</td><td>{n}</td></tr>"
+                        for c, n in sorted(_ctrls.items(), key=lambda kv: (-kv[1], kv[0])))
+        _blocks += (f"<h3>{_fw_labels[_fw]}</h3>"
+                    f"<table><tr><th>Control</th><th>Findings</th></tr>{_rows}</table>")
+    compliance_section_html = ("<h2>Compliance Mapping</h2>"
+        "<p>Findings mapped to security/compliance frameworks via CWE crosswalk "
+        "(OWASP, PCI DSS, ISO 27001, NIST 800-53, ASVS).</p>" + _blocks)
+
+# ── Remediation SLA — overdue (CISA KEV BOD 22-01) (#9) ──────
+_overdue = [f for f in all_f if (f.get("sla") or {}).get("overdue")]
+sla_section_html = ""
+if _overdue:
+    _overdue.sort(key=lambda f: f["sla"].get("days_remaining", 0))
+    _rows = "".join(
+        f"<tr><td style='font-size:12px'>{html.escape(f.get('name',''))}</td>"
+        f"<td>{badge(f['severity'])}</td>"
+        f"<td style='color:#7a2e2e;font-weight:bold'>OVERDUE {abs(f['sla'].get('days_remaining',0))}d</td>"
+        f"<td style='font-size:11px'>{html.escape(str(f['sla'].get('due_date','')))}</td></tr>"
+        for f in _overdue)
+    sla_section_html = (
+        "<h2>Remediation SLA — Overdue (CISA KEV / BOD 22-01)</h2>"
+        "<p>Known-exploited vulnerabilities past their CISA-mandated remediation deadline.</p>"
+        "<table><tr><th>Finding</th><th>Sev</th><th>SLA</th><th>CISA Due</th></tr>"
+        + _rows + "</table>")
+
 page = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>Security Report — {html.escape(DOMAIN)}</title><style>
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
@@ -2117,6 +2162,8 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <h3>Open Ports and Services (nmap)</h3><table><tr><th>Port / Service</th></tr>{trows(nmap_lines,"nmap not run or no open ports")}</table>
 {tech_inventory_html}
 <h2>3. Identified Vulnerabilities</h2>{vhtml}
+{sla_section_html}
+{compliance_section_html}
 {pci_section_html}
 
 <!-- Scan Behavior -->
@@ -2221,6 +2268,8 @@ try:
                 "score_source": f.get("score_source"),
                 "asset_class": f.get("asset_class"),
                 "requirements": f.get("requirements"),
+                "sla": f.get("sla"),
+                "compliance": f.get("compliance"),
             }.items() if v is not None or k in ("id","name","severity","source","url",
                                                   "cve_ids","cvss","in_kev","description",
                                                   "remediation","risk_score","epss")}
