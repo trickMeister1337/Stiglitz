@@ -1998,6 +1998,10 @@ fi
 export WPSCAN_VULNS
 unset _cms_to_run _wpscan_args
 
+# Estrutura a saída dos scanners de CMS (wpscan/joomscan/droopescan) em
+# cms_findings.json para o relatório agregar — senão só vira link de artefato.
+python3 "$SCRIPT_DIR/lib/cms_findings.py" "$OUTDIR" "$TARGET" || true
+
 # ── trufflehog: secrets em repos expostos ────────────────────────
 TRUFFLEHOG_FOUND=0
 if command -v trufflehog &>/dev/null; then

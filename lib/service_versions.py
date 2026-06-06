@@ -22,7 +22,7 @@ except ImportError:
     import xml.etree.ElementTree as ET
     from xml.etree.ElementTree import ParseError as _XML_PARSE_ERR
 
-outdir = sys.argv[1]
+outdir = sys.argv[1] if len(sys.argv) > 1 else ""
 target = sys.argv[2].rstrip("/") if len(sys.argv) > 2 else ""
 
 xml_path = os.path.join(outdir, "raw", "nmap.xml")
@@ -44,6 +44,37 @@ def cvss_to_sev(score):
     if s > 0:
         return "low"
     return "info"
+
+
+# Serviços sensíveis (datastores/admin) que NÃO deveriam estar expostos à
+# internet — frequentemente sem autenticação por padrão. nmap só os destacava
+# no console; aqui viram finding estruturado de alta severidade.
+DANGEROUS_PORTS = {
+    6379: "Redis", 27017: "MongoDB", 27018: "MongoDB", 28017: "MongoDB HTTP",
+    9200: "Elasticsearch", 9300: "Elasticsearch", 6443: "Kubernetes API",
+    2379: "etcd", 2380: "etcd", 5984: "CouchDB", 11211: "Memcached",
+    9000: "Portainer/SonarQube", 5601: "Kibana",
+}
+_DANGEROUS_NAMES = {
+    "redis": "Redis", "mongodb": "MongoDB", "mongod": "MongoDB", "mongo": "MongoDB",
+    "elasticsearch": "Elasticsearch", "etcd": "etcd", "couchdb": "CouchDB",
+    "memcached": "Memcached", "kubernetes": "Kubernetes API", "kibana": "Kibana",
+}
+
+
+def dangerous_service(portid, sname=""):
+    """Rótulo do serviço sensível se a porta/serviço for exposição perigosa, senão None."""
+    try:
+        p = int(portid)
+    except (TypeError, ValueError):
+        p = None
+    if p in DANGEROUS_PORTS:
+        return DANGEROUS_PORTS[p]
+    name = (sname or "").lower()
+    for key, label in _DANGEROUS_NAMES.items():
+        if key in name:
+            return label
+    return None
 
 
 def parse_vulners_script(script_el):
@@ -109,6 +140,31 @@ def main():
 
             idx += 1
             loc = f"{host_label}:{portid}/{proto}"
+
+            # Exposição de serviço sensível (datastore/admin) — risco distinto da
+            # versão desatualizada; emitido independentemente de haver CVE.
+            _danger = dangerous_service(portid, sname)
+            if _danger:
+                findings.append({
+                    "id": f"SVC-EXP-{idx:03d}",
+                    "tool": "nmap",
+                    "type": "exposed_service",
+                    "source": "Exposed Service",
+                    "name": f"Sensitive service exposed: {_danger} on {portid}/{proto}",
+                    "url": loc,
+                    "severity": "high",
+                    "description": (
+                        f"{_danger} ({banner}) is reachable on {portid}/{proto}. "
+                        f"Datastores and admin interfaces exposed to untrusted networks "
+                        f"are frequently unauthenticated and can lead to full data "
+                        f"compromise or remote code execution."
+                    ),
+                    "remediation": (
+                        f"Bind {_danger} to localhost or a private subnet, enforce "
+                        f"authentication, and restrict {portid}/{proto} via firewall/VPN."
+                    ),
+                    "cve": "N/A",
+                })
 
             if cves:
                 svc_with_cve += 1
