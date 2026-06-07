@@ -43,3 +43,23 @@ def test_cname_map_picks_first_cname_normalized():
     assert m["ok.target.com"] == "myorg.github.io"
     assert m["strform.target.com"] == "app.herokuapp.com"
     assert "semcname.target.com" not in m
+
+
+def test_parse_nuclei_extracts_confirmed_takeovers():
+    jsonl = "\n".join([
+        '{"template-id":"github-takeover","host":"https://ok.target.com",'
+        '"matched-at":"https://ok.target.com","info":{"name":"GitHub Takeover","severity":"high"}}',
+        '   ',  # linha em branco ignorada
+        'not-json-line',  # ignorada
+        '{"template-id":"heroku-takeover","host":"app.target.com:443",'
+        '"info":{"severity":"medium"}}',
+        '{"info":{"name":"sem host"}}',  # sem host → ignorada
+    ])
+    res = T.parse_nuclei(jsonl)
+    assert len(res) == 2
+    a = next(r for r in res if r["host"] == "ok.target.com")
+    assert a["service"] == "github-takeover"
+    assert a["severity"] == "high"
+    assert a["matched_at"] == "https://ok.target.com"
+    b = next(r for r in res if r["host"] == "app.target.com")  # porta removida
+    assert b["severity"] == "medium"

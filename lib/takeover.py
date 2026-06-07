@@ -55,3 +55,35 @@ def cname_map(cnames):
         if host and cl:
             m[host] = _norm(cl[0])
     return m
+
+
+def _host_only(s):
+    s = (s or "").replace("https://", "").replace("http://", "")
+    s = s.split("/")[0].split(":")[0]
+    return _norm(s)
+
+
+def parse_nuclei(jsonl_text):
+    """Extrai takeovers confirmados de um JSONL do nuclei.
+    Retorna lista de {host, service, severity, matched_at}. Linhas inválidas
+    ou sem host são ignoradas."""
+    results = []
+    for line in (jsonl_text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        host = _host_only(obj.get("host") or obj.get("matched-at"))
+        if not host:
+            continue
+        info = obj.get("info") or {}
+        results.append({
+            "host": host,
+            "service": obj.get("template-id") or info.get("name") or "unknown",
+            "severity": info.get("severity") or "unknown",
+            "matched_at": obj.get("matched-at") or obj.get("host") or "",
+        })
+    return results
