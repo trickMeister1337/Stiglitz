@@ -96,6 +96,9 @@ def build_sarif(findings, target,
                 "epss":     f.get("epss_score"),
                 "in_kev":   f.get("in_kev", False),
             },
+            "partialFingerprints": {
+                "stiglitzFingerprint/v1": f.get("fingerprint", "")
+            },
         })
 
     return {

@@ -1025,6 +1025,19 @@ import cde_scope as _cde, pci_verdicts as _pv
 _cde_targets = _cde.load_targets()
 _pv.tag_all(all_f, _cde_targets)
 
+# (P1) Estado de finding por fingerprint: SLA real, MTTR, retest cross-scan.
+try:
+    import finding_state as _state
+    _scan_id = os.path.basename(os.path.normpath(OUTDIR))
+    _state_summary = _state.apply_state(all_f, TARGET, _scan_id)
+    with open(os.path.join(OUTDIR, "raw", "state_summary.json"), "w",
+              encoding="utf-8") as _sfh:
+        json.dump(_state_summary, _sfh, ensure_ascii=False, indent=2)
+    print(f"[✓] Finding state: {_state_summary['open_total']} open, "
+          f"{_state_summary['resolved_total']} resolved")
+except Exception as _e:
+    print(f"[!] finding state: {_e}")
+
 stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
 for f in all_f:
     if f.get("source") == "Email Security": continue
@@ -2306,6 +2319,7 @@ try:
                 "reachability": f.get("reachability"),
                 "exploit_intel": f.get("exploit_intel"),
                 "fingerprint": f.get("fingerprint"),
+                "state": f.get("state"),
             }.items() if v is not None or k in ("id","name","severity","source","url",
                                                   "cve_ids","cvss","in_kev","description",
                                                   "remediation","risk_score","epss")}
