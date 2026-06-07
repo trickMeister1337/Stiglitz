@@ -194,3 +194,16 @@ def attach_state(findings, store, today):
                                  and prazo is not None and age > prazo),
         }
     return findings
+
+
+def apply_state(findings, target, scan_id, today=None, state_dir=None):
+    """Fluxo completo p/ o report: load → reconcile → attach → save → metrics.
+
+    Retorna o state_summary. Idempotente por (today, scan_id).
+    """
+    today = today or datetime.date.today()
+    store = load_store(target, state_dir=state_dir)
+    store, _trans = reconcile(store, findings, today, scan_id)
+    attach_state(findings, store, today)
+    save_store(target, store, state_dir=state_dir)
+    return derive_metrics(store, today)
