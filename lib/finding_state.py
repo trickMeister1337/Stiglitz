@@ -72,4 +72,13 @@ def reconcile(store, current_findings, today, scan_id):
         transitions.append({"fingerprint": fp, "event": event,
                             "severity": e["severity"]})
 
+    for fp, e in store.items():
+        if fp not in seen and e["status"] == "open":
+            e["status"] = "resolved"
+            e["resolved_at"] = today_iso
+            e["history"].append({"date": today_iso, "event": "resolved",
+                                "scan_id": scan_id})
+            transitions.append({"fingerprint": fp, "event": "resolved",
+                                "severity": e.get("severity", "info")})
+
     return store, transitions
