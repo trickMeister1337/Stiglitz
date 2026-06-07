@@ -99,6 +99,7 @@ warn()   { echo -e "  ${YLW}[!]${RST} $*" | tee -a "$LOGFILE"; }
 fail()   { echo -e "  ${RED}[✗]${RST} $*" | tee -a "$LOGFILE"; }
 step()   { echo -e "  ${BLD}[→]${RST} $*" | tee -a "$LOGFILE"; }
 has()    { command -v "$1" &>/dev/null; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ts()     { date '+%Y-%m-%d %H:%M:%S'; }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -211,7 +212,7 @@ validate_tools() {
     phase "VALIDAÇÃO DE FERRAMENTAS"
 
     local required=(curl dig python3)
-    local optional=(whois subfinder amass dnsx theHarvester waybackurls gau trufflehog jq)
+    local optional=(whois subfinder amass dnsx theHarvester waybackurls gau trufflehog jq nuclei shodan)
     local missing_req=0
 
     for tool in "${required[@]}"; do
@@ -231,11 +232,20 @@ validate_tools() {
         fi
     done
 
+    has nuclei || warn "  ↳ sem nuclei: confirmação de subdomain takeover (Fase 8) será pulada"
+    has dnsx   || warn "  ↳ sem dnsx: coleta de CNAME p/ takeover indisponível (Fase 8)"
+
     echo ""
-    [ -n "$SHODAN_KEY" ]   && info "Shodan API key   → configurada" || warn "Shodan API key   → não configurada (fase ignorada)"
+    if ! has shodan; then
+        warn "Shodan CLI       → binário ausente (fase Shodan ignorada)"
+    elif [ -z "$SHODAN_KEY" ]; then
+        warn "Shodan API key   → não configurada (fase Shodan ignorada)"
+    else
+        info "Shodan           → CLI + key OK"
+    fi
     [ -n "$HIBP_KEY" ]     && info "HIBP API key     → configurada" || warn "HIBP API key     → não configurada (fase ignorada)"
     [ -n "$GITHUB_TOKEN" ] && info "GitHub token     → configurado" || warn "GitHub token     → não configurado (dorking limitado)"
-    [ -n "$HUNTER_KEY" ]   && info "Hunter.io key    → configurada" || true
+    [ -n "$HUNTER_KEY" ]   && info "Hunter.io key    → configurada" || warn "Hunter.io key    → não configurada (fase ignorada)"
 
     [ "$missing_req" -gt 0 ] && { fail "Ferramentas obrigatórias ausentes. Abortando."; exit 1; }
 }
@@ -900,51 +910,47 @@ phase_cloud_surface() {
         esac
     done
 
-    # Subdomain Takeover — CNAMEs para serviços cloud mortos
-    step "Subdomain takeover — verificando CNAMEs"
-    local takeover_services=(
-        "s3.amazonaws.com" "s3-website" "cloudfront.net"
-        "azurewebsites.net" "azure-api.net" "blob.core.windows.net"
-        "github.io" "herokuapp.com" "fastly.net"
-        "shopify.com" "zendesk.com" "pantheonsite.io"
-        "ghost.io" "netlify.app" "netlify.com"
-        "bitbucket.io" "helpscoutdocs.com"
-    )
-
+    # ── Subdomain Takeover — CNAME externo confirmado por nuclei ──
+    step "Subdomain takeover — coleta de CNAME (dnsx) + confirmação (nuclei)"
     echo "subdomain,cname,service,status" > "$OUTDIR/cloud/takeover_candidates.csv"
-    local takeover_count=0
+    local tk_cnames="$OUTDIR/cloud/cnames.json"
+    local tk_targets="$OUTDIR/cloud/takeover_targets.txt"
+    local tk_nuclei="$OUTDIR/cloud/takeover_nuclei.jsonl"
 
-    while IFS= read -r subdomain; do
-        [ -z "$subdomain" ] && continue
-        [ "$ABORT" = true ] && break
-        # dnsx pode retornar "sub.domain.com [1.2.3.4]" — pegar só o hostname
-        subdomain=$(echo "$subdomain" | awk '{print $1}')
-        local cname
-        cname=$(dig CNAME "$subdomain" +short 2>/dev/null | tr -d '.')
-
-        for svc in "${takeover_services[@]}"; do
-            if echo "$cname" | grep -qi "$svc"; then
-                local code
-                code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "https://$subdomain" 2>/dev/null || echo "000")
-                case "$code" in
-                    404|410|422)
-                        warn "Possível takeover: $subdomain → $cname [$svc] (HTTP $code)"
-                        echo "$subdomain,$cname,$svc,POSSIBLE" >> "$OUTDIR/cloud/takeover_candidates.csv"
-                        takeover_count=$((takeover_count + 1))
-                        ;;
-                    *)
-                        echo "$subdomain,$cname,$svc,UNLIKELY-$code" >> "$OUTDIR/cloud/takeover_candidates.csv"
-                        ;;
-                esac
-                break
+    if ! has dnsx; then
+        warn "takeover: dnsx indisponível — confirmação de takeover pulada"
+    elif ! dnsx -l "$OUTDIR/subdomains_live.txt" -cname -json -silent > "$tk_cnames" 2>/dev/null \
+            || [ ! -s "$tk_cnames" ]; then
+        warn "takeover: coleta de CNAME (dnsx) falhou ou sem CNAMEs"
+    else
+        if ! python3 "$SCRIPT_DIR/lib/takeover.py" select-external "$tk_cnames" "$BASE_DOMAIN" \
+                > "$tk_targets" 2>/dev/null; then
+            warn "takeover: filtro de CNAME externo falhou"
+        elif [ ! -s "$tk_targets" ]; then
+            info "takeover: nenhum candidato externo"
+        elif ! has nuclei; then
+            warn "takeover: nuclei indisponível — confirmação pulada (defina/instale nuclei)"
+        else
+            nuclei -l "$tk_targets" -tags takeover -jsonl -silent -o "$tk_nuclei" 2>/dev/null
+            local nuc_rc=$?
+            if [ "$nuc_rc" -eq 0 ]; then
+                python3 "$SCRIPT_DIR/lib/takeover.py" build-csv "$tk_nuclei" "$tk_cnames" \
+                    > "$OUTDIR/cloud/takeover_candidates.csv" 2>/dev/null \
+                    || warn "takeover: parse do resultado nuclei falhou"
+            else
+                warn "takeover: nuclei retornou erro (código $nuc_rc)"
             fi
-        done
-    done < "$OUTDIR/subdomains_live.txt" 2>/dev/null || true
+        fi
+    fi
+
+    local takeover_count
+    takeover_count=$(( $(wc -l < "$OUTDIR/cloud/takeover_candidates.csv") - 1 ))
+    [ "$takeover_count" -lt 0 ] && takeover_count=0
 
     info "Buckets S3/Azure → ${BUCKETS_FOUND}"
     [ "$takeover_count" -gt 0 ] && \
-        warn "Candidatos a subdomain takeover → ${takeover_count}" || \
-        info "Subdomain takeover → nenhum candidato"
+        warn "Subdomain takeover CONFIRMADO → ${takeover_count}" || \
+        info "Subdomain takeover → nenhum confirmado"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

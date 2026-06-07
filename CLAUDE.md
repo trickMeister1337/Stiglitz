@@ -77,6 +77,8 @@ bash osint.sh <target> --no-roe                  # pular confirmação RoE (CI/C
 
 Output: `osint_<domain>_<timestamp>/` — arquivos-chave: `targets_enriched.txt`, `leaked_creds.csv`, `osint_summary.json`, `osint_report.html`. Integra via `stiglitz.sh <target> --osint-dir osint_*/`.
 
+**Subdomain takeover (Fase 8 / cloud surface) — híbrido:** `dnsx` coleta CNAMEs dos subdomínios vivos → `lib/takeover.py` filtra os **externos ao apex** (`BASE_DOMAIN`) → `nuclei -tags takeover` confirma por fingerprint de body → `cloud/takeover_candidates.csv` (schema legado `subdomain,cname,service,status`, status `CONFIRMED`). Degrada com `warn` no terminal quando `dnsx`/`nuclei` faltam, sem abortar a fase. O `validate_tools` (preflight) cobre `nuclei`/`shodan` e avisa toda dependência/chave de API ausente (Hunter/Shodan incluídos).
+
 ### `stiglitz_full.sh` — Orquestrador End-to-End
 Executa `osint.sh → stiglitz.sh → stiglitz_red.sh` em sequência e gera índice HTML consolidado (`index.html`).
 
@@ -133,6 +135,7 @@ Os módulos Python e bash vivem em `lib/` como **arquivos reais** (lidos diretam
 | `cve_enricher.py` | Enriquecimento NVD/EPSS/KEV com cache diário |
 | `js_analysis.py`, `email_security.py`, `security_headers.py`, `secscan.py` | Coletores das fases do scan |
 | `service_versions.py` | Parse do nmap XML (`-sV --script vulners`) → `service_findings.json`: versões de serviços de rede + CVEs por banner (software desatualizado). Usa `defusedxml` |
+| `takeover.py` | Detecção de subdomain takeover (osint.sh Fase 8) — filtro de CNAME externo ao apex + parse do JSONL do `nuclei` → `cloud/takeover_candidates.csv` (schema legado, status `CONFIRMED`). Lógica pura + CLI (`select-external`/`build-csv`); sem rede, sem domínio hardcoded |
 | `cde_scope.py`, `pan_scanner.py`, `payment_page_monitor.py`, `pci_verdicts.py` | Cobertura PCI DSS restrita ao CDE (lê `cde_targets.txt`, gitignored): PAN com Luhn+máscara (3.5.1), integridade de scripts/Magecart (6.4.3/11.6.1), tag `pci_req`. Texto dos findings em EN (deliverable) |
 | `finding_state.py` | Ledger de estado por `fingerprint`: reconcile NEW/PERSISTENT/RESOLVED/REOPENED com `first_seen`/`last_seen`/`resolved_at` + métricas (age, MTTR, SLA breach). Store JSON fora do repo em `STIGLITZ_STATE_DIR` (default `~/.stiglitz/state/`) — **nunca versiona dado de alvo**. Enriquece `findings.json` com `state` e grava `raw/state_summary.json` |
 | `trackers/` (`base.py`, `defectdojo.py`) | Interface genérica de tracker + adapter DefectDojo (push via reimport-scan SARIF, dedup nativa por `partialFingerprints`). Opt-in via env; degrada sem erro (padrão `oob.py`). HTTP injetável (testável sem rede) |
