@@ -355,7 +355,7 @@ if [ "$DRY_RUN" = true ]; then
     echo -e "  Domínio: ${DOMAIN}"
     echo -e "  Output:  ${OUTDIR}"
     echo -e "  Fases:   P1 subdomains → P2 surface → P3 TLS → P4 nuclei → P5 confirm →"
-    echo -e "           P6 CVE/EPSS → P7 WAF → P8 email → P9 ZAP → P10 JS → P10.5 extra → P11 report"
+    echo -e "           P6 CVE/EPSS → P7 WAF → P8 email → P9 ZAP → P10 JS → P10.5 extra → P11 report → P12 tracker"
     [ -n "$ONLY_PHASES" ] && echo -e "  Apenas:  ${ONLY_PHASES}"
     [ -n "$OSINT_DIR" ]   && echo -e "  OSINT:   ${OSINT_DIR}"
     echo -e "${GREEN}[DRY-RUN] Plano impresso — encerrando.${NC}"
@@ -466,7 +466,7 @@ cat << 'ASCIIART'
 ASCIIART
 echo -e "${NC}"
 echo -e "  ${BOLD}Stiglitz — All-in-One Offensive Security Pipeline${NC}"
-echo -e "  ${BLUE}Methodology: KEV + EPSS + CVSS · 11-phase pipeline${NC}"
+echo -e "  ${BLUE}Methodology: KEV + EPSS + CVSS · 12-phase pipeline${NC}"
 echo ""
 echo -e "  ${GREEN}▸${NC} Alvo     ${BOLD}$TARGET${NC}"
 echo -e "  ${GREEN}▸${NC} Domínio  ${BOLD}$DOMAIN${NC}"
@@ -2321,6 +2321,28 @@ else
     echo -e "  ${YELLOW}    Esperado em: $(dirname "$0")/stiglitz_report.py${NC}"
 fi
 fi  # fim P11
+
+# ====================== FASE 12: TRACKER SYNC (DefectDojo) ======================
+
+if _phase_enabled "P12"; then
+phase_start "P12"
+phase_banner "FASE 12: SINCRONIZAÇÃO COM TRACKER (DefectDojo)"
+
+if [[ -n "${DEFECTDOJO_URL:-}" && -n "${DEFECTDOJO_TOKEN:-}" ]]; then
+    echo -e "  ${BLUE}[…] Enviando findings para DefectDojo: ${DEFECTDOJO_URL}${NC}"
+    if ! python3 "$SCRIPT_DIR/stiglitz_track.py" "$OUTDIR"; then
+        echo -e "  ${YELLOW}[!] stiglitz_track.py retornou erro — sync com tracker falhou (não-fatal)${NC}"
+    else
+        echo -e "  ${GREEN}[✓] Sync com tracker concluído${NC}"
+    fi
+else
+    echo -e "  ${YELLOW}[○] nenhum tracker configurado — pulando (defina DEFECTDOJO_URL e DEFECTDOJO_TOKEN).${NC}"
+fi
+
+phase_end "P12"
+phase_done "FASE_12"
+fi  # fim P12
+
 # ====================== RESUMO FINAL ======================
 echo -e "\n${GREEN}════════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  PROCESSO CONCLUÍDO — $(date '+%d/%m/%Y %H:%M:%S')${NC}"
