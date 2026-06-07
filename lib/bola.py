@@ -201,3 +201,85 @@ def build_findings(results):
         finding["fingerprint"] = _fingerprint(finding)
         findings.append(finding)
     return findings
+
+
+def replay(req, token):
+    """Reemite a requisição (só método seguro) trocando o header Authorization.
+    token=None → sem auth. Retorna {status, body}. Usa curl (timeout/retry)."""
+    import subprocess
+    url = req.get("url") or ""
+    method = (req.get("method") or "GET").upper()
+    cmd = ["curl", "-s", "-S", "--max-time", "15", "-X", method,
+           "-o", "-", "-w", "\n__HTTP_STATUS__:%{http_code}", url]
+    if token:
+        cmd += ["-H", f"Authorization: Bearer {token}"]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        raw = p.stdout or ""
+    except Exception:
+        return {"status": 0, "body": ""}
+    status = 0
+    body = raw
+    marker = raw.rfind("__HTTP_STATUS__:")
+    if marker != -1:
+        body = raw[:marker].rstrip("\n")
+        try:
+            status = int(raw[marker + len("__HTTP_STATUS__:"):].strip())
+        except ValueError:
+            status = 0
+    return {"status": status, "body": body}
+
+
+def _scan_direction(corpus_owner, token_cross, direction, replay_fn):
+    """Para cada candidato (object-ref + método seguro) do corpus do dono,
+    reproduz com o token oposto e sem auth, e gera o verdict."""
+    results = []
+    for req in corpus_owner:
+        if not is_safe_method(req.get("method")) or not is_object_ref_request(req):
+            continue
+        baseline = {"status": req.get("status"), "body": req.get("resp_body")}
+        canary = extract_canary(req.get("resp_body"), "")
+        cross = replay_fn(req, token_cross)
+        unauth = replay_fn(req, None)
+        v = verdict(baseline, cross, unauth, canary)
+        results.append({"req": req, "verdict": v, "canary": canary, "direction": direction})
+    return results
+
+
+def run(messages_a, messages_b, token_a, token_b, outdir, replay_fn=replay):
+    """Loop bidirecional: B→objetos de A e A→objetos de B. Grava access_control.json."""
+    corpus_a = parse_zap_messages(messages_a)
+    corpus_b = parse_zap_messages(messages_b)
+    results = []
+    results += _scan_direction(corpus_a, token_b, "B->A", replay_fn)
+    results += _scan_direction(corpus_b, token_a, "A->B", replay_fn)
+    findings = build_findings(results)
+    payload = {"findings": findings,
+               "summary": {"candidates": len(results),
+                           "confirmed": sum(1 for f in findings if f["confirmed"])}}
+    try:
+        os.makedirs(outdir, exist_ok=True)
+        with open(os.path.join(outdir, "access_control.json"), "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+    return payload
+
+
+def main(argv):
+    if len(argv) >= 5 and argv[1] == "run":
+        msgs_a = open(argv[2], encoding="utf-8").read()
+        msgs_b = open(argv[3], encoding="utf-8").read()
+        outdir = argv[4]
+        tok_a = os.environ.get("BOLA_TOKEN_A", "")
+        tok_b = os.environ.get("BOLA_TOKEN_B", "")
+        res = run(msgs_a, msgs_b, tok_a, tok_b, outdir)
+        print(f"access-control: {res['summary']['confirmed']} confirmado(s) "
+              f"de {res['summary']['candidates']} candidato(s)")
+        return 0
+    print("uso: bola.py run <messages_a.json> <messages_b.json> <outdir>", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -152,3 +152,47 @@ def test_build_findings_skips_non_actionable():
          "canary": set(), "direction": "B->A"},
     ]
     assert B.build_findings(results) == []
+
+
+import json as _json
+
+
+def _fake_replay_factory():
+    # Simula: cross com token "B" vê o objeto do dono em /users/123 (BOLA);
+    # unauth sempre negado; /about é público.
+    def replay_fn(req, token):
+        url = req["url"]
+        if "/users/123" in url:
+            if token is None:
+                return {"status": 401, "body": "no"}
+            return {"status": 200, "body": '{"id":123,"email":"alice@target.com"}'}
+        return {"status": 404, "body": ""}
+    return replay_fn
+
+
+def test_run_confirms_bola_bidirectional(tmp_path):
+    msgs_a = _json.dumps({"messages": [
+        {"requestHeader": "GET /users/123 HTTP/1.1\r\nHost: t.com\r\n\r\n", "requestBody": "",
+         "responseHeader": "HTTP/1.1 200 OK\r\n\r\n",
+         "responseBody": '{"id":123,"email":"alice@target.com"}'},
+    ]})
+    msgs_b = _json.dumps({"messages": []})
+    out = str(tmp_path)
+    res = B.run(msgs_a, msgs_b, "tokA", "tokB", out, replay_fn=_fake_replay_factory())
+    assert any(f["type"] == "idor_read_pii" and f["confirmed"] for f in res["findings"])
+    assert os.path.exists(os.path.join(out, "access_control.json"))
+
+
+def test_cli_run_returns_zero(tmp_path, monkeypatch, capsys):
+    msgs_a = tmp_path / "a.json"
+    msgs_a.write_text('{"messages": []}')
+    msgs_b = tmp_path / "b.json"
+    msgs_b.write_text('{"messages": []}')
+    monkeypatch.setenv("BOLA_TOKEN_A", "x")
+    monkeypatch.setenv("BOLA_TOKEN_B", "y")
+    rc = B.main(["bola.py", "run", str(msgs_a), str(msgs_b), str(tmp_path)])
+    assert rc == 0
+
+
+def test_cli_unknown_command_returns_2():
+    assert B.main(["bola.py", "bogus"]) == 2
