@@ -212,7 +212,7 @@ validate_tools() {
     phase "VALIDAÇÃO DE FERRAMENTAS"
 
     local required=(curl dig python3)
-    local optional=(whois subfinder amass dnsx theHarvester waybackurls gau trufflehog jq)
+    local optional=(whois subfinder amass dnsx theHarvester waybackurls gau trufflehog jq nuclei shodan)
     local missing_req=0
 
     for tool in "${required[@]}"; do
@@ -232,11 +232,20 @@ validate_tools() {
         fi
     done
 
+    has nuclei || warn "  ↳ sem nuclei: confirmação de subdomain takeover (Fase 8) será pulada"
+    has dnsx   || warn "  ↳ sem dnsx: coleta de CNAME p/ takeover indisponível (Fase 8)"
+
     echo ""
-    [ -n "$SHODAN_KEY" ]   && info "Shodan API key   → configurada" || warn "Shodan API key   → não configurada (fase ignorada)"
+    if ! has shodan; then
+        warn "Shodan CLI       → binário ausente (fase Shodan ignorada)"
+    elif [ -z "$SHODAN_KEY" ]; then
+        warn "Shodan API key   → não configurada (fase Shodan ignorada)"
+    else
+        info "Shodan           → CLI + key OK"
+    fi
     [ -n "$HIBP_KEY" ]     && info "HIBP API key     → configurada" || warn "HIBP API key     → não configurada (fase ignorada)"
     [ -n "$GITHUB_TOKEN" ] && info "GitHub token     → configurado" || warn "GitHub token     → não configurado (dorking limitado)"
-    [ -n "$HUNTER_KEY" ]   && info "Hunter.io key    → configurada" || true
+    [ -n "$HUNTER_KEY" ]   && info "Hunter.io key    → configurada" || warn "Hunter.io key    → não configurada (fase ignorada)"
 
     [ "$missing_req" -gt 0 ] && { fail "Ferramentas obrigatórias ausentes. Abortando."; exit 1; }
 }
