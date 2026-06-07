@@ -13,3 +13,33 @@ def test_is_external_cname_distinguishes_third_party_from_apex():
     assert T.is_external_cname("TARGET.COM.", b) is False      # apex (case/dot)
     assert T.is_external_cname("", b) is False
     assert T.is_external_cname("anything.io", "") is False      # sem apex
+
+
+def _recs():
+    # forma do dnsx -cname -json: host + cname (lista)
+    return [
+        {"host": "ok.target.com", "cname": ["myorg.github.io"]},
+        {"host": "cdn.target.com", "cname": ["edge.target.com"]},   # interno
+        {"host": "novo.target.com", "cname": ["d1.cloudfront.net", "x.target.com"]},
+        {"host": "semcname.target.com"},                            # sem cname
+        {"host": "strform.target.com", "cname": "app.herokuapp.com"},  # cname string
+    ]
+
+
+def test_select_external_keeps_only_third_party_first_match():
+    out = T.select_external(_recs(), "target.com")
+    hosts = [h for h, _c in out]
+    assert "ok.target.com" in hosts
+    assert "novo.target.com" in hosts
+    assert "strform.target.com" in hosts
+    assert "cdn.target.com" not in hosts
+    assert "semcname.target.com" not in hosts
+    d = dict(out)
+    assert d["novo.target.com"] == "d1.cloudfront.net"   # primeiro externo
+
+
+def test_cname_map_picks_first_cname_normalized():
+    m = T.cname_map(_recs())
+    assert m["ok.target.com"] == "myorg.github.io"
+    assert m["strform.target.com"] == "app.herokuapp.com"
+    assert "semcname.target.com" not in m

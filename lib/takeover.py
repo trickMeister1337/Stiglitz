@@ -22,3 +22,36 @@ def is_external_cname(cname, base_domain):
     if not c or not b:
         return False
     return c != b and not c.endswith("." + b)
+
+
+def _cnames_of(rec):
+    cl = rec.get("cname") or []
+    if isinstance(cl, str):
+        cl = [cl]
+    return [c for c in cl if c]
+
+
+def select_external(cnames, base_domain):
+    """cnames: lista de dicts {host, cname:[...]}. Retorna [(host, cname_externo)],
+    o primeiro CNAME externo de cada host."""
+    out = []
+    for rec in cnames:
+        host = _norm(rec.get("host"))
+        if not host:
+            continue
+        for c in _cnames_of(rec):
+            if is_external_cname(c, base_domain):
+                out.append((host, _norm(c)))
+                break
+    return out
+
+
+def cname_map(cnames):
+    """Mapa host -> primeiro CNAME (normalizado). Hosts sem CNAME são omitidos."""
+    m = {}
+    for rec in cnames:
+        host = _norm(rec.get("host"))
+        cl = _cnames_of(rec)
+        if host and cl:
+            m[host] = _norm(cl[0])
+    return m
