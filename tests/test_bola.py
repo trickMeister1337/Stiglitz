@@ -220,3 +220,19 @@ def test_replay_parses_status_marker_with_embedded_marker(monkeypatch):
     r = B.replay({"url": "https://t.com/users/1", "method": "GET"}, "tok")
     assert r["status"] == 200
     assert r["body"].startswith("data __HTTP_STATUS__:fake more")
+
+
+def test_run_writes_access_findings_array_in_raw(tmp_path):
+    msgs_a = _json.dumps({"messages": [
+        {"requestHeader": "GET /users/123 HTTP/1.1\r\nHost: t.com\r\n\r\n", "requestBody": "",
+         "responseHeader": "HTTP/1.1 200 OK\r\n\r\n",
+         "responseBody": '{"id":123,"email":"alice@target.com"}'},
+    ]})
+    msgs_b = _json.dumps({"messages": []})
+    out = str(tmp_path)
+    B.run(msgs_a, msgs_b, "tokA", "tokB", out, replay_fn=_fake_replay_factory())
+    p = os.path.join(out, "raw", "access_findings.json")
+    assert os.path.exists(p)
+    arr = _json.load(open(p))
+    assert isinstance(arr, list)
+    assert any(f["type"] == "idor_read_pii" for f in arr)

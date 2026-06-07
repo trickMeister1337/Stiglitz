@@ -270,6 +270,14 @@ def run(messages_a, messages_b, token_a, token_b, outdir, replay_fn=replay):
     except Exception as exc:
         print(f"aviso: não foi possível gravar access_control.json: {exc}",
               file=sys.stderr)
+    try:
+        raw_dir = os.path.join(outdir, "raw")
+        os.makedirs(raw_dir, exist_ok=True)
+        with open(os.path.join(raw_dir, "access_findings.json"), "w", encoding="utf-8") as fh:
+            json.dump(findings, fh, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        print(f"aviso: não foi possível gravar access_findings.json: {exc}",
+              file=sys.stderr)
     return payload
 
 

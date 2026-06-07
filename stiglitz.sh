@@ -1729,7 +1729,7 @@ if [ ! -s "$_zap_msgs_a" ]; then
 else
     if BOLA_TOKEN_A="$TOKEN_A" BOLA_TOKEN_B="$TOKEN_B" \
             python3 "$SCRIPT_DIR/lib/bola.py" run "$_zap_msgs_a" "$_zap_msgs_b" "$OUTDIR"; then
-        echo -e "  ${GREEN}[✓] Access Control concluído → raw/access_control.json${NC}"
+        echo -e "  ${GREEN}[✓] Access Control concluído → access_control.json + raw/access_findings.json${NC}"
     else
         echo -e "  ${YELLOW}[!] access-control: motor BOLA retornou erro${NC}"
     fi
