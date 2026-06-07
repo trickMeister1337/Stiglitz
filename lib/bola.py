@@ -209,8 +209,14 @@ def replay(req, token):
     import subprocess
     url = req.get("url") or ""
     method = (req.get("method") or "GET").upper()
+    # Fix 1: validar esquema e netloc antes de chamar curl (evita argv injection)
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return {"status": 0, "body": ""}
+    if method not in SAFE_METHODS:
+        return {"status": 0, "body": ""}
     cmd = ["curl", "-s", "-S", "--max-time", "15", "-X", method,
-           "-o", "-", "-w", "\n__HTTP_STATUS__:%{http_code}", url]
+           "-o", "-", "-w", "\n__HTTP_STATUS__:%{http_code}", "--", url]
     if token:
         cmd += ["-H", f"Authorization: Bearer {token}"]
     try:
@@ -261,18 +267,25 @@ def run(messages_a, messages_b, token_a, token_b, outdir, replay_fn=replay):
         os.makedirs(outdir, exist_ok=True)
         with open(os.path.join(outdir, "access_control.json"), "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"aviso: não foi possível gravar access_control.json: {exc}",
+              file=sys.stderr)
     return payload
 
 
 def main(argv):
     if len(argv) >= 5 and argv[1] == "run":
-        msgs_a = open(argv[2], encoding="utf-8").read()
-        msgs_b = open(argv[3], encoding="utf-8").read()
+        with open(argv[2], encoding="utf-8") as _fh:
+            msgs_a = _fh.read()
+        with open(argv[3], encoding="utf-8") as _fh:
+            msgs_b = _fh.read()
         outdir = argv[4]
         tok_a = os.environ.get("BOLA_TOKEN_A", "")
         tok_b = os.environ.get("BOLA_TOKEN_B", "")
+        if tok_a and tok_b and tok_a == tok_b:
+            print("erro: BOLA_TOKEN_A == BOLA_TOKEN_B — replays usariam a mesma "
+                  "identidade; abortando.", file=sys.stderr)
+            return 2
         res = run(msgs_a, msgs_b, tok_a, tok_b, outdir)
         print(f"access-control: {res['summary']['confirmed']} confirmado(s) "
               f"de {res['summary']['candidates']} candidato(s)")

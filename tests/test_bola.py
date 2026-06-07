@@ -196,3 +196,27 @@ def test_cli_run_returns_zero(tmp_path, monkeypatch, capsys):
 
 def test_cli_unknown_command_returns_2():
     assert B.main(["bola.py", "bogus"]) == 2
+
+
+def test_replay_rejects_non_http_url():
+    # URL que começaria com '-' (argv smuggling) ou esquema não-http → rejeitado sem curl
+    assert B.replay({"url": "-O/etc/passwd", "method": "GET"}, "tok")["status"] == 0
+    assert B.replay({"url": "file:///etc/passwd", "method": "GET"}, None)["status"] == 0
+    assert B.replay({"url": "", "method": "GET"}, "tok")["status"] == 0
+
+
+def test_replay_rejects_unsafe_method():
+    assert B.replay({"url": "https://t.com/users/1", "method": "DELETE"}, "tok")["status"] == 0
+
+
+def test_replay_parses_status_marker_with_embedded_marker(monkeypatch):
+    import subprocess
+
+    class _P:
+        # corpo contém o marcador fake; o real é o ÚLTIMO (rfind) anexado pelo curl
+        stdout = "data __HTTP_STATUS__:fake more\n__HTTP_STATUS__:200"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _P())
+    r = B.replay({"url": "https://t.com/users/1", "method": "GET"}, "tok")
+    assert r["status"] == 200
+    assert r["body"].startswith("data __HTTP_STATUS__:fake more")
