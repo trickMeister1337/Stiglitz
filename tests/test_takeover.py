@@ -83,3 +83,32 @@ def test_build_candidates_csv_empty_is_header_only():
     text = T.build_candidates_csv([], {})
     rows = list(_csv.reader(_io.StringIO(text)))
     assert rows == [["subdomain", "cname", "service", "status"]]
+
+
+def test_cli_select_external_prints_hosts(tmp_path, capsys):
+    cn = tmp_path / "cnames.json"
+    cn.write_text(
+        '{"host":"ok.target.com","cname":["myorg.github.io"]}\n'
+        '{"host":"cdn.target.com","cname":["edge.target.com"]}\n'
+    )
+    rc = T.main(["takeover.py", "select-external", str(cn), "target.com"])
+    out = capsys.readouterr().out.split()
+    assert rc == 0
+    assert "ok.target.com" in out
+    assert "cdn.target.com" not in out
+
+
+def test_cli_build_csv_joins_nuclei_and_cnames(tmp_path, capsys):
+    cn = tmp_path / "cnames.json"
+    cn.write_text('{"host":"ok.target.com","cname":["myorg.github.io"]}\n')
+    nu = tmp_path / "nuclei.jsonl"
+    nu.write_text('{"template-id":"github-takeover","host":"ok.target.com",'
+                  '"info":{"severity":"high"}}\n')
+    rc = T.main(["takeover.py", "build-csv", str(nu), str(cn)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "ok.target.com,myorg.github.io,github-takeover,CONFIRMED" in out
+
+
+def test_cli_unknown_command_returns_2(capsys):
+    assert T.main(["takeover.py", "bogus"]) == 2

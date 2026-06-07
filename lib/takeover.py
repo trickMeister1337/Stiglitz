@@ -100,3 +100,42 @@ def build_candidates_csv(confirmed, cname_map):
         w.writerow([host, cname_map.get(host, ""),
                     c.get("service", "unknown"), "CONFIRMED"])
     return buf.getvalue()
+
+
+def _load_jsonl(path):
+    recs = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                recs.append(json.loads(line))
+            except Exception:
+                continue
+    return recs
+
+
+def main(argv):
+    if len(argv) < 2:
+        print("uso: takeover.py <select-external CNAMES BASE | build-csv NUCLEI CNAMES>",
+              file=sys.stderr)
+        return 2
+    cmd = argv[1]
+    if cmd == "select-external":
+        cnames = _load_jsonl(argv[2])
+        for host, _c in select_external(cnames, argv[3]):
+            print(host)
+        return 0
+    if cmd == "build-csv":
+        with open(argv[2], encoding="utf-8") as fh:
+            confirmed = parse_nuclei(fh.read())
+        cmap = cname_map(_load_jsonl(argv[3]))
+        sys.stdout.write(build_candidates_csv(confirmed, cmap))
+        return 0
+    print(f"comando desconhecido: {cmd}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
