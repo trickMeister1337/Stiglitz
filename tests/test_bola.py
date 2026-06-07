@@ -78,3 +78,39 @@ def test_canary_is_pii_flags_email_cpf():
     assert B.canary_is_pii({"alice@target.com"}) is True
     assert B.canary_is_pii({"123.456.789-09"}) is True
     assert B.canary_is_pii({"123"}) is False
+
+
+OWNER = {"status": 200, "body": '{"id":123,"email":"alice@target.com"}'}
+
+
+def test_verdict_protected_when_cross_denied():
+    cross = {"status": 403, "body": "forbidden"}
+    unauth = {"status": 401, "body": "no"}
+    v = B.verdict(OWNER, cross, unauth, {"alice@target.com", "123"})
+    assert v["state"] == "PROTECTED"
+
+
+def test_verdict_public_when_unauth_sees_same_body():
+    cross = {"status": 200, "body": OWNER["body"]}
+    unauth = {"status": 200, "body": OWNER["body"]}   # qualquer um acessa
+    v = B.verdict(OWNER, cross, unauth, {"alice@target.com", "123"})
+    assert v["state"] == "PUBLIC"
+
+
+def test_verdict_confirmed_when_cross_sees_owner_object():
+    cross = {"status": 200, "body": OWNER["body"]}     # idêntico ao dono
+    unauth = {"status": 401, "body": "no"}             # anônimo negado
+    v = B.verdict(OWNER, cross, unauth, {"alice@target.com", "123"})
+    assert v["state"] == "CONFIRMED"
+    assert v["canary_hit"] is True
+    assert v["confidence"] >= 85
+
+
+def test_verdict_inconclusive_when_canary_absent():
+    # cross vê 200 com MESMO template mas dados próprios (sem canário do dono)
+    cross = {"status": 200, "body": '{"id":999,"email":"bob@target.com"}'}
+    unauth = {"status": 401, "body": "no"}
+    v = B.verdict(OWNER, cross, unauth, {"alice@target.com", "123"})
+    assert v["state"] == "INCONCLUSIVE"
+    assert v["canary_hit"] is False
+    assert v["confidence"] < 60

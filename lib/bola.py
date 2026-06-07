@@ -98,3 +98,58 @@ def extract_canary(resp_body, content_type=""):
 def canary_is_pii(canary):
     """True se algum item do canário é PII (email/CPF) — vira idor_read_pii."""
     return any(_EMAIL.fullmatch(c) or _CPF.fullmatch(c) for c in canary)
+
+
+try:
+    from poc_validator import normalize as _normalize, response_diff as _response_diff
+except Exception:  # fallback se importado fora do pacote lib/
+    def _normalize(t):
+        return re.sub(r"\s+", " ", (t or "")).strip()
+
+    def _response_diff(a, b):
+        return (a != b, 0, "")
+
+
+def _is_2xx(status):
+    """True se status é 2xx (200-299)."""
+    return 200 <= int(status or 0) < 300
+
+
+def _bodies_match(a, b):
+    """True se os dois corpos são ≈ iguais (response_diff.changed == False)."""
+    changed, _score, _note = _response_diff(_normalize(a), _normalize(b))
+    return not changed
+
+
+def _canary_hit(canary, body):
+    """True se algum item do canário aparece no corpo."""
+    body = body or ""
+    return any(c and c in body for c in canary)
+
+
+def verdict(baseline, cross, unauth, canary):
+    """Máquina de estados de confirmação. baseline/cross/unauth: {status, body}.
+
+    Retorna {state, canary_hit, confidence}:
+      PROTECTED    — cross negado (401/403): autorização funciona.
+      PUBLIC       — unauth 2xx com corpo ≈ baseline: recurso público (não é achado).
+      CONFIRMED    — cross 2xx + corpo ≈ baseline + canário bate + unauth negado.
+      INCONCLUSIVE — cross 2xx mas corpo difere ou canário não bate (baixa confiança).
+    """
+    c_status = int(cross.get("status") or 0)
+    if c_status in (401, 403):
+        return {"state": "PROTECTED", "canary_hit": False, "confidence": 0}
+
+    unauth_open = _is_2xx(unauth.get("status")) and _bodies_match(
+        baseline.get("body"), unauth.get("body"))
+    if unauth_open:
+        return {"state": "PUBLIC", "canary_hit": False, "confidence": 0}
+
+    if not _is_2xx(c_status):
+        return {"state": "INCONCLUSIVE", "canary_hit": False, "confidence": 20}
+
+    hit = _canary_hit(canary, cross.get("body"))
+    same = _bodies_match(baseline.get("body"), cross.get("body"))
+    if hit and same:
+        return {"state": "CONFIRMED", "canary_hit": True, "confidence": 90}
+    return {"state": "INCONCLUSIVE", "canary_hit": hit, "confidence": 50 if same else 30}
