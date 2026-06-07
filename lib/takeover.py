@@ -87,3 +87,16 @@ def parse_nuclei(jsonl_text):
             "matched_at": obj.get("matched-at") or obj.get("host") or "",
         })
     return results
+
+
+def build_candidates_csv(confirmed, cname_map):
+    """Monta o CSV (schema legado: subdomain,cname,service,status=CONFIRMED).
+    Junta o CNAME pelo mapa host->cname."""
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["subdomain", "cname", "service", "status"])
+    for c in confirmed:
+        host = c.get("host", "")
+        w.writerow([host, cname_map.get(host, ""),
+                    c.get("service", "unknown"), "CONFIRMED"])
+    return buf.getvalue()

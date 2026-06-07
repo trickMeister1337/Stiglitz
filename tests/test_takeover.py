@@ -2,6 +2,7 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import takeover as T
+import csv as _csv, io as _io
 
 
 def test_is_external_cname_distinguishes_third_party_from_apex():
@@ -63,3 +64,22 @@ def test_parse_nuclei_extracts_confirmed_takeovers():
     assert a["matched_at"] == "https://ok.target.com"
     b = next(r for r in res if r["host"] == "app.target.com")  # porta removida
     assert b["severity"] == "medium"
+
+
+def test_build_candidates_csv_schema_and_join():
+    confirmed = [
+        {"host": "ok.target.com", "service": "github-takeover"},
+        {"host": "app.target.com", "service": "heroku-takeover"},
+    ]
+    cmap = {"ok.target.com": "myorg.github.io", "app.target.com": "app.herokuapp.com"}
+    text = T.build_candidates_csv(confirmed, cmap)
+    rows = list(_csv.reader(_io.StringIO(text)))
+    assert rows[0] == ["subdomain", "cname", "service", "status"]
+    assert ["ok.target.com", "myorg.github.io", "github-takeover", "CONFIRMED"] in rows
+    assert ["app.target.com", "app.herokuapp.com", "heroku-takeover", "CONFIRMED"] in rows
+
+
+def test_build_candidates_csv_empty_is_header_only():
+    text = T.build_candidates_csv([], {})
+    rows = list(_csv.reader(_io.StringIO(text)))
+    assert rows == [["subdomain", "cname", "service", "status"]]
