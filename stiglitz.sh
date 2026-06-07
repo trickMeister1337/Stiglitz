@@ -245,6 +245,8 @@ TARGET=""
 # shellcheck disable=SC2034  # knob de config reservado
 PARALLEL_JOBS=1
 AUTH_TOKEN=""      # Bearer token para scan autenticado
+TOKEN_A=""         # token primário (BOLA/BFLA) — também alimenta AUTH_TOKEN
+TOKEN_B=""         # token secundário (BOLA/BFLA)
 AUTH_HEADER=""     # Header customizado (ex: "Cookie: session=abc")
 OSINT_DIR=""       # Diretório de output do osint.sh (reaproveita descoberta)
 OUTDIR_OVERRIDE="" # Reutiliza um diretório de scan fixo (orquestrador pipeline.py)
@@ -253,9 +255,12 @@ DRY_RUN=false      # Simular: imprime o plano e sai sem executar ferramentas
 
 # Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase, --dry-run
 _args=("$@")
+# shellcheck disable=SC2034  # TOKEN_B consumido pela fase BOLA/BFLA (Task 9)
 for _i in "${!_args[@]}"; do
     case "${_args[$_i]}" in
         --token|-t)          AUTH_TOKEN="${_args[$((${_i}+1))]}" ;;
+        --token-a)           TOKEN_A="${_args[$((${_i}+1))]}" ;;
+        --token-b)           TOKEN_B="${_args[$((${_i}+1))]}" ;;
         --header|-H)         AUTH_HEADER="${_args[$((${_i}+1))]}" ;;
         --osint-dir|--osint) OSINT_DIR="${_args[$((${_i}+1))]}" ;;
         --outdir)            OUTDIR_OVERRIDE="${_args[$((${_i}+1))]}" ;;
@@ -263,6 +268,10 @@ for _i in "${!_args[@]}"; do
         --dry-run)           DRY_RUN=true ;;
     esac
 done
+
+# --token/-t é apelido de --token-a; AUTH_TOKEN (usado pela P9/nuclei) reflete o token A
+[ -z "$TOKEN_A" ] && [ -n "$AUTH_TOKEN" ] && TOKEN_A="$AUTH_TOKEN"
+[ -n "$TOKEN_A" ] && AUTH_TOKEN="$TOKEN_A"
 
 # Atribuir alvo se não for flag
 if [ -n "$1" ] && ! echo "$1" | grep -q '^-'; then
