@@ -153,3 +153,51 @@ def verdict(baseline, cross, unauth, canary):
     if hit and same:
         return {"state": "CONFIRMED", "canary_hit": True, "confidence": 90}
     return {"state": "INCONCLUSIVE", "canary_hit": hit, "confidence": 50 if same else 30}
+
+
+try:
+    from fingerprint import fingerprint as _fingerprint
+    from vuln_catalog import CATALOG as _CATALOG
+except Exception:
+    def _fingerprint(f):
+        return "0" * 16
+    _CATALOG = {}
+
+
+def classify(req, canary):
+    """Classe do finding: bfla (path privilegiado) > idor_read_pii (PII) > bola."""
+    if PRIVILEGED_PATH.search(req.get("url") or ""):
+        return "bfla"
+    if canary_is_pii(canary):
+        return "idor_read_pii"
+    return "bola"
+
+
+def build_findings(results):
+    """Converte resultados CONFIRMED/INCONCLUSIVE em findings (schema findings.json).
+    PROTECTED/PUBLIC são descartados. CONFIRMED → confirmed=True/severity high;
+    INCONCLUSIVE → confirmed=False/severity info (triagem)."""
+    findings = []
+    for r in results:
+        state = r["verdict"]["state"]
+        if state not in ("CONFIRMED", "INCONCLUSIVE"):
+            continue
+        klass = classify(r["req"], r.get("canary") or set())
+        cwe = _CATALOG.get(klass, {}).get("cwe", "")
+        confirmed = state == "CONFIRMED"
+        finding = {
+            "type": klass,
+            "cwe": cwe,
+            "url": r["req"].get("url", ""),
+            "param": "",
+            "severity": "high" if confirmed else "info",
+            "confirmed": confirmed,
+            "confidence": r["verdict"].get("confidence", 0),
+            "direction": r.get("direction", ""),
+            "canary_hit": r["verdict"].get("canary_hit", False),
+            "source": "bola",
+            "poc_note": f"Access-control {state} via replay {r.get('direction','')}",
+        }
+        finding["fingerprint"] = _fingerprint(finding)
+        findings.append(finding)
+    return findings

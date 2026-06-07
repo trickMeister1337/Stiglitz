@@ -114,3 +114,41 @@ def test_verdict_inconclusive_when_canary_absent():
     assert v["state"] == "INCONCLUSIVE"
     assert v["canary_hit"] is False
     assert v["confidence"] < 60
+
+
+def test_classify_picks_bfla_idor_bola():
+    # path privilegiado → bfla
+    assert B.classify({"url": "https://t.com/admin/users/1"}, {"x"}) == "bfla"
+    # PII no canário → idor_read_pii
+    assert B.classify({"url": "https://t.com/users/1"}, {"alice@target.com"}) == "idor_read_pii"
+    # objeto sem PII → bola
+    assert B.classify({"url": "https://t.com/orders/9"}, {"9"}) == "bola"
+
+
+def test_build_findings_schema_and_fingerprint():
+    results = [{
+        "req": {"url": "https://t.com/users/123", "method": "GET"},
+        "verdict": {"state": "CONFIRMED", "canary_hit": True, "confidence": 90},
+        "canary": {"alice@target.com", "123"},
+        "direction": "B->A",
+    }]
+    out = B.build_findings(results)
+    assert len(out) == 1
+    f = out[0]
+    assert f["type"] == "idor_read_pii"
+    assert f["cwe"] == "CWE-639"
+    assert f["url"] == "https://t.com/users/123"
+    assert f["confirmed"] is True
+    assert f["severity"] == "high"
+    assert f["direction"] == "B->A"
+    assert len(f["fingerprint"]) == 16
+
+
+def test_build_findings_skips_non_actionable():
+    results = [
+        {"req": {"url": "https://t.com/a/1"}, "verdict": {"state": "PROTECTED", "confidence": 0},
+         "canary": set(), "direction": "B->A"},
+        {"req": {"url": "https://t.com/a/2"}, "verdict": {"state": "PUBLIC", "confidence": 0},
+         "canary": set(), "direction": "B->A"},
+    ]
+    assert B.build_findings(results) == []
