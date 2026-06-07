@@ -35,6 +35,7 @@
 !/tests
 !/email_spoof_poc.py
 !/stiglitz_trend.py
+!/stiglitz_track.py
 !/stiglitz_red_batch.sh
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
