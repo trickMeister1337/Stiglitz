@@ -47,3 +47,20 @@ def test_reconcile_ignores_findings_without_fingerprint():
                                today=D(2026, 6, 1), scan_id="s1")
     assert store == {}
     assert trans == []
+
+def test_load_save_roundtrip(tmp_path):
+    d = str(tmp_path)
+    store, _ = S.reconcile({}, [_f("aaa")], today=D(2026, 6, 1), scan_id="s1")
+    p = S.save_store("ex.com", store, state_dir=d)
+    assert os.path.exists(p)
+    loaded = S.load_store("ex.com", state_dir=d)
+    assert loaded["aaa"]["first_seen"] == "2026-06-01"
+
+def test_load_missing_store_returns_empty(tmp_path):
+    assert S.load_store("never.com", state_dir=str(tmp_path)) == {}
+
+def test_save_sanitizes_target_into_filename(tmp_path):
+    d = str(tmp_path)
+    p = S.save_store("https://a.b.com/x", {}, state_dir=d)
+    assert os.path.dirname(p) == d
+    assert "/" not in os.path.basename(p).replace(".json", "")

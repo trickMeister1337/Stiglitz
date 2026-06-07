@@ -11,6 +11,7 @@ Store fora do repo (STIGLITZ_STATE_DIR, default ~/.stiglitz/state/) → nunca
 versiona dado de alvo. Lógica pura: a data corrente é injetada (testabilidade).
 """
 import os
+import re as _re
 import json
 import datetime
 
@@ -82,3 +83,36 @@ def reconcile(store, current_findings, today, scan_id):
                                 "severity": e.get("severity", "info")})
 
     return store, transitions
+
+
+def _state_dir(state_dir=None):
+    d = state_dir or os.environ.get("STIGLITZ_STATE_DIR") or \
+        os.path.join(os.path.expanduser("~"), ".stiglitz", "state")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _slug(target):
+    s = _re.sub(r"^https?://", "", str(target or "unknown"))
+    s = _re.sub(r"[^A-Za-z0-9._-]", "_", s).strip("_")
+    return s or "unknown"
+
+
+def load_store(target, state_dir=None):
+    p = os.path.join(_state_dir(state_dir), _slug(target) + ".json")
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def save_store(target, store, state_dir=None):
+    p = os.path.join(_state_dir(state_dir), _slug(target) + ".json")
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(store, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, p)
+    return p
