@@ -116,3 +116,81 @@ def save_store(target, store, state_dir=None):
         json.dump(store, fh, ensure_ascii=False, indent=2)
     os.replace(tmp, p)
     return p
+
+
+def _date(iso):
+    return datetime.date.fromisoformat(iso) if iso else None
+
+
+def _age_days(first_seen, today):
+    d = _date(first_seen)
+    return (today - d).days if d else None
+
+
+def _sla_prazo(entry, today):
+    """Prazo em dias via prioritization.sla_for_finding; fallback por severidade."""
+    if _prio is not None:
+        try:
+            sla = _prio.sla_for_finding(
+                {"severity": entry.get("severity", "info"), "in_kev": False}, today)
+            return sla.get("days_remaining")
+        except Exception:
+            pass
+    return {"critical": 15, "high": 30, "medium": 60, "low": 90}.get(
+        entry.get("severity", "info"), 90)
+
+
+def derive_metrics(store, today):
+    open_by_sev = {}
+    mttrs = []
+    open_ages = []
+    open_total = resolved_total = 0
+    breached = []
+    for fp, e in store.items():
+        if e["status"] == "open":
+            open_total += 1
+            sev = e.get("severity", "info")
+            open_by_sev[sev] = open_by_sev.get(sev, 0) + 1
+            age = _age_days(e["first_seen"], today)
+            if age is not None:
+                open_ages.append(age)
+                prazo = _sla_prazo(e, today)
+                if prazo is not None and age > prazo:
+                    breached.append(fp)
+        else:
+            resolved_total += 1
+            f, r = _date(e["first_seen"]), _date(e.get("resolved_at"))
+            if f and r:
+                mttrs.append((r - f).days)
+    return {
+        "open_total": open_total,
+        "open_by_severity": open_by_sev,
+        "resolved_total": resolved_total,
+        "mttr_days_avg": round(sum(mttrs) / len(mttrs), 1) if mttrs else None,
+        "oldest_open_days": max(open_ages) if open_ages else 0,
+        "sla_breached": breached,
+    }
+
+
+def attach_state(findings, store, today):
+    for f in findings:
+        e = store.get(f.get("fingerprint"))
+        if not e:
+            continue
+        age = _age_days(e["first_seen"], today)
+        mttr = None
+        if e["status"] == "resolved":
+            fd, rd = _date(e["first_seen"]), _date(e.get("resolved_at"))
+            mttr = (rd - fd).days if fd and rd else None
+        prazo = _sla_prazo(e, today)
+        f["state"] = {
+            "status": e["status"],
+            "first_seen": e["first_seen"],
+            "last_seen": e["last_seen"],
+            "age_days": age,
+            "mttr_days": mttr,
+            "reopened_count": e["reopened_count"],
+            "sla_breached": bool(e["status"] == "open" and age is not None
+                                 and prazo is not None and age > prazo),
+        }
+    return findings

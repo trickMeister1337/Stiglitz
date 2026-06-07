@@ -64,3 +64,25 @@ def test_save_sanitizes_target_into_filename(tmp_path):
     p = S.save_store("https://a.b.com/x", {}, state_dir=d)
     assert os.path.dirname(p) == d
     assert "/" not in os.path.basename(p).replace(".json", "")
+
+def test_derive_metrics_age_mttr_and_open_counts():
+    s1, _ = S.reconcile({}, [_f("aaa", sev="high")], today=D(2026, 6, 1), scan_id="s1")
+    s1, _ = S.reconcile(s1, [_f("aaa"), _f("bbb", sev="low")],
+                        today=D(2026, 6, 1), scan_id="s1b")
+    s2, _ = S.reconcile(s1, [_f("aaa")], today=D(2026, 6, 5), scan_id="s2")
+    m = S.derive_metrics(s2, today=D(2026, 6, 10))
+    assert m["open_total"] == 1
+    assert m["open_by_severity"]["high"] == 1
+    assert m["resolved_total"] == 1
+    assert m["mttr_days_avg"] == 4.0
+    assert m["oldest_open_days"] == 9
+
+def test_attach_state_marks_sla_breach_for_overdue_open():
+    s1, _ = S.reconcile({}, [_f("aaa", sev="critical")],
+                        today=D(2026, 1, 1), scan_id="s1")
+    findings = [_f("aaa", sev="critical")]
+    S.attach_state(findings, s1, today=D(2026, 6, 1))
+    st = findings[0]["state"]
+    assert st["status"] == "open"
+    assert st["age_days"] == 151
+    assert st["sla_breached"] is True
