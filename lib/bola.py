@@ -59,3 +59,23 @@ def parse_zap_messages(json_text):
             "resp_body": m.get("responseBody") or "",
         })
     return out
+
+
+def is_safe_method(method):
+    """Só métodos idempotentes read-only são reproduzidos (segurança/RoE)."""
+    return (method or "").strip().upper() in SAFE_METHODS
+
+
+def is_object_ref_request(req):
+    """True se a URL carrega referência a objeto (id numérico em path, UUID,
+    ou param id/user_id/account/...). Sem object-ref, replay é ruído."""
+    url = req.get("url") or ""
+    split = urllib.parse.urlsplit(url)
+    path, query = split.path or url, split.query or ""
+    if _NUM_SEG.search(path):
+        return True
+    if _UUID.search(url):
+        return True
+    if _ID_PARAM.search("?" + query):
+        return True
+    return False

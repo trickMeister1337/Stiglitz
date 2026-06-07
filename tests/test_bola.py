@@ -39,3 +39,23 @@ def test_parse_zap_messages_ignores_garbage():
     assert B.parse_zap_messages("not json") == []
     assert B.parse_zap_messages('{"messages": "x"}') == []
     assert B.parse_zap_messages("") == []
+
+
+def test_is_object_ref_request_detects_object_handles():
+    assert B.is_object_ref_request({"url": "/users/123"}) is True
+    assert B.is_object_ref_request({"url": "/api/orders/42/items"}) is True
+    assert B.is_object_ref_request(
+        {"url": "/x?account=550e8400-e29b-41d4-a716-446655440000"}) is True
+    assert B.is_object_ref_request({"url": "/profile?id=7"}) is True
+    assert B.is_object_ref_request({"url": "/about"}) is False
+    assert B.is_object_ref_request({"url": "/login"}) is False
+    assert B.is_object_ref_request({"url": ""}) is False
+
+
+def test_is_safe_method():
+    assert B.is_safe_method("GET") is True
+    assert B.is_safe_method("head") is True
+    assert B.is_safe_method("OPTIONS") is True
+    assert B.is_safe_method("POST") is False
+    assert B.is_safe_method("DELETE") is False
+    assert B.is_safe_method("") is False
