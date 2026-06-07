@@ -59,3 +59,22 @@ def test_is_safe_method():
     assert B.is_safe_method("POST") is False
     assert B.is_safe_method("DELETE") is False
     assert B.is_safe_method("") is False
+
+
+def test_extract_canary_pulls_ids_and_pii():
+    body = '{"id":123,"email":"alice@target.com","name":"Alice","cpf":"123.456.789-09"}'
+    can = B.extract_canary(body, "application/json")
+    assert "alice@target.com" in can
+    assert "123.456.789-09" in can
+    assert "123" in can  # id
+
+
+def test_extract_canary_empty_when_no_handles():
+    assert B.extract_canary("<html><body>welcome</body></html>", "text/html") == set()
+    assert B.extract_canary("", "application/json") == set()
+
+
+def test_canary_is_pii_flags_email_cpf():
+    assert B.canary_is_pii({"alice@target.com"}) is True
+    assert B.canary_is_pii({"123.456.789-09"}) is True
+    assert B.canary_is_pii({"123"}) is False

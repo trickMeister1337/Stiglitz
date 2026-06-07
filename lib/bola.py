@@ -79,3 +79,22 @@ def is_object_ref_request(req):
     if _ID_PARAM.search("?" + query):
         return True
     return False
+
+
+def extract_canary(resp_body, content_type=""):
+    """Extrai identificadores do objeto do dono (o que se procura no corpo do
+    cross-replay): emails, CPFs, e valores de campos id/uuid em JSON. Retorna set."""
+    body = resp_body or ""
+    canary = set()
+    canary.update(_EMAIL.findall(body))
+    canary.update(_CPF.findall(body))
+    canary.update(_UUID.findall(body))
+    # valores de campos "id"/"..._id" em JSON: "id": 123  ou  "user_id":"abc"
+    for m in re.finditer(r'"(?:\w*_)?id"\s*:\s*"?([\w-]{1,64})"?', body, re.I):
+        canary.add(m.group(1))
+    return {c for c in canary if c}
+
+
+def canary_is_pii(canary):
+    """True se algum item do canário é PII (email/CPF) — vira idor_read_pii."""
+    return any(_EMAIL.fullmatch(c) or _CPF.fullmatch(c) for c in canary)
