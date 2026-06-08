@@ -21,6 +21,11 @@ def validate(ctx):
     dc_result    = ctx["dc_result"]
     patterns     = ctx["patterns"].get("patterns", [])
 
+    # Par booleano (active_probe): sinal determinístico — prioridade sobre size-diff.
+    bp = ctx.get("bool_pair")
+    if bp and bp.get("confirmed"):
+        return True, bp["confidence"], f"Par booleano confirmado: {bp.get('note', '')}"
+
     # Padrões de erro SQL no response são prova direta
     for pat in patterns:
         try:

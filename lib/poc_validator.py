@@ -32,6 +32,13 @@ try:
 except Exception:
     _OOB_AVAILABLE = False
 
+# Active probe (par booleano + canário) — opcional, degrada sem erro.
+try:
+    import active_probe as _ap
+    _ACTIVE_PROBE_AVAILABLE = True
+except Exception:
+    _ACTIVE_PROBE_AVAILABLE = False
+
 # OAuth refresh é opcional — só ativa quando STIGLITZ_OAUTH_TOKEN_URL estiver
 # configurada. Refresh inicial no startup + retry em 401 dentro do loop.
 try:
@@ -303,6 +310,18 @@ def build_safe_baseline(curl_cmd, matched_at):
         safe, safe_curl)
     return clean, safe_curl
 
+
+def _req_to_curl(req):
+    """Monta um curl shell-safe a partir de {"url","method","body"} (active_probe).
+    Toda a shell-safety (shlex.quote) fica concentrada aqui."""
+    method = req.get("method", "GET")
+    url    = req.get("url", "")
+    body   = req.get("body", "")
+    cmd = f"curl -sk -L -X {shlex.quote(method)} --max-time 15 {shlex.quote(url)}"
+    if body and method in ("POST", "PUT", "PATCH"):
+        cmd += f" --data {shlex.quote(body[:500])}"
+    return cmd + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
+
 def check_auth_evidence(headers, body):
     ev = []
     sess_pats = ["session", "token", "auth", "jwt", "sid", "phpsessid", "connect.sid"]
@@ -374,7 +393,8 @@ def classify_vuln(template_id, name, tags=""):
 
 def validate(vuln_type, url, resp_body, resp_headers, status,
              method_results=None, diff_changed=False, diff_conf=0,
-             diff_note="", auth_ev=None, dc_result=None):
+             diff_note="", auth_ev=None, dc_result=None,
+             bool_pair=None, canary=None):
     """
     Valida uma vulnerabilidade e retorna (confirmed: bool, confidence: int, note: str).
 
@@ -411,6 +431,8 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
             "diff_note": diff_note, "auth_ev": auth,
             "dc_result": dc_result, "dc_bonus": dc_bonus,
             "method_results": method_results or {},
+            "bool_pair": bool_pair,
+            "canary": canary,
         }
         return _clamp_confidence(*_plugin(ctx))
 
@@ -811,6 +833,30 @@ def confirm_nuclei(outdir):
                     normalize(base_body), normalize(resp_body))
                 auth_ev = check_auth_evidence(resp_headers, resp_body)
 
+                # Active probe: par booleano (sqli) / canário (xss). Sempre on.
+                # Builder None ou fetch falho → sinal ausente → fallback (sem regressão).
+                bool_pair = None
+                canary    = None
+                if _ACTIVE_PROBE_AVAILABLE and vuln_type == "sqli":
+                    variants = _ap.build_boolean_variants(url, method, req_body)
+                    if variants:
+                        t_req, f_req = variants
+                        t_out, t_err = run_cmd(_apply_oauth(_req_to_curl(t_req)), timeout=15, retries=1)
+                        f_out, f_err = run_cmd(_apply_oauth(_req_to_curl(f_req)), timeout=15, retries=1)
+                        if not t_err and not f_err:
+                            _, _, t_body = parse_http_response(t_out)
+                            _, _, f_body = parse_http_response(f_out)
+                            bool_pair = _ap.boolean_pair_verdict(
+                                normalize(base_body), normalize(t_body), normalize(f_body))
+                elif _ACTIVE_PROBE_AVAILABLE and vuln_type == "xss":
+                    token = _ap.new_canary_token()
+                    c_req = _ap.build_canary_variant(url, token, method, req_body)
+                    if c_req:
+                        c_out, c_err = run_cmd(_apply_oauth(_req_to_curl(c_req)), timeout=15, retries=1)
+                        if not c_err:
+                            _, _, c_body = parse_http_response(c_out)
+                            canary = _ap.canary_reflection(token, c_body)
+
                 # Testar métodos adicionais
                 method_results = {}
                 for m in ["GET", "POST"]:
@@ -834,7 +880,8 @@ def confirm_nuclei(outdir):
                     vuln_type, url, resp_body, resp_headers, status,
                     method_results=method_results,
                     diff_changed=diff_changed, diff_conf=diff_conf,
-                    diff_note=diff_note, auth_ev=auth_ev, dc_result=dc)
+                    diff_note=diff_note, auth_ev=auth_ev, dc_result=dc,
+                    bool_pair=bool_pair, canary=canary)
 
                 state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
                 print(f"  [{state}] HTTP {status} | {confidence}% | {poc_note}")

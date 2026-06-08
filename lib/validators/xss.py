@@ -15,6 +15,13 @@ def validate(ctx):
     dc_result    = ctx["dc_result"]
     patterns     = ctx["patterns"].get("patterns", [])
 
+    # Canário de reflexão (active_probe): refletido sem encoding = XSS provável.
+    cn = ctx.get("canary")
+    if cn and cn.get("reflected") and not cn.get("encoded"):
+        return True, cn["confidence"], f"Canário refletido sem encoding: {cn.get('note', '')}"
+    if cn and cn.get("reflected") and cn.get("encoded"):
+        return False, cn["confidence"], f"Canário refletido mas HTML-encodado (provável safe): {cn.get('note', '')}"
+
     for pat in patterns:
         try:
             if re.search(pat, resp, re.IGNORECASE):
