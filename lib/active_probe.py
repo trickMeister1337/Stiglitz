@@ -62,3 +62,41 @@ def boolean_pair_verdict(baseline_norm, true_norm, false_norm):
                 "note": "Condição sem efeito (true≈false≈baseline)"}
     return {"confirmed": False, "confidence": 40,
             "note": "Sinal parcial — diferencial booleano incompleto"}
+
+
+PROBE_CHARS = '<">'   # quebra-de-contexto benigna anexada ao token do canário
+
+
+def new_canary_token():
+    """Marcador único 'stg' + 8 hex (os.urandom). Alfanumérico → busca inequívoca."""
+    return "stg" + os.urandom(4).hex()
+
+
+def canary_reflection(token, resp_body):
+    """Detecta reflexão de `token` + PROBE_CHARS no corpo.
+
+    Retorna {reflected, encoded, confidence, note}:
+      token + PROBE_CHARS crus (< " >)  → reflected, !encoded, conf=90 (XSS provável)
+      token + PROBE_CHARS HTML-escapados → reflected,  encoded, conf=35 (provável safe)
+      token ausente                      → reflected=False,     conf=0
+    """
+    body = resp_body or ""
+    if token not in body:
+        return {"reflected": False, "encoded": False, "confidence": 0,
+                "note": "Canário não refletido"}
+
+    # Janela após cada ocorrência do token — procura PROBE_CHARS crus vs escapados.
+    raw = False
+    enc = False
+    for m in re.finditer(re.escape(token), body):
+        window = body[m.end():m.end() + 16]
+        if any(c in window for c in PROBE_CHARS):
+            raw = True
+            break
+        if re.search(r"&(?:lt|gt|quot|#x?\d+);", window):
+            enc = True
+    if raw:
+        return {"reflected": True, "encoded": False, "confidence": 90,
+                "note": "Canário refletido com chars de quebra crus (XSS provável)"}
+    return {"reflected": True, "encoded": True, "confidence": 35,
+            "note": "Canário refletido mas escapado/neutralizado (provável safe)"}
