@@ -24,6 +24,7 @@ Pipeline de recon e varredura de vulnerabilidades. Metodologia de risco: **KEV >
 7. **Fase 6** — Enriquecimento CVE/EPSS (NVD + FIRST.org + CISA KEV)
 8. **Fase 8** — Email Security (SPF/DMARC/DKIM)
 9. **Fase 9** — ZAP Spider + Active Scan
+   - **Fase 9.5** — Access Control (BOLA/BFLA) — opt-in com `--token-a` + `--token-b`: replay multi-token de requisições do ZAP, confirma acesso indevido por tripla A/B/unauth + canário de corpo
 10. **Fase 10** — JS Analysis + secret detection (katana)
 11. **Fase 10.5** — Testes complementares (ffuf + smuggler + wpscan/joomscan/droopescan + trufflehog)
 12. **Fase 11** — Relatório HTML + findings.json (enriquecido com `state` por fingerprint) + SARIF 2.1.0 (com `partialFingerprints`)
@@ -31,7 +32,8 @@ Pipeline de recon e varredura de vulnerabilidades. Metodologia de risco: **KEV >
 
 ```bash
 bash stiglitz.sh <target>                       # scan único
-bash stiglitz.sh <target> --token "eyJ..."      # scan autenticado
+bash stiglitz.sh <target> --token "eyJ..."      # scan autenticado (--token/-t é apelido de --token-a)
+bash stiglitz.sh <target> --token-a "<jwt>" --token-b "<jwt2>"  # habilita BOLA/BFLA (Fase 9.5)
 bash stiglitz.sh <target> --osint-dir osint_*/  # reaproveita descoberta do osint.sh
 ```
 
@@ -135,6 +137,7 @@ Os módulos Python e bash vivem em `lib/` como **arquivos reais** (lidos diretam
 | `cve_enricher.py` | Enriquecimento NVD/EPSS/KEV com cache diário |
 | `js_analysis.py`, `email_security.py`, `security_headers.py`, `secscan.py` | Coletores das fases do scan |
 | `service_versions.py` | Parse do nmap XML (`-sV --script vulners`) → `service_findings.json`: versões de serviços de rede + CVEs por banner (software desatualizado). Usa `defusedxml` |
+| `bola.py` | Detecção de BOLA/IDOR e BFLA (OWASP API #1, fase P9.5) — reproduz requisições do ZAP com dois tokens (`--token-a`/`-b`), confirma acesso indevido por tripla A/B/unauth + canário de corpo → `access_control.json` (classes `bola`/`idor_read_pii`/`bfla`, com fingerprint). Só GET/HEAD/OPTIONS; tokens via env. Lógica pura + CLI |
 | `takeover.py` | Detecção de subdomain takeover (osint.sh Fase 8) — filtro de CNAME externo ao apex + parse do JSONL do `nuclei` → `cloud/takeover_candidates.csv` (schema legado, status `CONFIRMED`). Lógica pura + CLI (`select-external`/`build-csv`); sem rede, sem domínio hardcoded |
 | `cde_scope.py`, `pan_scanner.py`, `payment_page_monitor.py`, `pci_verdicts.py` | Cobertura PCI DSS restrita ao CDE (lê `cde_targets.txt`, gitignored): PAN com Luhn+máscara (3.5.1), integridade de scripts/Magecart (6.4.3/11.6.1), tag `pci_req`. Texto dos findings em EN (deliverable) |
 | `finding_state.py` | Ledger de estado por `fingerprint`: reconcile NEW/PERSISTENT/RESOLVED/REOPENED com `first_seen`/`last_seen`/`resolved_at` + métricas (age, MTTR, SLA breach). Store JSON fora do repo em `STIGLITZ_STATE_DIR` (default `~/.stiglitz/state/`) — **nunca versiona dado de alvo**. Enriquece `findings.json` com `state` e grava `raw/state_summary.json` |

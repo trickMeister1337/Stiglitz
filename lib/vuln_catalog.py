@@ -14,6 +14,8 @@ CATALOG = {
                            "vector": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"},
     "bola":               {"cwe": "CWE-639", "title": "Broken Object Level Authorization",
                            "vector": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"},
+    "bfla":               {"cwe": "CWE-285", "title": "Broken Function Level Authorization",
+                           "vector": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"},
     "broken_auth":        {"cwe": "CWE-287", "title": "Autenticação quebrada",
                            "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"},
     "priv_escalation":    {"cwe": "CWE-269", "title": "Escalação de privilégio",

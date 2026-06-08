@@ -245,6 +245,8 @@ TARGET=""
 # shellcheck disable=SC2034  # knob de config reservado
 PARALLEL_JOBS=1
 AUTH_TOKEN=""      # Bearer token para scan autenticado
+TOKEN_A=""         # token primário (BOLA/BFLA) — também alimenta AUTH_TOKEN
+TOKEN_B=""         # token secundário (BOLA/BFLA)
 AUTH_HEADER=""     # Header customizado (ex: "Cookie: session=abc")
 OSINT_DIR=""       # Diretório de output do osint.sh (reaproveita descoberta)
 OUTDIR_OVERRIDE="" # Reutiliza um diretório de scan fixo (orquestrador pipeline.py)
@@ -256,6 +258,8 @@ _args=("$@")
 for _i in "${!_args[@]}"; do
     case "${_args[$_i]}" in
         --token|-t)          AUTH_TOKEN="${_args[$((${_i}+1))]}" ;;
+        --token-a)           TOKEN_A="${_args[$((${_i}+1))]}" ;;
+        --token-b)           TOKEN_B="${_args[$((${_i}+1))]}" ;;
         --header|-H)         AUTH_HEADER="${_args[$((${_i}+1))]}" ;;
         --osint-dir|--osint) OSINT_DIR="${_args[$((${_i}+1))]}" ;;
         --outdir)            OUTDIR_OVERRIDE="${_args[$((${_i}+1))]}" ;;
@@ -263,6 +267,10 @@ for _i in "${!_args[@]}"; do
         --dry-run)           DRY_RUN=true ;;
     esac
 done
+
+# --token/-t é apelido de --token-a; AUTH_TOKEN (usado pela P9/nuclei) reflete o token A
+[ -z "$TOKEN_A" ] && [ -n "$AUTH_TOKEN" ] && TOKEN_A="$AUTH_TOKEN"
+[ -n "$TOKEN_A" ] && AUTH_TOKEN="$TOKEN_A"
 
 # Atribuir alvo se não for flag
 if [ -n "$1" ] && ! echo "$1" | grep -q '^-'; then
@@ -447,7 +455,7 @@ _phase_enabled() {
 _needs_network() {
     # Retorna 0 se alguma fase habilitada precisa de acesso de rede ao alvo.
     # Fases offline (P11 = geração de relatório) não requerem conectividade.
-    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P10 P10_5; do
+    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P9_5 P10 P10_5; do
         _phase_enabled "$_np" && return 0
     done
     return 1
@@ -1673,6 +1681,63 @@ export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT KATANA_URLS WAF_DETECTED WAF_NAM
 # ====================== FASE 10: JS ANALYSIS ======================
 
 fi  # fim P9
+
+# ====================== FASE 9.5: ACCESS CONTROL (BOLA/BFLA) ======================
+if _phase_enabled "P9_5" && [ -n "$TOKEN_A" ] && [ -n "$TOKEN_B" ]; then
+phase_start "P9_5"
+phase_banner "FASE 9.5/11: ACCESS CONTROL (BOLA/BFLA)"
+
+_zap_msgs_a="$OUTDIR/raw/zap_messages_a.json"
+_zap_msgs_b="$OUTDIR/raw/zap_messages_b.json"
+_zap_msgs_full="$OUTDIR/raw/zap_messages_full.json"
+echo '{"messages":[]}' > "$_zap_msgs_b"   # default vazio → degrada p/ só direção B→A
+
+if zap_api_call "core/view/version" "" 2>/dev/null | grep -q "version"; then
+    # Corpus de A: histórico já gravado pelo crawl autenticado da P9 (token A)
+    zap_api_call "core/view/messages" "" > "$_zap_msgs_a" 2>/dev/null || true
+    _n_a=$(python3 -c "import json,sys
+try:
+    d=json.load(open(sys.argv[1])); print(len(d.get('messages',[])) if isinstance(d,dict) else 0)
+except Exception:
+    print(0)" "$_zap_msgs_a" 2>/dev/null || echo 0)
+
+    # Corpus de B: spider-only leve com token B (sem active scan)
+    _tb_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "Bearer ${TOKEN_B}" 2>/dev/null)
+    zap_api_call "replacer/action/removeRule" "description=AuthToken" >/dev/null 2>&1 || true
+    zap_api_call "replacer/action/addRule" \
+        "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_tb_enc}" \
+        >/dev/null 2>&1
+    _tgt_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$TARGET" 2>/dev/null)
+    zap_api_call "spider/action/scan" "url=${_tgt_enc}&maxChildren=10" >/dev/null 2>&1
+    sleep 20
+    # Dump cumulativo e fatia só as mensagens novas (de B) — evita A no corpus_b (FP)
+    zap_api_call "core/view/messages" "" > "$_zap_msgs_full" 2>/dev/null || true
+    python3 -c "import json,sys
+try:
+    d=json.load(open(sys.argv[1])); msgs=d.get('messages',[]) if isinstance(d,dict) else []
+except Exception:
+    msgs=[]
+n=int(sys.argv[2])
+json.dump({'messages':msgs[n:]}, open(sys.argv[3],'w'))" \
+        "$_zap_msgs_full" "$_n_a" "$_zap_msgs_b" 2>/dev/null || echo '{"messages":[]}' > "$_zap_msgs_b"
+else
+    echo -e "  ${YELLOW}[!] ZAP indisponível — corpus de B vazio (só direção B→A)${NC}"
+fi
+
+if [ ! -s "$_zap_msgs_a" ]; then
+    echo -e "  ${YELLOW}[!] access-control: sem corpus do ZAP (P9 não rodou?) — BOLA/BFLA pulado${NC}"
+else
+    if BOLA_TOKEN_A="$TOKEN_A" BOLA_TOKEN_B="$TOKEN_B" \
+            python3 "$SCRIPT_DIR/lib/bola.py" run "$_zap_msgs_a" "$_zap_msgs_b" "$OUTDIR"; then
+        echo -e "  ${GREEN}[✓] Access Control concluído → access_control.json + raw/access_findings.json${NC}"
+    else
+        echo -e "  ${YELLOW}[!] access-control: motor BOLA retornou erro${NC}"
+    fi
+fi
+phase_end "P9_5"
+phase_done "FASE_9_5"
+fi  # fim P9.5
+
 if _phase_enabled "P10"; then
 phase_start "P10"
 phase_banner "FASE 10/11: ANÁLISE DE JAVASCRIPT & SECRETS"
