@@ -100,3 +100,62 @@ def canary_reflection(token, resp_body):
                 "note": "Canário refletido com chars de quebra crus (XSS provável)"}
     return {"reflected": True, "encoded": True, "confidence": 35,
             "note": "Canário refletido mas escapado/neutralizado (provável safe)"}
+
+
+# Mesmas keywords SQL do build_safe_baseline (poc_validator).
+_SQLI_KW = re.compile(
+    r"(?:\bOR\b|\bAND\b|\bUNION\b|\bSELECT\b|\bDROP\b|\bINSERT\b|\bUPDATE\b"
+    r"|\bDELETE\b|\bEXEC\b|\bCAST\b|\bSLEEP\b|\bWAITFOR\b|\bBENCHMARK\b|--|')",
+    re.IGNORECASE)
+
+# Chars que sinalizam um parâmetro carregando payload XSS.
+_XSS_HINT = re.compile(r"[<>\"']|script|javascript:|onerror|onload", re.IGNORECASE)
+
+
+def _rebuild_query(url, key, new_value):
+    """Devolve `url` com o parâmetro `key` da query trocado por `new_value`
+    (demais parâmetros preservados, na ordem)."""
+    parts = urlsplit(url)
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    rebuilt = [(k, new_value if k == key else v) for k, v in pairs]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path,
+                       urlencode(rebuilt), parts.fragment))
+
+
+def _first_param(url, hint_re):
+    """(key, value) do primeiro parâmetro de query cujo valor casa `hint_re`, ou None."""
+    parts = urlsplit(url)
+    for k, v in parse_qsl(parts.query, keep_blank_values=True):
+        if hint_re.search(v or ""):
+            return k, v
+    return None
+
+
+def build_boolean_variants(url, method="GET", body=""):
+    """(true_req, false_req) | None — cada req é {"url","method","body"}.
+
+    Detecta na query o parâmetro injetável (valor com keyword SQL) e troca o
+    valor por `1' AND '1'='1` (true) / `1' AND '1'='2` (false). Só query string
+    nesta fase. None se nenhum parâmetro injetável for achado."""
+    hit = _first_param(url, _SQLI_KW)
+    if not hit:
+        return None
+    key, _v = hit
+    true_req = {"method": method, "body": body,
+                "url": _rebuild_query(url, key, "1' AND '1'='1")}
+    false_req = {"method": method, "body": body,
+                 "url": _rebuild_query(url, key, "1' AND '1'='2")}
+    return true_req, false_req
+
+
+def build_canary_variant(url, token, method="GET", body=""):
+    """canary_req | None — {"url","method","body"}.
+
+    Detecta na query o parâmetro com payload XSS-ish e troca o valor por
+    `token + PROBE_CHARS`. Só query string nesta fase. None se nada substituível."""
+    hit = _first_param(url, _XSS_HINT)
+    if not hit:
+        return None
+    key, _v = hit
+    return {"method": method, "body": body,
+            "url": _rebuild_query(url, key, token + PROBE_CHARS)}
