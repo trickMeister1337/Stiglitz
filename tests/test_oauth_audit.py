@@ -190,3 +190,31 @@ def test_classify_pkce_no_false_positive_on_error_code():
     # error_code=E401 contém a substring "code=" mas NÃO é um authorization code
     v = oauth_audit.classify_pkce_response(302, "https://target.com/cb?error_code=E401", "")
     assert v["state"] != "CONFIRMED"
+
+
+def test_active_findings_redirect_confirmed():
+    probe = {"label": "redirect_uri:external",
+             "url": "https://target.com/authorize?redirect_uri=https://oauth-probe.invalid/cb",
+             "expected_marker": "oauth-probe.invalid", "kind": "redirect"}
+    verdict = {"state": "CONFIRMED", "evidence": "Location -> https://oauth-probe.invalid/cb"}
+    fs = oauth_audit.active_findings([(probe, verdict)], "https://target.com")
+    assert len(fs) == 1
+    assert fs[0]["type"] == "oauth_redirect_uri"
+    assert fs[0]["severity"] == "high"
+    assert "oauth-probe.invalid" in fs[0]["evidence"]
+
+
+def test_active_findings_pkce_confirmed():
+    probe = {"label": "pkce:missing", "url": "https://target.com/authorize?response_type=code",
+             "kind": "pkce"}
+    verdict = {"state": "CONFIRMED", "evidence": "code issued (status=302)"}
+    fs = oauth_audit.active_findings([(probe, verdict)], "https://target.com")
+    assert fs[0]["type"] == "oauth_pkce_missing"
+
+
+def test_active_findings_drops_non_confirmed():
+    probe = {"label": "redirect_uri:external", "url": "u",
+             "expected_marker": "oauth-probe.invalid", "kind": "redirect"}
+    for st in ("REJECTED", "INCONCLUSIVE"):
+        assert oauth_audit.active_findings([(probe, {"state": st, "evidence": ""})],
+                                           "https://target.com") == []

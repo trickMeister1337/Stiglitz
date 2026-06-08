@@ -277,3 +277,35 @@ def classify_pkce_response(status, location, body):
     if status in (400, 401, 403) or "code_challenge" in low or "pkce" in low:
         return {"state": "REJECTED", "evidence": f"status={status}"}
     return {"state": "INCONCLUSIVE", "evidence": f"status={status}"}
+
+
+def active_findings(probe_verdicts, target):
+    """Converte (probe, verdict) CONFIRMED em findings. Não-CONFIRMED é descartado."""
+    out = []
+    for probe, verdict in probe_verdicts:
+        if verdict.get("state") != "CONFIRMED":
+            continue
+        kind = probe.get("kind")
+        ev = verdict.get("evidence", "")
+        if kind == "redirect":
+            out.append(_finding(
+                "oauth_redirect_uri", target,
+                "redirect_uri validation bypass confirmed (open redirect / code theft)", "high",
+                "The authorization server accepted an attacker-controlled redirect_uri and "
+                "redirected to it. An attacker can steal the authorization code/token and take "
+                "over the victim's account.",
+                "Enforce exact-match allow-listing of registered redirect URIs; reject any "
+                "unregistered value. No substring/subdomain/path matching.",
+                evidence=f"{probe.get('label')} | {ev}"))
+        elif kind == "pkce":
+            klass = "oauth_pkce_missing" if probe.get("label") == "pkce:missing" else "oauth_pkce_downgrade"
+            out.append(_finding(
+                klass, target,
+                "PKCE not enforced — authorization code issued without valid PKCE", "high",
+                "The authorization server issued an authorization code for a request that "
+                "lacked a valid S256 code_challenge, leaving public clients open to "
+                "authorization code interception.",
+                "Require and validate a S256 code_challenge for every authorization code "
+                "request; reject 'plain' and missing challenges.",
+                evidence=f"{probe.get('label')} | {ev}"))
+    return _dedup(out)
