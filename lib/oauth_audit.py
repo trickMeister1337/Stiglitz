@@ -194,3 +194,55 @@ def static_findings(wellknown, flows, target):
                 "Register and require https:// redirect URIs only.",
                 evidence=f"redirect_uri={f.get('redirect_uri')}"))
     return _dedup(out)
+
+
+def _with_query(url, params):
+    """Reescreve a query da URL com params (descarta valores vazios)."""
+    s = urllib.parse.urlsplit(url)
+    q = urllib.parse.urlencode({k: v for k, v in params.items() if v != ""})
+    return urllib.parse.urlunsplit((s.scheme, s.netloc, s.path, q, ""))
+
+
+def build_redirect_uri_probes(authorize_url, params, canary):
+    """Variações maliciosas de redirect_uri apontando ao host canary (sentinela)."""
+    host = urllib.parse.urlsplit(canary).netloc or canary
+    legit = params.get("redirect_uri", "")
+    legit_host = urllib.parse.urlsplit(legit).netloc
+    # Only variants whose real destination host IS the canary can be confirmed by the
+    # Location-host classifier: external (destination = canary), subdomain_suffix
+    # (destination = target.com.canary, a subdomain of canary), and userinfo
+    # (https://target.com@canary → real host is canary via authority confusion).
+    # path_traversal (/cb/../canary normalises back to target.com) and
+    # open_redirect_param (?next=canary is second-order) never make the destination
+    # the canary, so they are dropped to avoid noise.
+    variants = {
+        "external": canary,
+        "subdomain_suffix": f"https://{legit_host}.{host}/cb" if legit_host else canary,
+        "userinfo": f"https://{legit_host}@{host}/cb" if legit_host else canary,
+    }
+    probes = []
+    for label, evil in variants.items():
+        p = dict(params)
+        p["redirect_uri"] = evil
+        probes.append({"label": f"redirect_uri:{label}",
+                       "url": _with_query(authorize_url, p),
+                       "expected_marker": host, "kind": "redirect"})
+    return probes
+
+
+def build_pkce_missing_probe(authorize_url, params):
+    """Code flow sem code_challenge — testa se o servidor aceita (PKCE não enforçado)."""
+    p = dict(params)
+    p["response_type"] = "code"
+    p.pop("code_challenge", None)
+    p.pop("code_challenge_method", None)
+    return {"label": "pkce:missing", "url": _with_query(authorize_url, p), "kind": "pkce"}
+
+
+def build_pkce_downgrade_probe(authorize_url, params):
+    """Code flow com code_challenge_method=plain — testa downgrade."""
+    p = dict(params)
+    p["response_type"] = "code"
+    p["code_challenge"] = p.get("code_challenge") or "plainchallenge"
+    p["code_challenge_method"] = "plain"
+    return {"label": "pkce:downgrade", "url": _with_query(authorize_url, p), "kind": "pkce"}

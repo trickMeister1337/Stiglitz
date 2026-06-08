@@ -119,3 +119,32 @@ def test_static_findings_clean_flow_no_issues():
           "response_types_supported": ["code"],
           "code_challenge_methods_supported": ["S256"]}
     assert oauth_audit.static_findings(wk, [flow], "https://target.com") == []
+
+
+BASE = {"client_id": "abc", "response_type": "code", "scope": "openid",
+        "state": "s", "redirect_uri": "https://target.com/cb"}
+CANARY = "https://oauth-probe.invalid/cb"
+
+
+def test_redirect_uri_probes_point_to_canary():
+    probes = oauth_audit.build_redirect_uri_probes(
+        "https://target.com/authorize", BASE, CANARY)
+    labels = {p["label"] for p in probes}
+    assert "redirect_uri:external" in labels
+    for p in probes:
+        assert p["expected_marker"] == "oauth-probe.invalid"
+        assert "oauth-probe.invalid" in p["url"]
+        assert p["url"].startswith("https://target.com/authorize?")
+        assert "client_id=abc" in p["url"]
+
+
+def test_pkce_missing_probe_drops_challenge():
+    p = oauth_audit.build_pkce_missing_probe("https://target.com/authorize", BASE)
+    assert "code_challenge" not in p["url"]
+    assert p["label"] == "pkce:missing"
+
+
+def test_pkce_downgrade_probe_uses_plain():
+    p = oauth_audit.build_pkce_downgrade_probe("https://target.com/authorize", BASE)
+    assert "code_challenge_method=plain" in p["url"]
+    assert p["label"] == "pkce:downgrade"
