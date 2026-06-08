@@ -36,6 +36,9 @@ except Exception:
     _CATALOG = {}
 
 
+_AUTHORIZE_HINT = re.compile(r'/(?:oauth2?/)?(?:authorize|auth)\b|[?&]response_type=', re.I)
+
+
 def parse_well_known(json_text):
     """Normaliza o JSON do .well-known. JSON inválido/não-dict → {}."""
     try:
@@ -57,3 +60,30 @@ def parse_well_known(json_text):
         "grant_types_supported": _list("grant_types_supported"),
         "scopes_supported": _list("scopes_supported"),
     }
+
+
+def parse_authorize_requests(zap_messages_text):
+    """Extrai fluxos /authorize observados no dump do ZAP. Reusa bola.parse_zap_messages."""
+    flows = []
+    for r in parse_zap_messages(zap_messages_text):
+        url = r.get("url") or ""
+        if not _AUTHORIZE_HINT.search(url):
+            continue
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+
+        def g(k):
+            v = q.get(k)
+            return v[0] if v else ""
+
+        flows.append({
+            "authorize_url": url,
+            "client_id": g("client_id"),
+            "redirect_uri": g("redirect_uri"),
+            "response_type": g("response_type"),
+            "state": g("state"),
+            "nonce": g("nonce"),
+            "code_challenge": g("code_challenge"),
+            "code_challenge_method": g("code_challenge_method"),
+            "scope": g("scope"),
+        })
+    return flows
