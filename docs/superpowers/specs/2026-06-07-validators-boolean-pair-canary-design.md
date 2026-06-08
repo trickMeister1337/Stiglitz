@@ -62,16 +62,22 @@ de injeção limpo (quoting/param ambíguo) **ou** o fetch do probe falha, retor
 Reusa `normalize`/`response_diff` de `poc_validator` via try-import com fallback (mesmo
 padrão de `bola.py`), para ser importável fora do pacote e testável sem rede.
 
-### Builders de payload (transformam o curl reconstruído)
+### Builders de payload (operam sobre URL estruturada, não sobre a string de shell)
+
+Decisão de planejamento: o payload vive **dentro** da URL que o `confirm_nuclei` depois
+passa por `shlex.quote`. Regexar a string de shell montada esbarra em quoting. Logo os
+builders recebem `url` (e `method`/`body`) estruturados e devolvem **dicts de request**;
+o orquestrador faz o `shlex.quote` na hora de montar o curl (shell-safety isolada num lugar).
 
 ```python
-def build_boolean_variants(curl_cmd, safe="safe-test-value-123"):
-    """(true_curl, false_curl) | None.
-    Substitui a região de injeção (mesmas âncoras do build_safe_baseline:
-    keyword SQL entre aspas e/ou valor de parâmetro de query) por:
-        <safe>' AND '1'='1   (true / tautologia)
-        <safe>' AND '1'='2   (false / contradição)
-    Retorna None se nenhuma região injetável for identificada → fallback."""
+def build_boolean_variants(url, method="GET", body=""):
+    """(true_req, false_req) | None — cada req é {"url","method","body"}.
+    Detecta na query string o parâmetro injetável (valor contendo keyword SQL —
+    mesmas keywords do build_safe_baseline) e troca o valor por:
+        <base>' AND '1'='1   (true / tautologia)
+        <base>' AND '1'='2   (false / contradição)
+    onde <base> é um token benigno fixo ('1'). Só query string nesta fase
+    (payload no body → None). None se nenhum parâmetro injetável for achado → fallback."""
 
 def new_canary_token():
     """Marcador único, curto e busca-seguro: 'stg' + 8 hex (os.urandom).
@@ -80,11 +86,12 @@ def new_canary_token():
 
 PROBE_CHARS = '<">'   # quebra-de-contexto benigna anexada ao token
 
-def build_canary_variant(curl_cmd, token):
-    """canary_curl | None. Injeta `token + PROBE_CHARS` na região de payload XSS
-    detectada (mesmas âncoras XSS do build_safe_baseline). Os chars de quebra
-    permitem distinguir reflexão crua (XSS provável) de reflexão escapada (safe).
-    None se nada substituível."""
+def build_canary_variant(url, token, method="GET", body=""):
+    """canary_req | None — {"url","method","body"}.
+    Detecta na query string o parâmetro injetável (valor com chars XSS-ish:
+    < > " ' script javascript:) e troca o valor por `token + PROBE_CHARS`.
+    Os chars de quebra permitem distinguir reflexão crua (XSS provável) de
+    reflexão escapada (safe). Só query string nesta fase. None se nada substituível."""
 ```
 
 ### Vereditos puros
@@ -96,8 +103,10 @@ def boolean_pair_verdict(baseline_norm, true_norm, false_norm):
       TRUE≈baseline ∧ FALSE≠baseline ∧ TRUE≠FALSE → confirmed=True,  conf=88
       tudo ≈ igual (condição sem efeito)           → confirmed=False, conf=25
       sinal parcial (só um dos critérios)          → confirmed=False, conf=40
-      baseline < guard mínimo (50B, via response_diff) → inconclusivo, conf=20
-    Comparações via response_diff(normalize(...))."""
+      baseline < 50 chars normalizados             → inconclusivo, conf=20
+    Comparação de CONTEÚDO via difflib.SequenceMatcher.ratio() (>=0.95 ≈ igual)
+    sobre normalize(...); NÃO usa response_diff (este é por tamanho/erro e não
+    distingue TRUE vs FALSE de tamanho parecido). normalize é reusado."""
 
 def canary_reflection(token, resp_body):
     """{reflected: bool, encoded: bool, confidence: int, note: str}.
@@ -142,10 +151,12 @@ if cn and cn.get("reflected") and cn.get("encoded"):
 - `validate(...)`: dois novos kwargs `bool_pair=None, canary=None`, repassados no dict `ctx`
   do dispatch de plugin (o `ctx` já é montado nas linhas ~407-414).
 - `confirm_nuclei`: após o cálculo de `diff_changed`/`diff_conf`:
-  - `vuln_type == "sqli"`: `build_boolean_variants(clean_curl)` → 2 fetches
+  - `vuln_type == "sqli"`: `build_boolean_variants(url, method, req_body)` → se não-None,
+    monta curl de cada req com `shlex.quote` (helper local `_req_to_curl`) → 2 fetches
     (reusa `run_cmd` + `parse_http_response`) → `boolean_pair_verdict(normalize(base), …)`.
-  - `vuln_type == "xss"`: `token = new_canary_token()` → `build_canary_variant(clean_curl, token)`
-    → 1 fetch → `canary_reflection(token, body)`.
+  - `vuln_type == "xss"`: `token = new_canary_token()` →
+    `build_canary_variant(url, token, method, req_body)` → se não-None, monta curl →
+    1 fetch → `canary_reflection(token, body)`.
   - Passa os dicts resultantes a `validate(...)`. **Sempre on** (sem gate de profile).
   - Custo: ~+2 req (sqli) / +1 req (xss) por finding desses tipos.
 - `confirm_zap`: inalterado nesta fase (o ZAP não reconstrói payload de injeção do mesmo
@@ -171,8 +182,8 @@ if cn and cn.get("reflected") and cn.get("encoded"):
 - Builder `None` → sem campo no `ctx` → comportamento atual idêntico.
 - Fetch do probe com timeout/erro → ausência de sinal (não confirma por par incompleto);
   nunca derruba a confirmação do caminho legado.
-- `boolean_pair_verdict` herda o guard de baseline mínimo (50B) do `response_diff`;
-  baseline pequeno → inconclusivo.
+- `boolean_pair_verdict` tem guard de baseline mínimo (50 chars normalizados);
+  baseline pequeno → inconclusivo (conf 20), nunca confirmado.
 
 ## Fora de escopo (YAGNI / plano futuro)
 
