@@ -218,3 +218,67 @@ def test_active_findings_drops_non_confirmed():
     for st in ("REJECTED", "INCONCLUSIVE"):
         assert oauth_audit.active_findings([(probe, {"state": st, "evidence": ""})],
                                            "https://target.com") == []
+
+
+def _wk_text():
+    return json.dumps({"authorization_endpoint": "https://target.com/authorize",
+                       "response_types_supported": ["code"],
+                       "code_challenge_methods_supported": []})
+
+
+def _zap_text():
+    return json.dumps({"messages": [
+        {"requestHeader": "GET https://target.com/authorize?client_id=a&"
+                          "redirect_uri=https%3A%2F%2Ftarget.com%2Fcb&response_type=code&"
+                          "state=s HTTP/1.1",
+         "responseHeader": "HTTP/1.1 302 Found", "responseBody": ""}]})
+
+
+def test_run_passive_only_when_not_active(tmp_path):
+    sent = []
+
+    def fake_send(probe):
+        sent.append(probe)
+        return (302, "https://oauth-probe.invalid/cb", "")
+
+    res = oauth_audit.run(str(tmp_path), active=False, profile=None,
+                          well_known_text=_wk_text(), zap_text=_zap_text(),
+                          client_id="a", authorize_url="https://target.com/authorize",
+                          target="https://target.com", send_fn=fake_send)
+    assert sent == []                       # nenhum probe enviado (passivo)
+    assert res["summary"]["active"] is False
+    assert res["summary"]["passive"] >= 1   # achou PKCE-missing no well-known
+    out = json.load(open(os.path.join(str(tmp_path), "raw", "oauth_findings.json")))
+    assert any(f["type"] == "oauth_pkce_missing" for f in out)
+
+
+def test_run_production_forces_dry_run(tmp_path):
+    sent = []
+
+    def fake_send(probe):
+        sent.append(probe)
+        return (302, "https://oauth-probe.invalid/cb", "")
+
+    res = oauth_audit.run(str(tmp_path), active=True, profile="production",
+                          well_known_text=_wk_text(), zap_text=_zap_text(),
+                          client_id="a", authorize_url="https://target.com/authorize",
+                          target="https://target.com", send_fn=fake_send)
+    assert sent == []                       # production → dry-run
+    assert res["summary"]["dry_run"] is True
+
+
+def test_run_active_sends_probes_and_confirms(tmp_path):
+    def fake_send(probe):
+        if probe.get("kind") == "redirect":
+            return (302, "https://oauth-probe.invalid/cb?code=x", "")
+        return (302, "https://target.com/cb?code=x", "")
+
+    res = oauth_audit.run(str(tmp_path), active=True, profile="staging",
+                          well_known_text=_wk_text(), zap_text=_zap_text(),
+                          client_id="a", authorize_url="https://target.com/authorize",
+                          target="https://target.com", send_fn=fake_send)
+    out = json.load(open(os.path.join(str(tmp_path), "raw", "oauth_findings.json")))
+    types = {f["type"] for f in out}
+    assert "oauth_redirect_uri" in types
+    assert "oauth_pkce_missing" in types
+    assert res["summary"]["active"] is True

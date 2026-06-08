@@ -309,3 +309,107 @@ def active_findings(probe_verdicts, target):
                 "request; reject 'plain' and missing challenges.",
                 evidence=f"{probe.get('label')} | {ev}"))
     return _dedup(out)
+
+
+def fetch_well_known(base_url, timeout=15):
+    """GET nos paths .well-known. Retorna o primeiro corpo JSON não-vazio, ou ''."""
+    import urllib.request
+    base = base_url.rstrip("/")
+    for path in WELL_KNOWN_PATHS:
+        try:
+            req = urllib.request.Request(base + path, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+            if body.strip():
+                return body
+        except Exception:
+            continue
+    return ""
+
+
+def send_probe(probe, timeout=15):
+    """Envia o probe via curl SEM seguir redirect (lê o Location cru). Retorna (status, location, body)."""
+    import subprocess
+    url = probe.get("url") or ""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return (0, "", "")
+    cmd = ["curl", "-s", "-S", "--max-time", str(timeout), "-o", "-",
+           "-w", "\n__HTTP_STATUS__:%{http_code}\n__LOCATION__:%{redirect_url}", "--", url]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        raw = p.stdout or ""
+    except Exception:
+        return (0, "", "")
+    status, location, body = 0, "", raw
+    sm = raw.rfind("__HTTP_STATUS__:")
+    if sm != -1:
+        body = raw[:sm].rstrip("\n")
+        tail = raw[sm:]
+        for line in tail.splitlines():
+            if line.startswith("__HTTP_STATUS__:"):
+                try:
+                    status = int(line.split(":", 1)[1].strip())
+                except ValueError:
+                    status = 0
+            elif line.startswith("__LOCATION__:"):
+                location = line.split(":", 1)[1].strip()
+    return (status, location, body)
+
+
+def run(scan_dir, active=False, profile=None, well_known_text=None, zap_text=None,
+        client_id="", authorize_url="", redirect_uri="", canary=None, target="",
+        send_fn=send_probe):
+    """Orquestra a fase P9.6. Passivo sempre; ativo só com active=True e profile!=production.
+    well_known_text/zap_text injetáveis (testes); em produção real são lidos do disco/rede pelo caller."""
+    canary = canary or os.environ.get("STIGLITZ_OAUTH_CANARY_URI") or "https://oauth-probe.invalid/cb"
+    wk = parse_well_known(well_known_text or "")
+    flows = parse_authorize_requests(zap_text or "")
+
+    findings = static_findings(wk, flows, target or authorize_url)
+    passive_n = len(findings)
+
+    authorize_url = authorize_url or wk.get("authorization_endpoint") or ""
+    if not client_id and flows:
+        client_id = flows[0].get("client_id", "")
+    if not redirect_uri and flows:
+        redirect_uri = flows[0].get("redirect_uri", "")
+
+    dry_run = active and (profile or "").lower() == "production"
+    do_active = active and not dry_run and bool(authorize_url) and bool(client_id)
+
+    params = {"client_id": client_id, "response_type": "code",
+              "scope": (flows[0].get("scope") if flows else "") or "openid",
+              "state": "stiglitz", "redirect_uri": redirect_uri}
+
+    if active and not do_active and not dry_run:
+        print("  [!] oauth-audit: probes ativos pulados (sem authorize_url/client_id)")
+
+    if dry_run:
+        print("  [i] oauth-audit: probes ativos em dry-run (STIGLITZ_PROFILE=production)")
+
+    if do_active:
+        probes = build_redirect_uri_probes(authorize_url, params, canary)
+        pkce_missing = build_pkce_missing_probe(authorize_url, params)
+        pkce_down = build_pkce_downgrade_probe(authorize_url, params)
+        canary_host = urllib.parse.urlsplit(canary).netloc
+        verdicts = []
+        for pr in probes:
+            status, loc, body = send_fn(pr)
+            verdicts.append((pr, classify_redirect_response(status, loc, canary_host)))
+        for pr in (pkce_missing, pkce_down):
+            status, loc, body = send_fn(pr)
+            verdicts.append((pr, classify_pkce_response(status, loc, body)))
+        findings += active_findings(verdicts, target or authorize_url)
+        findings = _dedup(findings)
+
+    summary = {"passive": passive_n, "active": do_active, "dry_run": dry_run,
+               "total": len(findings)}
+    raw_dir = os.path.join(scan_dir, "raw")
+    try:
+        os.makedirs(raw_dir, exist_ok=True)
+        with open(os.path.join(raw_dir, "oauth_findings.json"), "w", encoding="utf-8") as fh:
+            json.dump(findings, fh, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        print(f"  aviso: não foi possível gravar oauth_findings.json: {exc}", file=sys.stderr)
+    return {"findings": findings, "summary": summary}
