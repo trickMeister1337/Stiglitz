@@ -1,5 +1,5 @@
 # tests/test_active_probe.py
-import os, sys
+import os, sys, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import active_probe as ap
 
@@ -90,3 +90,29 @@ def test_build_canary_variant_injects_token():
 
 def test_build_canary_variant_no_xss_param_returns_none():
     assert ap.build_canary_variant("http://t.com/p?id=42", "stgdeadbeef") is None
+
+
+# --- CLI tests (Task 4) ---
+import subprocess
+
+_AP_PATH = os.path.join(os.path.dirname(__file__), "..", "lib", "active_probe.py")
+
+
+def test_cli_verdict_bool_confirmed():
+    out = subprocess.run(
+        [sys.executable, _AP_PATH, "verdict-bool", BASE, BASE, DIFF],
+        capture_output=True, text=True)
+    assert out.returncode == 0
+    data = json.loads(out.stdout)
+    assert data["confirmed"] is True
+
+
+def test_cli_verdict_canary_raw(tmp_path):
+    body_file = tmp_path / "body.txt"
+    body_file.write_text('x stgdeadbeef<"> y')
+    out = subprocess.run(
+        [sys.executable, _AP_PATH, "verdict-canary", "stgdeadbeef", str(body_file)],
+        capture_output=True, text=True)
+    assert out.returncode == 0
+    data = json.loads(out.stdout)
+    assert data["reflected"] is True and data["encoded"] is False

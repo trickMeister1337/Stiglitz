@@ -159,3 +159,24 @@ def build_canary_variant(url, token, method="GET", body=""):
     key, _v = hit
     return {"method": method, "body": body,
             "url": _rebuild_query(url, key, token + PROBE_CHARS)}
+
+
+# adicionar no FINAL de lib/active_probe.py
+
+def _main(argv):
+    if len(argv) >= 5 and argv[1] == "verdict-bool":
+        print(json.dumps(boolean_pair_verdict(argv[2], argv[3], argv[4])))
+        return 0
+    if len(argv) >= 4 and argv[1] == "verdict-canary":
+        with open(argv[3], encoding="utf-8", errors="replace") as fh:
+            body = fh.read()
+        print(json.dumps(canary_reflection(argv[2], body)))
+        return 0
+    sys.stderr.write(
+        "uso: active_probe.py verdict-bool <baseline> <true> <false>\n"
+        "     active_probe.py verdict-canary <token> <body-file>\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv))
