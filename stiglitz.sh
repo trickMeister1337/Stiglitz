@@ -252,8 +252,9 @@ OSINT_DIR=""       # Diretório de output do osint.sh (reaproveita descoberta)
 OUTDIR_OVERRIDE="" # Reutiliza um diretório de scan fixo (orquestrador pipeline.py)
 ONLY_PHASES=""     # Lista de fases a executar (ex: "P4"); vazio = todas
 DRY_RUN=false      # Simular: imprime o plano e sai sem executar ferramentas
+OAUTH_ACTIVE=0     # Probes ativos OAuth/OIDC (P9.6) — opt-in via --oauth-active
 
-# Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase, --dry-run
+# Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase, --dry-run, --oauth-active
 _args=("$@")
 for _i in "${!_args[@]}"; do
     case "${_args[$_i]}" in
@@ -265,6 +266,7 @@ for _i in "${!_args[@]}"; do
         --outdir)            OUTDIR_OVERRIDE="${_args[$((${_i}+1))]}" ;;
         --only-phase)        ONLY_PHASES="${_args[$((${_i}+1))]}" ;;
         --dry-run)           DRY_RUN=true ;;
+        --oauth-active)      OAUTH_ACTIVE=1 ;;
     esac
 done
 
@@ -455,7 +457,7 @@ _phase_enabled() {
 _needs_network() {
     # Retorna 0 se alguma fase habilitada precisa de acesso de rede ao alvo.
     # Fases offline (P11 = geração de relatório) não requerem conectividade.
-    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P9_5 P10 P10_5; do
+    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P9_5 P9_6 P10 P10_5; do
         _phase_enabled "$_np" && return 0
     done
     return 1
@@ -1737,6 +1739,46 @@ fi
 phase_end "P9_5"
 phase_done "FASE_9_5"
 fi  # fim P9.5
+
+# ====================== FASE 9.6: OAUTH/OIDC AUDIT ======================
+if _phase_enabled "P9_6"; then
+phase_start "P9_6"
+phase_banner "FASE 9.6/11: OAUTH/OIDC AUDIT (redirect_uri & PKCE)"
+
+_oauth_wk="$OUTDIR/raw/oauth_well_known.json"
+: > "$_oauth_wk"
+# Descoberta passiva do well-known (degrada silenciosamente se ausente)
+for _wkp in "/.well-known/openid-configuration" "/.well-known/oauth-authorization-server"; do
+    if curl -s -S --max-time 15 "https://${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
+            && [ -s "$_oauth_wk" ] && grep -q "authorization_endpoint" "$_oauth_wk"; then
+        break
+    fi
+    : > "$_oauth_wk"
+done
+[ -s "$_oauth_wk" ] || _oauth_wk=""   # nada encontrado → não passa --well-known (Python tenta a rede)
+
+# Corpus do ZAP (reusa o dump da P9.5 se existir)
+_oauth_zap="$OUTDIR/raw/zap_messages_a.json"
+[ -f "$_oauth_zap" ] || _oauth_zap=""
+
+_oauth_active=""
+[ "${OAUTH_ACTIVE:-0}" = "1" ] && _oauth_active="1"
+_oauth_profile="${STIGLITZ_PROFILE:-}"
+
+if python3 "$SCRIPT_DIR/lib/oauth_audit.py" run "$OUTDIR" \
+        ${_oauth_wk:+--well-known "$_oauth_wk"} \
+        ${_oauth_zap:+--zap "$_oauth_zap"} \
+        --target "https://${TARGET}" \
+        ${_oauth_profile:+--profile "$_oauth_profile"} \
+        ${_oauth_active:+--active}; then
+    echo -e "  ${GREEN}[✓] OAuth audit concluído → raw/oauth_findings.json${NC}"
+else
+    echo -e "  ${YELLOW}[!] oauth-audit: módulo retornou erro${NC}"
+fi
+
+phase_end "P9_6"
+phase_done "FASE_9_6"
+fi  # fim P9.6
 
 if _phase_enabled "P10"; then
 phase_start "P10"
