@@ -644,6 +644,12 @@ def test_classify_pkce_confirmed_when_code_issued():
 def test_classify_pkce_rejected():
     v = oauth_audit.classify_pkce_response(400, "", "code_challenge required")
     assert v["state"] == "REJECTED"
+
+
+def test_classify_pkce_no_false_positive_on_error_code():
+    # error_code=E401 contém a substring "code=" mas NÃO é um authorization code
+    v = oauth_audit.classify_pkce_response(302, "https://target.com/cb?error_code=E401", "")
+    assert v["state"] != "CONFIRMED"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -678,7 +684,8 @@ def classify_pkce_response(status, location, body):
     """CONFIRMED se um authorization code é emitido sem PKCE válido; REJECTED se o servidor exige PKCE."""
     loc = location or ""
     b = body or ""
-    if "code=" in loc or '"code"' in b or '"access_token"' in b:
+    loc_qs = urllib.parse.parse_qs(urllib.parse.urlsplit(loc).query)
+    if "code" in loc_qs or '"code"' in b or '"access_token"' in b:
         return {"state": "CONFIRMED", "evidence": f"code issued (status={status})"}
     low = (loc + " " + b).lower()
     if status in (400, 401, 403) or "code_challenge" in low or "pkce" in low:
