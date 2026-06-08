@@ -882,6 +882,7 @@ for _vf_file, _vf_label in [
     ('graphql_findings.json',    'graphql_findings'),
     ('retire_findings.json',     'retire_findings'),
     ('access_findings.json',     'access_findings'),
+    ('oauth_findings.json',      'oauth_findings'),
 ]:
     _vff = os.path.join(OUTDIR, 'raw', _vf_file)
     if os.path.exists(_vff):
