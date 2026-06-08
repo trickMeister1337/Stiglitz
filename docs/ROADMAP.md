@@ -44,7 +44,12 @@ unificado; SLA/aging CISA KEV (`lib/prioritization.py`); compliance multi-framew
   builders query-string, CLI. Integrado: `validators/sqli.py` consome `ctx["bool_pair"]`,
   `validators/xss.py` consome `ctx["canary"]`, `poc_validator.validate()` repassa os kwargs,
   `confirm_nuclei` dispara os probes. Degrada sem regressão (builder None / fetch falho →
-  fallback legado). Suite 486 passed / 4 skipped
+  fallback legado)
+- ✅ **OAuth/OIDC audit** (fase **P9.6** no stiglitz.sh, `lib/oauth_audit.py`): descoberta
+  passiva (well-known + params do dump ZAP) de redirect_uri/PKCE/state/nonce/implicit flow;
+  probes ativos opt-in com `--oauth-active` (dry-run sob `STIGLITZ_PROFILE=production`);
+  classifiers CONFIRMED/REJECTED/INCONCLUSIVE → `oauth_findings.json`; 6 classes novas no
+  catálogo. Suite combinada: 514 passed / 4 skipped
 
 **P1 restante (ordem de retorno):**
 1. ZAP bearer-token session propagation (fronteira do BOLA) + fix render AJAX
