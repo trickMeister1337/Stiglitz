@@ -2,6 +2,7 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 
 from vuln_catalog import CATALOG
+import oauth_audit
 
 
 def test_oauth_classes_registered():
@@ -18,3 +19,21 @@ def test_oauth_classes_registered():
         assert CATALOG[klass]["cwe"] == cwe
         assert CATALOG[klass]["vector"].startswith("AV:")
         assert CATALOG[klass]["title"]
+
+
+def test_parse_well_known_normalizes():
+    doc = """{"authorization_endpoint":"https://target.com/authorize",
+              "token_endpoint":"https://target.com/token",
+              "response_types_supported":["code","token","id_token"],
+              "code_challenge_methods_supported":["S256"],
+              "grant_types_supported":["authorization_code"]}"""
+    wk = oauth_audit.parse_well_known(doc)
+    assert wk["authorization_endpoint"] == "https://target.com/authorize"
+    assert wk["response_types_supported"] == ["code", "token", "id_token"]
+    assert wk["code_challenge_methods_supported"] == ["S256"]
+
+
+def test_parse_well_known_invalid_returns_empty():
+    assert oauth_audit.parse_well_known("not json") == {}
+    assert oauth_audit.parse_well_known("[1,2,3]") == {}
+    assert oauth_audit.parse_well_known("") == {}
