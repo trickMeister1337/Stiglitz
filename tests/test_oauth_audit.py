@@ -148,3 +148,45 @@ def test_pkce_downgrade_probe_uses_plain():
     p = oauth_audit.build_pkce_downgrade_probe("https://target.com/authorize", BASE)
     assert "code_challenge_method=plain" in p["url"]
     assert p["label"] == "pkce:downgrade"
+
+
+def test_classify_redirect_confirmed_when_location_is_canary():
+    v = oauth_audit.classify_redirect_response(
+        302, "https://oauth-probe.invalid/cb?code=x", "oauth-probe.invalid")
+    assert v["state"] == "CONFIRMED"
+
+
+def test_classify_redirect_confirmed_via_userinfo_authority():
+    # userinfo-confusion: host real é o canary mesmo com target.com no userinfo
+    v = oauth_audit.classify_redirect_response(
+        302, "https://target.com@oauth-probe.invalid/cb?code=x", "oauth-probe.invalid")
+    assert v["state"] == "CONFIRMED"
+
+
+def test_classify_redirect_rejected():
+    v = oauth_audit.classify_redirect_response(400, "", "oauth-probe.invalid")
+    assert v["state"] == "REJECTED"
+    v2 = oauth_audit.classify_redirect_response(
+        302, "https://target.com/error?e=invalid_redirect_uri", "oauth-probe.invalid")
+    assert v2["state"] == "REJECTED"
+
+
+def test_classify_redirect_inconclusive():
+    v = oauth_audit.classify_redirect_response(200, "", "oauth-probe.invalid")
+    assert v["state"] == "INCONCLUSIVE"
+
+
+def test_classify_pkce_confirmed_when_code_issued():
+    v = oauth_audit.classify_pkce_response(302, "https://target.com/cb?code=abc", "")
+    assert v["state"] == "CONFIRMED"
+
+
+def test_classify_pkce_rejected():
+    v = oauth_audit.classify_pkce_response(400, "", "code_challenge required")
+    assert v["state"] == "REJECTED"
+
+
+def test_classify_pkce_no_false_positive_on_error_code():
+    # error_code=E401 contém a substring "code=" mas NÃO é um authorization code
+    v = oauth_audit.classify_pkce_response(302, "https://target.com/cb?error_code=E401", "")
+    assert v["state"] != "CONFIRMED"

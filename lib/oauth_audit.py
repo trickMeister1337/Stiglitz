@@ -246,3 +246,34 @@ def build_pkce_downgrade_probe(authorize_url, params):
     p["code_challenge"] = p.get("code_challenge") or "plainchallenge"
     p["code_challenge_method"] = "plain"
     return {"label": "pkce:downgrade", "url": _with_query(authorize_url, p), "kind": "pkce"}
+
+
+def _loc_host(location):
+    # .hostname (não .netloc) — ignora userinfo/porta, então o probe
+    # userinfo (https://target.com@canary/cb) resolve para o host real = canary.
+    return urllib.parse.urlsplit(location or "").hostname or ""
+
+
+def classify_redirect_response(status, location, canary_host):
+    """CONFIRMED se o servidor redireciona para o host canary; REJECTED se nega; senão INCONCLUSIVE."""
+    loc = location or ""
+    host = _loc_host(loc)
+    if host and (host == canary_host or host.endswith("." + canary_host)):
+        return {"state": "CONFIRMED", "evidence": f"Location -> {loc[:120]}"}
+    low = loc.lower()
+    if status in (400, 401, 403) or "invalid_redirect" in low or "invalid_request" in low:
+        return {"state": "REJECTED", "evidence": f"status={status} {loc[:80]}"}
+    return {"state": "INCONCLUSIVE", "evidence": f"status={status} location={loc[:80]}"}
+
+
+def classify_pkce_response(status, location, body):
+    """CONFIRMED se um authorization code é emitido sem PKCE válido; REJECTED se o servidor exige PKCE."""
+    loc = location or ""
+    b = body or ""
+    loc_qs = urllib.parse.parse_qs(urllib.parse.urlsplit(loc).query)
+    if "code" in loc_qs or '"code"' in b or '"access_token"' in b:
+        return {"state": "CONFIRMED", "evidence": f"code issued (status={status})"}
+    low = (loc + " " + b).lower()
+    if status in (400, 401, 403) or "code_challenge" in low or "pkce" in low:
+        return {"state": "REJECTED", "evidence": f"status={status}"}
+    return {"state": "INCONCLUSIVE", "evidence": f"status={status}"}
