@@ -282,3 +282,19 @@ def test_run_active_sends_probes_and_confirms(tmp_path):
     assert "oauth_redirect_uri" in types
     assert "oauth_pkce_missing" in types
     assert res["summary"]["active"] is True
+
+
+def test_cli_run_writes_output(tmp_path, monkeypatch, capsys):
+    wk = tmp_path / "wk.json"; wk.write_text(_wk_text())
+    zap = tmp_path / "zap.json"; zap.write_text(_zap_text())
+    rc = oauth_audit.main(["oauth_audit.py", "run", str(tmp_path),
+                           "--well-known", str(wk), "--zap", str(zap),
+                           "--target", "https://target.com"])
+    assert rc == 0
+    out = json.load(open(os.path.join(str(tmp_path), "raw", "oauth_findings.json")))
+    assert isinstance(out, list)
+    assert "oauth-audit" in capsys.readouterr().out
+
+
+def test_cli_usage_on_bad_args():
+    assert oauth_audit.main(["oauth_audit.py"]) == 2

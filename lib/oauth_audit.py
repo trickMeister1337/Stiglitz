@@ -413,3 +413,49 @@ def run(scan_dir, active=False, profile=None, well_known_text=None, zap_text=Non
     except Exception as exc:
         print(f"  aviso: não foi possível gravar oauth_findings.json: {exc}", file=sys.stderr)
     return {"findings": findings, "summary": summary}
+
+
+def _read(path):
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            return fh.read()
+    except Exception:
+        return ""
+
+
+def main(argv):
+    """CLI: oauth_audit.py run <scan_dir> [--well-known F] [--zap F] [--active]
+    [--profile P] [--target URL] [--authorize-url URL]. Segredos via env STIGLITZ_OAUTH_*."""
+    if len(argv) < 3 or argv[1] != "run":
+        print("uso: oauth_audit.py run <scan_dir> [--well-known F] [--zap F] "
+              "[--active] [--profile P] [--target URL] [--authorize-url URL]", file=sys.stderr)
+        return 2
+    scan_dir = argv[2]
+    opts = {"--well-known": "", "--zap": "", "--profile": os.environ.get("STIGLITZ_PROFILE", ""),
+            "--target": "", "--authorize-url": os.environ.get("STIGLITZ_OAUTH_AUTHORIZE_URL", "")}
+    active = "--active" in argv
+    i = 3
+    while i < len(argv):
+        if argv[i] in opts and i + 1 < len(argv):
+            opts[argv[i]] = argv[i + 1]
+            i += 2
+        else:
+            i += 1
+    wk_text = _read(opts["--well-known"]) if opts["--well-known"] else ""
+    if not wk_text and opts["--target"]:
+        wk_text = fetch_well_known(opts["--target"])
+    zap_text = _read(opts["--zap"]) if opts["--zap"] else ""
+    res = run(scan_dir, active=active, profile=opts["--profile"] or None,
+              well_known_text=wk_text, zap_text=zap_text,
+              client_id=os.environ.get("STIGLITZ_OAUTH_CLIENT_ID", ""),
+              authorize_url=opts["--authorize-url"],
+              redirect_uri=os.environ.get("STIGLITZ_OAUTH_REDIRECT_URI", ""),
+              target=opts["--target"])
+    s = res["summary"]
+    print(f"  oauth-audit: {s['total']} finding(s) ({s['passive']} passivo, "
+          f"ativo={s['active']}, dry_run={s['dry_run']})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
