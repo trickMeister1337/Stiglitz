@@ -26,14 +26,14 @@ Lógica pura e testável (parse, análise de params, *builders* de probe, *class
 ### CLI e ativação (`stiglitz.sh`)
 
 - A fase **P9.6 roda em dois níveis**:
-  - **Passivo** (sempre que houver well-known **ou** ZAP dump): só `static_findings`, zero tráfego ofensivo.
-  - **Ativo** (probes): só quando o perfil permite (`staging`/`lab`) **e** há `client_id` (do env ou capturado). Em `production` os probes viram **dry-run** (montados e logados, não enviados).
-- Config opcional via env: `STIGLITZ_OAUTH_AUTHORIZE_URL`, `STIGLITZ_OAUTH_CLIENT_ID`, `STIGLITZ_OAUTH_REDIRECT_URI` (redirect legítimo registrado, base dos probes), `STIGLITZ_OAUTH_CANARY_URI`. Sem nenhuma, a fase ainda roda passiva a partir do well-known/ZAP descobertos.
+  - **Passivo** (sempre que houver well-known **ou** ZAP dump): só `static_findings`, zero tráfego ofensivo. **É o default** — sem nenhuma flag, a fase só descobre e analisa.
+  - **Ativo** (probes): exige a **flag opt-in `--oauth-active`** (igual ao BOLA exigir `--token-a/-b`) **e** `client_id` (do env ou capturado). Mesmo com a flag, `STIGLITZ_PROFILE=production` força **dry-run** (probes montados e logados, não enviados). O scan não tem perfil nativo (diferente do `stiglitz_red.sh`); o perfil chega só via env `STIGLITZ_PROFILE` (default ausente ⇒ tratado como permissivo, mas a flag já é o gate primário).
+- Config opcional via env: `STIGLITZ_OAUTH_AUTHORIZE_URL`, `STIGLITZ_OAUTH_CLIENT_ID`, `STIGLITZ_OAUTH_REDIRECT_URI` (redirect legítimo registrado, base dos probes), `STIGLITZ_OAUTH_CANARY_URI`, `STIGLITZ_PROFILE`. Sem nenhuma, a fase ainda roda passiva a partir do well-known/ZAP descobertos.
 - Invocável isoladamente pelo `pipeline.py` (`--only-phase`), com checkpoint, no padrão das demais fases.
 
 ### Gating de perfil / segurança
 
-- Probes ativos só em `staging`/`lab`; `production` → dry-run. Decisão derivada do perfil já carregado pelo scan (mesma fonte do gating de sqlmap/brute).
+- Probes ativos **gated por flag opt-in `--oauth-active`** (default off). Quando ligados, `STIGLITZ_PROFILE=production` força dry-run. O `stiglitz.sh` (scan) não tem perfil nativo — os perfis sqlmap/brute são do `stiglitz_red.sh`; por isso o gate primário é a flag, e o perfil é um override opcional via env.
 - O probe de open redirect usa **somente** o `STIGLITZ_OAUTH_CANARY_URI` (sentinela), nunca um domínio externo arbitrário — evita SSRF/redirect contra terceiros reais.
 - Segredos (`client_id`, redirect) por env, não em argv. `oauth_findings.json` fica no `OUTDIR` (gitignored) — **nunca** versionado.
 
