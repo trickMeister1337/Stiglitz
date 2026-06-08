@@ -44,7 +44,7 @@ def test_oauth_classes_registered():
     expected = {
         "oauth_redirect_uri":  "CWE-601",
         "oauth_pkce_missing":  "CWE-287",
-        "oauth_pkce_downgrade": "CWE-310",
+        "oauth_pkce_downgrade": "CWE-757",
         "oauth_missing_state": "CWE-352",
         "oauth_missing_nonce": "CWE-294",
         "oauth_implicit_flow": "CWE-522",
@@ -70,7 +70,7 @@ Em `lib/vuln_catalog.py`, logo após a entrada `"open_redirect": {...},` adicion
                              "vector": "AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:N"},
     "oauth_pkce_missing":   {"cwe": "CWE-287", "title": "OAuth authorization code flow without enforced PKCE",
                              "vector": "AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N"},
-    "oauth_pkce_downgrade": {"cwe": "CWE-310", "title": "OAuth PKCE downgrade to plain challenge method",
+    "oauth_pkce_downgrade": {"cwe": "CWE-757", "title": "OAuth PKCE downgrade to plain challenge method",
                              "vector": "AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N"},
     "oauth_missing_state":  {"cwe": "CWE-352", "title": "OAuth flow without state parameter (login CSRF)",
                              "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N"},

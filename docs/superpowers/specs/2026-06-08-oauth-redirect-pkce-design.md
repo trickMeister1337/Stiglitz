@@ -105,7 +105,7 @@ Já existem `open_redirect` (CWE-601) e `csrf_state_changing` (CWE-352) genéric
 |--------|-----|------------------------|
 | `oauth_redirect_uri` | CWE-601 | `AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:N` (ATO via roubo de code) |
 | `oauth_pkce_missing` | CWE-287 | `AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N` (interceptação de code, public client) |
-| `oauth_pkce_downgrade` | CWE-310 | `AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N` |
+| `oauth_pkce_downgrade` | CWE-757 | `AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N` |
 | `oauth_missing_state` | CWE-352 | `AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N` (login CSRF) |
 | `oauth_missing_nonce` | CWE-294 | `AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N` (replay de id_token) |
 | `oauth_implicit_flow` | CWE-522 | `AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N` (token no fragment vaza em log/referer) |
