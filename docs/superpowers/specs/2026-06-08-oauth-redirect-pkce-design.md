@@ -49,7 +49,7 @@ Lógica pura e testável (parse, análise de params, *builders* de probe, *class
   - **state/nonce**: fluxo observado sem `state`; fluxo OIDC (`scope` contém `openid`) sem `nonce`.
   - **redirect_uri sobre HTTP**: `redirect_uri` observado com esquema `http://`.
 - **Probe builders** (puros — montam a request, não enviam):
-  - `build_redirect_uri_probes(authorize_url, base_params, canary) -> [probe]` — variações: domínio canary puro, `sub.target.canary` (sufixo), path traversal (`/../`), `@canary` (userinfo), `%0d%0a`/`%2e` (encoding), `target.com.canary` (prefixo). Cada probe carrega o `expected_marker` (host canary).
+  - `build_redirect_uri_probes(authorize_url, base_params, canary) -> [probe]` — 3 variações cujo **host de destino real é o canary** (confirmáveis pelo classifier, que compara o host do `Location`): `external` (canary puro), `subdomain_suffix` (`target.com.canary`), `userinfo` (`https://target.com@canary` — authority confusion, host real = canary). Variantes "canary-inert" (path traversal `/../` que normaliza de volta a target.com; `?next=canary` second-order) ficam **fora** — não produzem destino = canary e só gerariam ruído. Cada probe carrega o `expected_marker` (host canary).
   - `build_pkce_downgrade_probe(...)` — fluxo com `code_challenge_method=plain`.
   - `build_pkce_missing_probe(...)` — code flow sem `code_challenge`.
 - **Classifiers**:

@@ -556,12 +556,13 @@ def build_redirect_uri_probes(authorize_url, params, canary):
     host = urllib.parse.urlsplit(canary).netloc or canary
     legit = params.get("redirect_uri", "")
     legit_host = urllib.parse.urlsplit(legit).netloc
+    # Só variantes cujo HOST de destino real é o canary podem ser confirmadas
+    # pelo classifier (que compara o host do Location). path_traversal e
+    # open_redirect_param são canary-inert (destino real continua target.com) → fora.
     variants = {
         "external": canary,
         "subdomain_suffix": f"https://{legit_host}.{host}/cb" if legit_host else canary,
-        "userinfo": f"{legit}@{host}" if legit else canary,
-        "path_traversal": f"{legit}/../{host}" if legit else canary,
-        "open_redirect_param": f"{legit}?next={canary}" if legit else canary,
+        "userinfo": f"https://{legit_host}@{host}/cb" if legit_host else canary,
     }
     probes = []
     for label, evil in variants.items():
@@ -656,7 +657,9 @@ Adicionar a `lib/oauth_audit.py`:
 
 ```python
 def _loc_host(location):
-    return urllib.parse.urlsplit(location or "").netloc
+    # .hostname (não .netloc) — ignora userinfo/porta, então o probe
+    # userinfo (https://target.com@canary/cb) resolve para o host real = canary.
+    return urllib.parse.urlsplit(location or "").hostname or ""
 
 
 def classify_redirect_response(status, location, canary_host):
