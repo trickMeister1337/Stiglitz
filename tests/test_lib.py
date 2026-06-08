@@ -670,6 +670,32 @@ class TestPocValidator(unittest.TestCase):
         clean, safe = pv.build_safe_baseline("curl 'http://x/?id=1 OR 1=1'", "http://x")
         self.assertNotIn("OR 1=1", safe)
 
+    def test_validate_passes_bool_pair_to_plugin(self):
+        import poc_validator as pv
+        confirmed, conf, note = pv.validate(
+            "sqli", "http://x/", "", "", "200",
+            bool_pair={"confirmed": True, "confidence": 88, "note": "par ok"})
+        self.assertTrue(confirmed)
+        self.assertEqual(conf, 88)
+
+    def test_validate_passes_canary_to_plugin(self):
+        import poc_validator as pv
+        confirmed, conf, note = pv.validate(
+            "xss", "http://x/", "irrelevante", "", "200",
+            canary={"reflected": True, "encoded": False, "confidence": 90, "note": "cru"})
+        self.assertTrue(confirmed)
+        self.assertEqual(conf, 90)
+
+    def test_req_to_curl_quotes_url_and_method(self):
+        import poc_validator as pv
+        req = {"url": "http://t.com/s?q=1' AND '1'='1", "method": "GET", "body": ""}
+        cmd = pv._req_to_curl(req)
+        self.assertIn("curl ", cmd)
+        self.assertIn("-X GET", cmd)
+        # URL com aspas simples deve estar shell-quotada (sem aspas cruas soltas)
+        self.assertIn("http://t.com/s?q=1", cmd)
+        self.assertIn("-D -", cmd)
+
     def test_build_safe_baseline_neutralizes_double_quote_sqli(self):
         import poc_validator as pv
         # Antes só aspas simples eram tratadas → payload em aspas duplas era FN
@@ -982,6 +1008,33 @@ class TestValidatorPlugins(unittest.TestCase):
         self.assertTrue(confirmed)
         self.assertGreaterEqual(conf, 60)
 
+    def test_sqli_plugin_bool_pair_confirms_over_weak_diff(self):
+        # bool_pair confirmado tem prioridade sobre size-diff fraco sem double-check
+        from validators.sqli import validate as sqli_validate
+        ctx = {
+            "url": "http://x/", "resp_body": "", "resp_headers": "",
+            "status": "200", "patterns": {"patterns": []},
+            "diff_changed": True, "diff_conf": 15, "diff_note": "mudou 40%",
+            "auth_ev": [], "dc_result": None, "dc_bonus": 0,
+            "bool_pair": {"confirmed": True, "confidence": 88, "note": "par ok"},
+        }
+        confirmed, conf, note = sqli_validate(ctx)
+        self.assertTrue(confirmed)
+        self.assertEqual(conf, 88)
+        self.assertIn("booleano", note.lower())
+
+    def test_sqli_plugin_bool_pair_absent_keeps_legacy(self):
+        # sem bool_pair, size-diff fraco sem dc continua NÃO confirmando (regressão)
+        from validators.sqli import validate as sqli_validate
+        ctx = {
+            "url": "http://x/", "resp_body": "", "resp_headers": "",
+            "status": "200", "patterns": {"patterns": []},
+            "diff_changed": True, "diff_conf": 15, "diff_note": "mudou 40%",
+            "auth_ev": [], "dc_result": None, "dc_bonus": 0,
+        }
+        confirmed, _, _ = sqli_validate(ctx)
+        self.assertFalse(confirmed)
+
     def test_all_classify_types_have_plugin(self):
         """Cada vuln_type retornado por classify_vuln deve ter um plug-in
         registrado. Garante que o dispatch nunca cai no if/elif legado."""
@@ -1008,6 +1061,35 @@ class TestValidatorPlugins(unittest.TestCase):
         confirmed, conf, _ = xss_validate(ctx)
         self.assertTrue(confirmed)
         self.assertGreaterEqual(conf, 90)
+
+    def test_xss_plugin_canary_raw_confirms(self):
+        from validators.xss import validate as xss_validate
+        ctx = {
+            "url": "http://x/", "resp_body": "irrelevante", "resp_headers": "",
+            "status": "200", "patterns": {"patterns": []},
+            "diff_changed": False, "diff_conf": 0, "diff_note": "",
+            "auth_ev": [], "dc_result": None, "dc_bonus": 0,
+            "canary": {"reflected": True, "encoded": False, "confidence": 90,
+                       "note": "cru"},
+        }
+        confirmed, conf, note = xss_validate(ctx)
+        self.assertTrue(confirmed)
+        self.assertEqual(conf, 90)
+        self.assertIn("canário", note.lower())
+
+    def test_xss_plugin_canary_encoded_not_confirmed(self):
+        from validators.xss import validate as xss_validate
+        ctx = {
+            "url": "http://x/", "resp_body": "irrelevante", "resp_headers": "",
+            "status": "200", "patterns": {"patterns": []},
+            "diff_changed": False, "diff_conf": 0, "diff_note": "",
+            "auth_ev": [], "dc_result": None, "dc_bonus": 0,
+            "canary": {"reflected": True, "encoded": True, "confidence": 35,
+                       "note": "escapado"},
+        }
+        confirmed, conf, _ = xss_validate(ctx)
+        self.assertFalse(confirmed)
+        self.assertEqual(conf, 35)
 
 
 class TestProfileLoader(unittest.TestCase):
