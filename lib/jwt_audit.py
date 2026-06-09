@@ -90,6 +90,35 @@ def crack_hs256(token, wordlist):
     return None
 
 
+def exp_status(token, window_seconds, now_ts):
+    """Classifica o exp do JWT contra uma janela de scan, SEM usar relógio (now_ts injetado).
+
+    Retorna dict {"state", "exp", "remaining"}:
+      "malformed"      — token não decodificável
+      "no_exp"         — payload sem exp (ou exp não-numérico)
+      "expired"        — exp <= now_ts
+      "expires_within" — now_ts < exp <= now_ts + window_seconds
+      "ok"             — exp > now_ts + window_seconds
+    remaining = exp - now_ts (segundos) quando exp presente, senão None.
+    """
+    try:
+        _, payload = decode_jwt(token)
+    except (ValueError, json.JSONDecodeError):
+        return {"state": "malformed", "exp": None, "remaining": None}
+    exp = payload.get("exp")
+    if not isinstance(exp, (int, float)) or isinstance(exp, bool):
+        return {"state": "no_exp", "exp": None, "remaining": None}
+    exp = int(exp)
+    remaining = exp - int(now_ts)
+    if remaining <= 0:
+        state = "expired"
+    elif remaining <= window_seconds:
+        state = "expires_within"
+    else:
+        state = "ok"
+    return {"state": state, "exp": exp, "remaining": remaining}
+
+
 def _finding(ftype, name, sev, url, desc, remediation, evidence=""):
     return {
         "tool": "jwt_audit", "type": ftype, "source": "JWT Audit",

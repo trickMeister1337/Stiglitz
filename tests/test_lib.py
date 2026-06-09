@@ -1784,6 +1784,47 @@ class TestSarifEnvironmental(unittest.TestCase):
         self.assertEqual(rule["properties"]["security-severity"], "7.5")
 
 
+class TestJwtExp(unittest.TestCase):
+    """exp_status: classificação determinística do exp do JWT (now_ts injetado)."""
+
+    def _token(self, payload):
+        import jwt_audit as ja
+        # header trivial + payload arbitrário; assinatura vazia (não verificada aqui)
+        h = ja.b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+        p = ja.b64url_encode(json.dumps(payload).encode())
+        return f"{h}.{p}."
+
+    def test_expired(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"exp": 1000}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "expired")
+        self.assertEqual(st["exp"], 1000)
+        self.assertEqual(st["remaining"], -1000)
+
+    def test_expires_within_window(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"exp": 2500}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "expires_within")
+        self.assertEqual(st["remaining"], 500)
+
+    def test_ok_comfortably_valid(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"exp": 100000}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "ok")
+
+    def test_no_exp_claim(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"sub": "u1"}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "no_exp")
+        self.assertIsNone(st["exp"])
+
+    def test_malformed_token(self):
+        import jwt_audit as ja
+        st = ja.exp_status("not-a-jwt", 1980, now_ts=2000)
+        self.assertEqual(st["state"], "malformed")
+        self.assertIsNone(st["remaining"])
+
+
 if __name__ == "__main__":
     # Run with verbose output
     unittest.main(verbosity=2)
