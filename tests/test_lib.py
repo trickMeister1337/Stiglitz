@@ -1806,6 +1806,7 @@ class TestJwtExp(unittest.TestCase):
         st = ja.exp_status(self._token({"exp": 2500}), 1980, now_ts=2000)
         self.assertEqual(st["state"], "expires_within")
         self.assertEqual(st["remaining"], 500)
+        self.assertEqual(st["exp"], 2500)
 
     def test_ok_comfortably_valid(self):
         import jwt_audit as ja
@@ -1823,6 +1824,19 @@ class TestJwtExp(unittest.TestCase):
         st = ja.exp_status("not-a-jwt", 1980, now_ts=2000)
         self.assertEqual(st["state"], "malformed")
         self.assertIsNone(st["remaining"])
+
+    def test_boundary_exactly_at_window_is_within(self):
+        import jwt_audit as ja
+        # exp == now_ts + window_seconds → remaining == window_seconds → expires_within (limite fechado à direita)
+        st = ja.exp_status(self._token({"exp": 3980}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "expires_within")
+        self.assertEqual(st["remaining"], 1980)
+
+    def test_boundary_one_past_window_is_ok(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"exp": 3981}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "ok")
+        self.assertEqual(st["remaining"], 1981)
 
 
 if __name__ == "__main__":

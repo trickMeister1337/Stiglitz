@@ -100,6 +100,7 @@ def exp_status(token, window_seconds, now_ts):
       "expires_within" — now_ts < exp <= now_ts + window_seconds
       "ok"             — exp > now_ts + window_seconds
     remaining = exp - now_ts (segundos) quando exp presente, senão None.
+    now_ts e exp são truncados para int (epoch em segundos).
     """
     try:
         _, payload = decode_jwt(token)
