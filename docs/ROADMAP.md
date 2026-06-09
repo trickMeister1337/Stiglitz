@@ -50,10 +50,15 @@ unificado; SLA/aging CISA KEV (`lib/prioritization.py`); compliance multi-framew
   probes ativos opt-in com `--oauth-active` (dry-run sob `STIGLITZ_PROFILE=production`);
   classifiers CONFIRMED/REJECTED/INCONCLUSIVE → `oauth_findings.json`; 6 classes novas no
   catálogo. Suite combinada: 514 passed / 4 skipped
+- ✅ **ZAP bearer-token propagation (spider) + AJAX render chromium** (Fase 9): bearer/header
+  injetados no HttpSender ANTES do spider (helper `zap_inject_auth_headers`) → ZAP Spider e
+  histórico que a P9.5 (BOLA) consome rodam autenticados (fronteira do BOLA expandida);
+  pré-check de `exp` (`jwt_audit.exp_status` + CLI `exp-check`); AJAX Spider via `chrome-headless`
+  com preflight de browser e degradação. Validado ao vivo (alvo local): spider autenticado
+  descobre rota protegida, AJAX renderiza via chromium (confinamento snap não bloqueou), exp-check OK
 
 **P1 restante (ordem de retorno):**
-1. ZAP bearer-token session propagation (fronteira do BOLA) + fix render AJAX
-   (firefox/geckodriver no env)
+- (nenhum — itens P1 concluídos; próximo é o backlog P2)
 
 ## P2 — BACKLOG
 
@@ -67,6 +72,11 @@ IaC/container (trivy); multi-tenant.
   no scan full, não como passo isolado do orquestrador)
 - **Cobertura PCI:** porte seletivo do swarm-pci (PAN/Luhn, Magecart, tag `pci_req`); escopo
   via `cde_targets.txt` (gitignored). Design aprovado, implementação pendente
+- **Propagação do bearer ao active scanner + browser do AJAX:** o replacer cobre o ZAP Spider
+  clássico, mas validação ao vivo mostrou que o **active scanner** e o **browser do AJAX Spider**
+  rodam deslogados (requests sem `Authorization`). Propagação completa exige mais que o replacer
+  (httpSender script, ou contexto forced-user adaptado a bearer estático). Não bloqueia a fronteira
+  do BOLA, que depende do histórico do spider — já autenticado
 
 ## Pendência operacional
 
