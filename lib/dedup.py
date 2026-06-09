@@ -1,4 +1,3 @@
-# lib/dedup.py
 #!/usr/bin/env python3
 """
 dedup.py — dedup semântico de findings (P2).
@@ -100,8 +99,9 @@ def _merge(group):
     cves = sorted(set().union(*[_cves(f) for f in group]))
     if cves:
         m["cves"] = cves
-    m["merged_from"] = sorted({_fp_of(f) for f in group})
-    exact = len({_fp_of(f) for f in group}) == 1
+    fps = {_fp_of(f) for f in group}
+    m["merged_from"] = sorted(fps)
+    exact = len(fps) == 1
     m["merge_score"] = 1.0 if exact else round(
         max(_score(rep, f) for f in group if f is not rep), 4)
     m["fingerprint"] = _fp_of(rep)
@@ -114,7 +114,7 @@ def dedupe(findings, threshold=None):
     if not findings:
         return list(findings or [])
     if threshold is None:
-        threshold = DEFAULT_THRESHOLD
+        threshold = DEFAULT_THRESHOLD  # threshold só é exercido no estágio 2 (fuzzy)
 
     # Estágio 1 — bucket exato por fingerprint (preserva ordem de 1ª aparição).
     order, buckets = [], {}
