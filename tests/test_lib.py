@@ -1277,6 +1277,35 @@ class TestReportModules(unittest.TestCase):
             self.assertNotIn("helpUri", rules[rid])
 
 
+class TestStiglitzPhase9Order(unittest.TestCase):
+    """Garante que o token é injetado ANTES do spider (fronteira do BOLA)."""
+
+    def _sh(self):
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repo, "stiglitz.sh"), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_inject_helper_called_before_spider(self):
+        sh = self._sh()
+        # "zap_inject_auth_headers\n" casa a CHAMADA (a definição é "...() {")
+        call = sh.index("zap_inject_auth_headers\n")
+        spider = sh.index("spider/action/scan")
+        self.assertLess(call, spider, "auth headers devem ser injetados antes do spider")
+
+    def test_no_duplicate_authtoken_replacer_in_prewarm(self):
+        sh = self._sh()
+        # A regra AuthToken deve ser adicionada exatamente uma vez com _auth_enc
+        # (token-A startup, via helper). O P9.5 usa _tb_enc (token-B) e é precedido
+        # por removeRule — não conta como duplicata de startup.
+        self.assertEqual(sh.count("description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}"), 1)
+
+    def test_ajax_sets_browser_id(self):
+        # smoke: garante que o preflight de browser do AJAX existe no source
+        sh = self._sh()
+        self.assertIn("ajaxSpider/action/setOptionBrowserId", sh)
+        self.assertIn("chrome-headless", sh)
+
+
 class TestAuditChain(unittest.TestCase):
     """Hash chain do audit trail — verify_audit.py detecta adulteração."""
 
@@ -1782,6 +1811,97 @@ class TestSarifEnvironmental(unittest.TestCase):
         s = build_sarif(findings, "https://x.com")
         rule = s["runs"][0]["tool"]["driver"]["rules"][0]
         self.assertEqual(rule["properties"]["security-severity"], "7.5")
+
+
+class TestJwtExp(unittest.TestCase):
+    """exp_status: classificação determinística do exp do JWT (now_ts injetado)."""
+
+    def _token(self, payload):
+        import jwt_audit as ja
+        # header trivial + payload arbitrário; assinatura vazia (não verificada aqui)
+        h = ja.b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+        p = ja.b64url_encode(json.dumps(payload).encode())
+        return f"{h}.{p}."
+
+    def test_expired(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"exp": 1000}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "expired")
+        self.assertEqual(st["exp"], 1000)
+        self.assertEqual(st["remaining"], -1000)
+
+    def test_expires_within_window(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"exp": 2500}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "expires_within")
+        self.assertEqual(st["remaining"], 500)
+        self.assertEqual(st["exp"], 2500)
+
+    def test_ok_comfortably_valid(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"exp": 100000}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "ok")
+
+    def test_no_exp_claim(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"sub": "u1"}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "no_exp")
+        self.assertIsNone(st["exp"])
+
+    def test_malformed_token(self):
+        import jwt_audit as ja
+        st = ja.exp_status("not-a-jwt", 1980, now_ts=2000)
+        self.assertEqual(st["state"], "malformed")
+        self.assertIsNone(st["remaining"])
+
+    def test_boundary_exactly_at_window_is_within(self):
+        import jwt_audit as ja
+        # exp == now_ts + window_seconds → remaining == window_seconds → expires_within (limite fechado à direita)
+        st = ja.exp_status(self._token({"exp": 3980}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "expires_within")
+        self.assertEqual(st["remaining"], 1980)
+
+    def test_boundary_one_past_window_is_ok(self):
+        import jwt_audit as ja
+        st = ja.exp_status(self._token({"exp": 3981}), 1980, now_ts=2000)
+        self.assertEqual(st["state"], "ok")
+        self.assertEqual(st["remaining"], 1981)
+
+    def test_cli_exp_check_expired(self):
+        import subprocess, os
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        h = __import__("jwt_audit").b64url_encode(json.dumps({"alg": "none"}).encode())
+        p = __import__("jwt_audit").b64url_encode(json.dumps({"exp": 1000}).encode())
+        tok = f"{h}.{p}."
+        out = subprocess.run(
+            ["python3", os.path.join(repo, "lib", "jwt_audit.py"), "exp-check", tok, "1980", "2000"],
+            capture_output=True, text=True)
+        self.assertEqual(out.stdout.split()[0], "expired")
+
+    def test_cli_exp_check_no_exp_emits_empty_remaining(self):
+        import subprocess, os
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        h = __import__("jwt_audit").b64url_encode(json.dumps({"alg": "none"}).encode())
+        p = __import__("jwt_audit").b64url_encode(json.dumps({"sub": "u1"}).encode())
+        tok = f"{h}.{p}."
+        out = subprocess.run(
+            ["python3", os.path.join(repo, "lib", "jwt_audit.py"), "exp-check", tok, "1980", "2000"],
+            capture_output=True, text=True)
+        # state sem remaining: o split colapsa o espaço final → só o estado
+        self.assertEqual(out.stdout.split(), ["no_exp"])
+
+
+class TestPocPatternsLoad(unittest.TestCase):
+    """load_patterns degrada sem poluir stdout (warning de diagnóstico vai p/ stderr)."""
+
+    def test_missing_file_no_stdout_pollution(self):
+        import io, contextlib
+        import poc_validator as pv
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = pv.load_patterns("/nonexistent/definitely/nope.json")
+        self.assertEqual(result, {})
+        self.assertEqual(buf.getvalue(), "", "load_patterns não pode escrever no stdout")
 
 
 if __name__ == "__main__":

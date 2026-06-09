@@ -180,6 +180,40 @@ zap_setup_auth_context() {
     echo -e "  ${GREEN}[✓] ZAP Context autenticado (ctx=${ctx} user=${uid}) — spider/ascan rodarão logados${NC}"
 }
 
+# ── Injeção de bearer token / header custom no HttpSender do ZAP (replacer) ──
+# Roda ANTES do spider para que spider/AJAX/active-scan e o histórico que a P9.5
+# (BOLA) consome herdem o Authorization. Pre-check de exp avisa (não aborta) se o
+# JWT expira dentro da janela estimada do scan.
+zap_inject_auth_headers() {
+    if [ -n "${AUTH_TOKEN:-}" ]; then
+        local _win _now _expst _state _rem _auth_enc
+        _win=$(( ZAP_SPIDER_TIMEOUT + ${ZAP_AJAX_TIMEOUT:-180} + ZAP_SCAN_TIMEOUT ))
+        _now=$(date +%s)
+        _expst=$(python3 "$SCRIPT_DIR/lib/jwt_audit.py" exp-check "$AUTH_TOKEN" "$_win" "$_now" 2>/dev/null)
+        _state="${_expst%% *}"; _rem="${_expst##* }"
+        case "$_state" in
+            expired)
+                echo -e "  ${RED}[✗] Token JWT já expirou — spider/scan rodarão deslogados${NC}" ;;
+            expires_within)
+                echo -e "  ${YELLOW}[!] Token JWT expira em ~$(( ${_rem:-0} / 60 ))min (janela do scan ~$(( _win / 60 ))min) — possível perda de cobertura no fim${NC}" ;;
+        esac
+        _auth_enc=$(_url_quote "Bearer ${AUTH_TOKEN}")
+        zap_api_call "replacer/action/addRule" \
+            "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}" \
+            > /dev/null 2>&1
+        echo -e "  ${GREEN}[✓] Authorization Bearer injetado no ZAP (antes do spider)${NC}"
+    fi
+    if [ -n "${AUTH_HEADER:-}" ]; then
+        local _hname _hval _hval_enc
+        _hname="${AUTH_HEADER%%:*}"; _hval="${AUTH_HEADER#*:}"
+        _hval_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1].strip(),safe=''))" "$_hval" 2>/dev/null)
+        zap_api_call "replacer/action/addRule" \
+            "description=CustomHeader&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
+            > /dev/null 2>&1
+        echo -e "  ${GREEN}[✓] Header customizado injetado no ZAP (antes do spider)${NC}"
+    fi
+}
+
 wait_for_zap_progress() {
     local status_endpoint=$1 scan_id=$2 timeout_secs=$3 label=$4
     local elapsed=0 interval=10 progress
@@ -1427,6 +1461,9 @@ if command -v zaproxy &>/dev/null; then
         # ── ZAP Context autenticado (#3): configura scan logado se STIGLITZ_AUTH_* setado
         zap_setup_auth_context
 
+        # ── Bearer/header no HttpSender ANTES do spider (fronteira do BOLA) ──
+        zap_inject_auth_headers
+
         # ── ZAP Spider: complementa o Katana ou age sozinho ────────────
         echo -e "  ${BLUE}[…] Iniciando ZAP Spider (complementa crawl)...${NC}"
         if [ -n "$ZAP_CONTEXT_ID" ]; then
@@ -1444,28 +1481,50 @@ if command -v zaproxy &>/dev/null; then
         # browser headless e descobre rotas client-side/XHR invisíveis ao spider.
         if [ "${STIGLITZ_AJAX_SPIDER:-1}" = "1" ]; then
             echo -e "  ${BLUE}[…] AJAX Spider (SPA crawl headless)...${NC}"
+            # Preflight: o browser default do ZAP é firefox-headless. Escolher o que
+            # existe no host (chromium preferido neste ambiente; firefox se houver).
+            _ajax_browser=""
+            if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 \
+               || command -v google-chrome >/dev/null 2>&1 || command -v chrome >/dev/null 2>&1; then
+                _ajax_browser="chrome-headless"
+            elif command -v firefox >/dev/null 2>&1 || command -v firefox-esr >/dev/null 2>&1; then
+                _ajax_browser="firefox-headless"
+            fi
+            if [ -z "$_ajax_browser" ]; then
+                echo -e "  ${YELLOW}[○] Nenhum browser (chromium/firefox) no host — AJAX Spider pulado${NC}"
+            else
+                zap_api_call "ajaxSpider/action/setOptionBrowserId" "String=${_ajax_browser}" > /dev/null 2>&1
+                if [ "$_ajax_browser" = "chrome-headless" ]; then
+                    _chr_bin=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null || command -v google-chrome 2>/dev/null || command -v chrome 2>/dev/null)
+                    [ -n "$_chr_bin" ] && zap_api_call "selenium/action/setOptionChromeBinaryPath" "String=$(_url_quote "$_chr_bin")" > /dev/null 2>&1
+                fi
+                echo -e "  ${BLUE}[…] AJAX Spider usará browser: ${_ajax_browser}${NC}"
+            fi
             # inScope=true exige escopo definido (senão internal_error — validado);
             # com contexto autenticado usamos scanAsUser+inScope, senão inScope=false.
-            if [ -n "$ZAP_CONTEXT_ID" ]; then
-                _ajax_start=$(zap_api_call "ajaxSpider/action/scanAsUser" "contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&url=${ENCODED_URL}&inScope=true" 2>/dev/null)
-            else
-                _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=false" 2>/dev/null)
-            fi
-            if echo "$_ajax_start" | grep -q "OK"; then
-                _ajax_waited=0
-                while [ "$_ajax_waited" -lt "${ZAP_AJAX_TIMEOUT:-180}" ]; do
-                    _ajax_st=$(zap_api_call "ajaxSpider/view/status" "" 2>/dev/null \
-                        | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
-                    [ "$_ajax_st" = "stopped" ] && break
-                    sleep 5; _ajax_waited=$((_ajax_waited+5))
-                done
-                _ajax_n=$(zap_api_call "ajaxSpider/view/numberOfResults" "" 2>/dev/null \
-                    | python3 -c "import sys,json; print(json.load(sys.stdin).get('numberOfResults','0'))" 2>/dev/null || echo 0)
-                echo -e "  ${GREEN}[✓] AJAX Spider: ${_ajax_n:-0} rota(s) client-side descoberta(s)${NC}"
-            else
-                echo -e "  ${YELLOW}[○] AJAX Spider indisponível (add-on/browser ausente) — seguindo${NC}"
-            fi
-            unset _ajax_start _ajax_st _ajax_waited _ajax_n
+            if [ -n "$_ajax_browser" ]; then
+                if [ -n "$ZAP_CONTEXT_ID" ]; then
+                    _ajax_start=$(zap_api_call "ajaxSpider/action/scanAsUser" "contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&url=${ENCODED_URL}&inScope=true" 2>/dev/null)
+                else
+                    _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=false" 2>/dev/null)
+                fi
+                if echo "$_ajax_start" | grep -q "OK"; then
+                    _ajax_waited=0
+                    while [ "$_ajax_waited" -lt "${ZAP_AJAX_TIMEOUT:-180}" ]; do
+                        _ajax_st=$(zap_api_call "ajaxSpider/view/status" "" 2>/dev/null \
+                            | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+                        [ "$_ajax_st" = "stopped" ] && break
+                        sleep 5; _ajax_waited=$((_ajax_waited+5))
+                    done
+                    _ajax_n=$(zap_api_call "ajaxSpider/view/numberOfResults" "" 2>/dev/null \
+                        | python3 -c "import sys,json; print(json.load(sys.stdin).get('numberOfResults','0'))" 2>/dev/null || echo 0)
+                    echo -e "  ${GREEN}[✓] AJAX Spider: ${_ajax_n:-0} rota(s) client-side descoberta(s)${NC}"
+                else
+                    echo -e "  ${YELLOW}[○] AJAX Spider indisponível (add-on/browser ausente) — seguindo${NC}"
+                fi
+                unset _ajax_start _ajax_st _ajax_waited _ajax_n
+            fi  # fim if _ajax_browser
+            unset _ajax_browser _chr_bin
         fi
 
         # ── Verificar total de URLs no contexto ZAP ───────────────────
@@ -1502,15 +1561,9 @@ if command -v zaproxy &>/dev/null; then
             done
             echo -e "  ${GREEN}[✓] robots.txt importado para contexto ZAP${NC}"
         fi
-        # Injetar token de autenticação no ZAP se fornecido
+        # Token já injetado no HttpSender por zap_inject_auth_headers (antes do spider).
+        # Aqui apenas o force-crawl + katana autenticado, que dependem do token presente.
         if [ -n "$AUTH_TOKEN" ]; then
-            _auth_enc=$(python3 -c \
-                "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
-                "Bearer ${AUTH_TOKEN}" 2>/dev/null)
-            zap_api_call "replacer/action/addRule" \
-                "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}" \
-                > /dev/null 2>&1
-            echo -e "  ${GREEN}[✓] Authorization header injetado no ZAP${NC}"
             # Force-crawl endpoints autenticados com o token injetado
             echo -e "  ${BLUE}[…] Forçando crawl de endpoints protegidos com token...${NC}"
             for _ap in "/api" "/api/v1" "/api/v2" "/api/v3" \
@@ -1540,18 +1593,8 @@ if command -v zaproxy &>/dev/null; then
                 KATANA_JS_DONE=1
             fi
         fi
-        if [ -n "$AUTH_HEADER" ]; then
-            _hname="${AUTH_HEADER%%:*}"; _hval="${AUTH_HEADER#*:}"
-            _hval_enc=$(python3 -c \
-                "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1].strip(),safe=''))" \
-                "$_hval" 2>/dev/null)
-            zap_api_call "replacer/action/addRule" \
-                "description=CustomHeader&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
-                > /dev/null 2>&1
-            echo -e "  ${GREEN}[✓] Header customizado injetado no ZAP${NC}"
-        fi
         sleep 3
-        unset _pw_path _pw_url _pw_enc _robots _rpath _renc _hname _hval _hval_enc _auth_enc
+        unset _pw_path _pw_url _pw_enc _robots _rpath _renc
 
         # ── Iniciar Active Scan com validação ────────────────────────────
         echo -e "  ${BLUE}[…] Iniciando Active Scan...${NC}"

@@ -70,7 +70,7 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: python3 -m pytest tests/test_lib.py tests/test_stiglitz_modules.py tests/test_pipeline.py tests/test_e2e.py tests/test_email_spoof.py tests/test_criticality.py tests/test_bizlogic.py -v --tb=short
+        run: python3 -m pytest tests/ --ignore=tests/test_integration.py -v --tb=short
 
       - name: Run RED shell suite (dry-run, no external tools)
         run: bash tests/test_stiglitz_red.sh

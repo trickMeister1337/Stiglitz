@@ -24,6 +24,8 @@ Pipeline de recon e varredura de vulnerabilidades. Metodologia de risco: **KEV >
 7. **Fase 6** — Enriquecimento CVE/EPSS (NVD + FIRST.org + CISA KEV)
 8. **Fase 8** — Email Security (SPF/DMARC/DKIM)
 9. **Fase 9** — ZAP Spider + Active Scan
+   - **Bearer token / header custom** são injetados no HttpSender do ZAP (replacer) **antes** do spider (helper `zap_inject_auth_headers`), de modo que o ZAP Spider e o histórico que a Fase 9.5 (BOLA) consome rodem autenticados — expandindo a superfície de endpoints protegidos descobertos. Pré-check de `exp` do JWT (`jwt_audit.exp_status` + CLI `exp-check`) avisa (sem abortar) se o token expira dentro da janela estimada do scan. (Obs.: o replacer cobre o spider clássico; active scanner e browser do AJAX ainda rodam deslogados — ver follow-up no ROADMAP.)
+   - **AJAX Spider** seleciona o browser por preflight (`chrome-headless` preferido; `firefox-headless` como fallback), com degradação graciosa quando nenhum browser está disponível.
    - **Fase 9.5** — Access Control (BOLA/BFLA) — opt-in com `--token-a` + `--token-b`: replay multi-token de requisições do ZAP, confirma acesso indevido por tripla A/B/unauth + canário de corpo
    - **Fase 9.6** — OAuth/OIDC Audit — descoberta passiva (well-known + params do ZAP) de redirect_uri/PKCE/state/nonce/implicit flow; probes ativos opt-in com `--oauth-active` (dry-run sob `STIGLITZ_PROFILE=production`)
 10. **Fase 10** — JS Analysis + secret detection (katana)
@@ -166,7 +168,7 @@ go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 ## Critérios de Confirmação de PoC (`poc_validator.py`)
 
 - Threshold mínimo: 60% de confidence (`MIN_CONFIRM_CONFIDENCE`)
-- Padrões externos em `vuln_patterns.json`
+- Padrões externos **opcionais** em `vuln_patterns.json` (override; o módulo tem defaults inline para todas as consultas — a ausência do arquivo não é erro e degrada em silêncio)
 - Lê alertas ZAP do XML, testssl, e resultados de email security (SPF/DMARC/DKIM)
 
 Um exploit do RED é **CONFIRMADO** somente com: databases + tabelas enumeradas + dump_count > 0 + payload capturado.
