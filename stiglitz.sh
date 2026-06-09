@@ -1481,8 +1481,28 @@ if command -v zaproxy &>/dev/null; then
         # browser headless e descobre rotas client-side/XHR invisíveis ao spider.
         if [ "${STIGLITZ_AJAX_SPIDER:-1}" = "1" ]; then
             echo -e "  ${BLUE}[…] AJAX Spider (SPA crawl headless)...${NC}"
+            # Preflight: o browser default do ZAP é firefox-headless. Escolher o que
+            # existe no host (chromium preferido neste ambiente; firefox se houver).
+            _ajax_browser=""
+            if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 \
+               || command -v google-chrome >/dev/null 2>&1 || command -v chrome >/dev/null 2>&1; then
+                _ajax_browser="chrome-headless"
+            elif command -v firefox >/dev/null 2>&1 || command -v firefox-esr >/dev/null 2>&1; then
+                _ajax_browser="firefox-headless"
+            fi
+            if [ -z "$_ajax_browser" ]; then
+                echo -e "  ${YELLOW}[○] Nenhum browser (chromium/firefox) no host — AJAX Spider pulado${NC}"
+            else
+                zap_api_call "ajaxSpider/action/setOptionBrowserId" "String=${_ajax_browser}" > /dev/null 2>&1
+                if [ "$_ajax_browser" = "chrome-headless" ]; then
+                    _chr_bin=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null || command -v google-chrome 2>/dev/null)
+                    [ -n "$_chr_bin" ] && zap_api_call "selenium/action/setOptionChromeBinaryPath" "String=$(_url_quote "$_chr_bin")" > /dev/null 2>&1
+                fi
+                echo -e "  ${BLUE}[…] AJAX Spider usará browser: ${_ajax_browser}${NC}"
+            fi
             # inScope=true exige escopo definido (senão internal_error — validado);
             # com contexto autenticado usamos scanAsUser+inScope, senão inScope=false.
+            if [ -n "$_ajax_browser" ]; then
             if [ -n "$ZAP_CONTEXT_ID" ]; then
                 _ajax_start=$(zap_api_call "ajaxSpider/action/scanAsUser" "contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&url=${ENCODED_URL}&inScope=true" 2>/dev/null)
             else
@@ -1503,6 +1523,8 @@ if command -v zaproxy &>/dev/null; then
                 echo -e "  ${YELLOW}[○] AJAX Spider indisponível (add-on/browser ausente) — seguindo${NC}"
             fi
             unset _ajax_start _ajax_st _ajax_waited _ajax_n
+            fi  # fim if _ajax_browser
+            unset _ajax_browser _chr_bin
         fi
 
         # ── Verificar total de URLs no contexto ZAP ───────────────────

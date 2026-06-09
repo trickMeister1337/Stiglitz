@@ -1299,6 +1299,11 @@ class TestStiglitzPhase9Order(unittest.TestCase):
         # por removeRule — não conta como duplicata de startup.
         self.assertEqual(sh.count("description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}"), 1)
 
+    def test_ajax_sets_browser_id(self):
+        sh = self._sh()
+        self.assertIn("ajaxSpider/action/setOptionBrowserId", sh)
+        self.assertIn("chrome-headless", sh)
+
 
 class TestAuditChain(unittest.TestCase):
     """Hash chain do audit trail — verify_audit.py detecta adulteração."""
