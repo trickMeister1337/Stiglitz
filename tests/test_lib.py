@@ -1838,6 +1838,17 @@ class TestJwtExp(unittest.TestCase):
         self.assertEqual(st["state"], "ok")
         self.assertEqual(st["remaining"], 1981)
 
+    def test_cli_exp_check_expired(self):
+        import subprocess, os
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        h = __import__("jwt_audit").b64url_encode(json.dumps({"alg": "none"}).encode())
+        p = __import__("jwt_audit").b64url_encode(json.dumps({"exp": 1000}).encode())
+        tok = f"{h}.{p}."
+        out = subprocess.run(
+            ["python3", os.path.join(repo, "lib", "jwt_audit.py"), "exp-check", tok, "1980", "2000"],
+            capture_output=True, text=True)
+        self.assertEqual(out.stdout.split()[0], "expired")
+
 
 if __name__ == "__main__":
     # Run with verbose output

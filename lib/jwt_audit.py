@@ -188,5 +188,10 @@ def main(outdir, target, token=""):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "",
-         sys.argv[3] if len(sys.argv) > 3 else "")
+    if len(sys.argv) > 1 and sys.argv[1] == "exp-check":
+        st = exp_status(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
+        rem = "" if st["remaining"] is None else st["remaining"]
+        print(f"{st['state']} {rem}")
+    else:
+        main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "",
+             sys.argv[3] if len(sys.argv) > 3 else "")
