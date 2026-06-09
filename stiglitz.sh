@@ -206,7 +206,7 @@ zap_inject_auth_headers() {
     if [ -n "${AUTH_HEADER:-}" ]; then
         local _hname _hval _hval_enc
         _hname="${AUTH_HEADER%%:*}"; _hval="${AUTH_HEADER#*:}"
-        _hval_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1].strip(),safe=''))" "$_hval")
+        _hval_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1].strip(),safe=''))" "$_hval" 2>/dev/null)
         zap_api_call "replacer/action/addRule" \
             "description=CustomHeader&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
             > /dev/null 2>&1
