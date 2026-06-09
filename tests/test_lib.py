@@ -1849,6 +1849,18 @@ class TestJwtExp(unittest.TestCase):
             capture_output=True, text=True)
         self.assertEqual(out.stdout.split()[0], "expired")
 
+    def test_cli_exp_check_no_exp_emits_empty_remaining(self):
+        import subprocess, os
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        h = __import__("jwt_audit").b64url_encode(json.dumps({"alg": "none"}).encode())
+        p = __import__("jwt_audit").b64url_encode(json.dumps({"sub": "u1"}).encode())
+        tok = f"{h}.{p}."
+        out = subprocess.run(
+            ["python3", os.path.join(repo, "lib", "jwt_audit.py"), "exp-check", tok, "1980", "2000"],
+            capture_output=True, text=True)
+        # state sem remaining: o split colapsa o espaço final → só o estado
+        self.assertEqual(out.stdout.split(), ["no_exp"])
+
 
 if __name__ == "__main__":
     # Run with verbose output
