@@ -83,11 +83,16 @@ def load_patterns(patterns_path=None):
             if os.path.isfile(c):
                 patterns_path = c
                 break
+    if patterns_path is None:
+        # vuln_patterns.json é um override OPCIONAL — o módulo tem defaults inline
+        # para todas as consultas a PATTERNS. Ausência não é erro: degrada silencioso.
+        return {}
     try:
         with open(patterns_path, encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        print(f"  [!] vuln_patterns.json: {e} — usando padrões mínimos")
+        # warning de diagnóstico vai p/ stderr — NUNCA stdout (poluiria CLIs que emitem JSON)
+        print(f"  [!] vuln_patterns.json: {e} — usando padrões mínimos", file=sys.stderr)
         return {}
 
 PATTERNS = load_patterns()

@@ -1891,6 +1891,19 @@ class TestJwtExp(unittest.TestCase):
         self.assertEqual(out.stdout.split(), ["no_exp"])
 
 
+class TestPocPatternsLoad(unittest.TestCase):
+    """load_patterns degrada sem poluir stdout (warning de diagnóstico vai p/ stderr)."""
+
+    def test_missing_file_no_stdout_pollution(self):
+        import io, contextlib
+        import poc_validator as pv
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = pv.load_patterns("/nonexistent/definitely/nope.json")
+        self.assertEqual(result, {})
+        self.assertEqual(buf.getvalue(), "", "load_patterns não pode escrever no stdout")
+
+
 if __name__ == "__main__":
     # Run with verbose output
     unittest.main(verbosity=2)

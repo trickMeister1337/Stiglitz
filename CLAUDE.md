@@ -168,7 +168,7 @@ go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 ## Critérios de Confirmação de PoC (`poc_validator.py`)
 
 - Threshold mínimo: 60% de confidence (`MIN_CONFIRM_CONFIDENCE`)
-- Padrões externos em `vuln_patterns.json`
+- Padrões externos **opcionais** em `vuln_patterns.json` (override; o módulo tem defaults inline para todas as consultas — a ausência do arquivo não é erro e degrada em silêncio)
 - Lê alertas ZAP do XML, testssl, e resultados de email security (SPF/DMARC/DKIM)
 
 Um exploit do RED é **CONFIRMADO** somente com: databases + tabelas enumeradas + dump_count > 0 + payload capturado.
