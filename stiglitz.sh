@@ -1495,7 +1495,7 @@ if command -v zaproxy &>/dev/null; then
             else
                 zap_api_call "ajaxSpider/action/setOptionBrowserId" "String=${_ajax_browser}" > /dev/null 2>&1
                 if [ "$_ajax_browser" = "chrome-headless" ]; then
-                    _chr_bin=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null || command -v google-chrome 2>/dev/null)
+                    _chr_bin=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null || command -v google-chrome 2>/dev/null || command -v chrome 2>/dev/null)
                     [ -n "$_chr_bin" ] && zap_api_call "selenium/action/setOptionChromeBinaryPath" "String=$(_url_quote "$_chr_bin")" > /dev/null 2>&1
                 fi
                 echo -e "  ${BLUE}[…] AJAX Spider usará browser: ${_ajax_browser}${NC}"
@@ -1503,26 +1503,26 @@ if command -v zaproxy &>/dev/null; then
             # inScope=true exige escopo definido (senão internal_error — validado);
             # com contexto autenticado usamos scanAsUser+inScope, senão inScope=false.
             if [ -n "$_ajax_browser" ]; then
-            if [ -n "$ZAP_CONTEXT_ID" ]; then
-                _ajax_start=$(zap_api_call "ajaxSpider/action/scanAsUser" "contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&url=${ENCODED_URL}&inScope=true" 2>/dev/null)
-            else
-                _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=false" 2>/dev/null)
-            fi
-            if echo "$_ajax_start" | grep -q "OK"; then
-                _ajax_waited=0
-                while [ "$_ajax_waited" -lt "${ZAP_AJAX_TIMEOUT:-180}" ]; do
-                    _ajax_st=$(zap_api_call "ajaxSpider/view/status" "" 2>/dev/null \
-                        | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
-                    [ "$_ajax_st" = "stopped" ] && break
-                    sleep 5; _ajax_waited=$((_ajax_waited+5))
-                done
-                _ajax_n=$(zap_api_call "ajaxSpider/view/numberOfResults" "" 2>/dev/null \
-                    | python3 -c "import sys,json; print(json.load(sys.stdin).get('numberOfResults','0'))" 2>/dev/null || echo 0)
-                echo -e "  ${GREEN}[✓] AJAX Spider: ${_ajax_n:-0} rota(s) client-side descoberta(s)${NC}"
-            else
-                echo -e "  ${YELLOW}[○] AJAX Spider indisponível (add-on/browser ausente) — seguindo${NC}"
-            fi
-            unset _ajax_start _ajax_st _ajax_waited _ajax_n
+                if [ -n "$ZAP_CONTEXT_ID" ]; then
+                    _ajax_start=$(zap_api_call "ajaxSpider/action/scanAsUser" "contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&url=${ENCODED_URL}&inScope=true" 2>/dev/null)
+                else
+                    _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=false" 2>/dev/null)
+                fi
+                if echo "$_ajax_start" | grep -q "OK"; then
+                    _ajax_waited=0
+                    while [ "$_ajax_waited" -lt "${ZAP_AJAX_TIMEOUT:-180}" ]; do
+                        _ajax_st=$(zap_api_call "ajaxSpider/view/status" "" 2>/dev/null \
+                            | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+                        [ "$_ajax_st" = "stopped" ] && break
+                        sleep 5; _ajax_waited=$((_ajax_waited+5))
+                    done
+                    _ajax_n=$(zap_api_call "ajaxSpider/view/numberOfResults" "" 2>/dev/null \
+                        | python3 -c "import sys,json; print(json.load(sys.stdin).get('numberOfResults','0'))" 2>/dev/null || echo 0)
+                    echo -e "  ${GREEN}[✓] AJAX Spider: ${_ajax_n:-0} rota(s) client-side descoberta(s)${NC}"
+                else
+                    echo -e "  ${YELLOW}[○] AJAX Spider indisponível (add-on/browser ausente) — seguindo${NC}"
+                fi
+                unset _ajax_start _ajax_st _ajax_waited _ajax_n
             fi  # fim if _ajax_browser
             unset _ajax_browser _chr_bin
         fi

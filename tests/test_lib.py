@@ -1300,6 +1300,7 @@ class TestStiglitzPhase9Order(unittest.TestCase):
         self.assertEqual(sh.count("description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}"), 1)
 
     def test_ajax_sets_browser_id(self):
+        # smoke: garante que o preflight de browser do AJAX existe no source
         sh = self._sh()
         self.assertIn("ajaxSpider/action/setOptionBrowserId", sh)
         self.assertIn("chrome-headless", sh)
