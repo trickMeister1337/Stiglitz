@@ -1277,6 +1277,29 @@ class TestReportModules(unittest.TestCase):
             self.assertNotIn("helpUri", rules[rid])
 
 
+class TestStiglitzPhase9Order(unittest.TestCase):
+    """Garante que o token é injetado ANTES do spider (fronteira do BOLA)."""
+
+    def _sh(self):
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repo, "stiglitz.sh"), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_inject_helper_called_before_spider(self):
+        sh = self._sh()
+        # "zap_inject_auth_headers\n" casa a CHAMADA (a definição é "...() {")
+        call = sh.index("zap_inject_auth_headers\n")
+        spider = sh.index("spider/action/scan")
+        self.assertLess(call, spider, "auth headers devem ser injetados antes do spider")
+
+    def test_no_duplicate_authtoken_replacer_in_prewarm(self):
+        sh = self._sh()
+        # A regra AuthToken deve ser adicionada exatamente uma vez com _auth_enc
+        # (token-A startup, via helper). O P9.5 usa _tb_enc (token-B) e é precedido
+        # por removeRule — não conta como duplicata de startup.
+        self.assertEqual(sh.count("description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}"), 1)
+
+
 class TestAuditChain(unittest.TestCase):
     """Hash chain do audit trail — verify_audit.py detecta adulteração."""
 

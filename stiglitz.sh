@@ -180,6 +180,40 @@ zap_setup_auth_context() {
     echo -e "  ${GREEN}[✓] ZAP Context autenticado (ctx=${ctx} user=${uid}) — spider/ascan rodarão logados${NC}"
 }
 
+# ── Injeção de bearer token / header custom no HttpSender do ZAP (replacer) ──
+# Roda ANTES do spider para que spider/AJAX/active-scan e o histórico que a P9.5
+# (BOLA) consome herdem o Authorization. Pre-check de exp avisa (não aborta) se o
+# JWT expira dentro da janela estimada do scan.
+zap_inject_auth_headers() {
+    if [ -n "${AUTH_TOKEN:-}" ]; then
+        local _win _now _expst _state _rem _auth_enc
+        _win=$(( ZAP_SPIDER_TIMEOUT + ${ZAP_AJAX_TIMEOUT:-180} + ZAP_SCAN_TIMEOUT ))
+        _now=$(date +%s)
+        _expst=$(python3 "$SCRIPT_DIR/lib/jwt_audit.py" exp-check "$AUTH_TOKEN" "$_win" "$_now" 2>/dev/null)
+        _state="${_expst%% *}"; _rem="${_expst##* }"
+        case "$_state" in
+            expired)
+                echo -e "  ${RED}[✗] Token JWT já expirou — spider/scan rodarão deslogados${NC}" ;;
+            expires_within)
+                echo -e "  ${YELLOW}[!] Token JWT expira em ~$(( ${_rem:-0} / 60 ))min (janela do scan ~$(( _win / 60 ))min) — possível perda de cobertura no fim${NC}" ;;
+        esac
+        _auth_enc=$(_url_quote "Bearer ${AUTH_TOKEN}")
+        zap_api_call "replacer/action/addRule" \
+            "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}" \
+            > /dev/null 2>&1
+        echo -e "  ${GREEN}[✓] Authorization Bearer injetado no ZAP (antes do spider)${NC}"
+    fi
+    if [ -n "${AUTH_HEADER:-}" ]; then
+        local _hname _hval _hval_enc
+        _hname="${AUTH_HEADER%%:*}"; _hval="${AUTH_HEADER#*:}"
+        _hval_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1].strip(),safe=''))" "$_hval")
+        zap_api_call "replacer/action/addRule" \
+            "description=CustomHeader&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
+            > /dev/null 2>&1
+        echo -e "  ${GREEN}[✓] Header customizado injetado no ZAP (antes do spider)${NC}"
+    fi
+}
+
 wait_for_zap_progress() {
     local status_endpoint=$1 scan_id=$2 timeout_secs=$3 label=$4
     local elapsed=0 interval=10 progress
@@ -1427,6 +1461,9 @@ if command -v zaproxy &>/dev/null; then
         # ── ZAP Context autenticado (#3): configura scan logado se STIGLITZ_AUTH_* setado
         zap_setup_auth_context
 
+        # ── Bearer/header no HttpSender ANTES do spider (fronteira do BOLA) ──
+        zap_inject_auth_headers
+
         # ── ZAP Spider: complementa o Katana ou age sozinho ────────────
         echo -e "  ${BLUE}[…] Iniciando ZAP Spider (complementa crawl)...${NC}"
         if [ -n "$ZAP_CONTEXT_ID" ]; then
@@ -1502,15 +1539,9 @@ if command -v zaproxy &>/dev/null; then
             done
             echo -e "  ${GREEN}[✓] robots.txt importado para contexto ZAP${NC}"
         fi
-        # Injetar token de autenticação no ZAP se fornecido
+        # Token já injetado no HttpSender por zap_inject_auth_headers (antes do spider).
+        # Aqui apenas o force-crawl + katana autenticado, que dependem do token presente.
         if [ -n "$AUTH_TOKEN" ]; then
-            _auth_enc=$(python3 -c \
-                "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
-                "Bearer ${AUTH_TOKEN}" 2>/dev/null)
-            zap_api_call "replacer/action/addRule" \
-                "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}" \
-                > /dev/null 2>&1
-            echo -e "  ${GREEN}[✓] Authorization header injetado no ZAP${NC}"
             # Force-crawl endpoints autenticados com o token injetado
             echo -e "  ${BLUE}[…] Forçando crawl de endpoints protegidos com token...${NC}"
             for _ap in "/api" "/api/v1" "/api/v2" "/api/v3" \
@@ -1540,18 +1571,8 @@ if command -v zaproxy &>/dev/null; then
                 KATANA_JS_DONE=1
             fi
         fi
-        if [ -n "$AUTH_HEADER" ]; then
-            _hname="${AUTH_HEADER%%:*}"; _hval="${AUTH_HEADER#*:}"
-            _hval_enc=$(python3 -c \
-                "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1].strip(),safe=''))" \
-                "$_hval" 2>/dev/null)
-            zap_api_call "replacer/action/addRule" \
-                "description=CustomHeader&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
-                > /dev/null 2>&1
-            echo -e "  ${GREEN}[✓] Header customizado injetado no ZAP${NC}"
-        fi
         sleep 3
-        unset _pw_path _pw_url _pw_enc _robots _rpath _renc _hname _hval _hval_enc _auth_enc
+        unset _pw_path _pw_url _pw_enc _robots _rpath _renc
 
         # ── Iniciar Active Scan com validação ────────────────────────────
         echo -e "  ${BLUE}[…] Iniciando Active Scan...${NC}"
