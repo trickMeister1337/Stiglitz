@@ -1819,7 +1819,7 @@ _oauth_wk="$OUTDIR/raw/oauth_well_known.json"
 : > "$_oauth_wk"
 # Descoberta passiva do well-known (degrada silenciosamente se ausente)
 for _wkp in "/.well-known/openid-configuration" "/.well-known/oauth-authorization-server"; do
-    if curl -s -S --max-time 15 "https://${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
+    if curl -s -S --max-time 15 "${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
             && [ -s "$_oauth_wk" ] && grep -q "authorization_endpoint" "$_oauth_wk"; then
         break
     fi
@@ -1838,7 +1838,7 @@ _oauth_profile="${STIGLITZ_PROFILE:-}"
 if python3 "$SCRIPT_DIR/lib/oauth_audit.py" run "$OUTDIR" \
         ${_oauth_wk:+--well-known "$_oauth_wk"} \
         ${_oauth_zap:+--zap "$_oauth_zap"} \
-        --target "https://${TARGET}" \
+        --target "$TARGET" \
         ${_oauth_profile:+--profile "$_oauth_profile"} \
         ${_oauth_active:+--active}; then
     echo -e "  ${GREEN}[✓] OAuth audit concluído → raw/oauth_findings.json${NC}"
