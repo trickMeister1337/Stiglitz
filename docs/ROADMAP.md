@@ -68,6 +68,11 @@ unificado; SLA/aging CISA KEV (`lib/prioritization.py`); compliance multi-framew
   e o `--target` do `oauth_audit` usavam `https://${TARGET}` com `TARGET` já normalizado com
   esquema → `https://https://...` (zerava a fase, como zerava na bizlogic antes da P9.7). Agora
   usam `$TARGET` direto (mesma correção da P9.7). Validado: URLs bem-formadas, shellcheck limpo
+- ✅ **P9.5 (Access Control) no orquestrador + fluxo confirmado**: a fase **P9 do `pipeline.py`
+  virou unidade combinada `P9 P9_5 P9_6 P9_7` — as sub-fases de authz consomem o ZAP vivo da P9
+  (daemon encerrado no `trap EXIT` por invocação), então rodam juntas, não como passos isolados.
+  Confirmado por teste de caracterização que os findings da P9.5 chegam ao `findings.json`
+  (com `fingerprint`) **e** ao `findings.sarif` (com `partialFingerprints`). Suíte 553 passed / 4 skipped
 
 **P1 restante (ordem de retorno):**
 - (nenhum — itens P1 concluídos; próximo é o backlog P2)
@@ -79,9 +84,6 @@ IaC/container (trivy); multi-tenant.
 
 ## Follow-ups conhecidos (não feitos)
 
-- **BOLA:** confirmar se os findings de P9.5 chegam ao `findings.json` enriquecido + SARIF
-  (hoje entram via agregação do report). Adicionar P9.5 ao `pipeline.py` PHASES (hoje só roda
-  no scan full, não como passo isolado do orquestrador)
 - **Cobertura PCI:** porte seletivo do swarm-pci (PAN/Luhn, Magecart, tag `pci_req`); escopo
   via `cde_targets.txt` (gitignored). Design aprovado, implementação pendente
 - **Propagação do bearer ao active scanner + browser do AJAX:** o replacer cobre o ZAP Spider

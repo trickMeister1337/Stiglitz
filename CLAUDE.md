@@ -49,7 +49,7 @@ bash stiglitz.sh <target> --outdir <dir> --only-phase "P3 P4"
 Output: `scan_<domain>_<timestamp>/` (relatório `stiglitz_report.html`, gerado por `stiglitz_report.py`).
 
 ### `pipeline.py` — Orquestrador de Fases (Python)
-Dirige as fases do `stiglitz.sh` via `--only-phase`, com **checkpoint real** (pula fases já concluídas), retry por fase, dry-run e logging. A lógica das ferramentas permanece no `stiglitz.sh`; aqui mora só a orquestração. P3+P4 rodam como unidade combinada (paralelismo testssl/nuclei).
+Dirige as fases do `stiglitz.sh` via `--only-phase`, com **checkpoint real** (pula fases já concluídas), retry por fase, dry-run e logging. A lógica das ferramentas permanece no `stiglitz.sh`; aqui mora só a orquestração. P3+P4 rodam como unidade combinada (paralelismo testssl/nuclei). A fase **P9 também é combinada** (`P9 P9_5 P9_6 P9_7`): as sub-fases de authz (Access Control/OAuth/BizLogic) consomem o ZAP vivo iniciado pela P9 — que é encerrado no `trap EXIT` a cada invocação —, então rodam na mesma invocação; o gating por token degrada sozinho quando ausente.
 
 ```bash
 python3 pipeline.py <target>                       # scan completo orquestrado
