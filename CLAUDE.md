@@ -28,7 +28,7 @@ Pipeline de recon e varredura de vulnerabilidades. Metodologia de risco: **KEV >
    - **AJAX Spider** seleciona o browser por preflight (`chrome-headless` preferido; `firefox-headless` como fallback), com degradação graciosa quando nenhum browser está disponível.
    - **Fase 9.5** — Access Control (BOLA/BFLA) — opt-in com `--token-a` + `--token-b`: replay multi-token de requisições do ZAP, confirma acesso indevido por tripla A/B/unauth + canário de corpo
    - **Fase 9.6** — OAuth/OIDC Audit — descoberta passiva (well-known + params do ZAP) de redirect_uri/PKCE/state/nonce/implicit flow; probes ativos opt-in com `--oauth-active` (dry-run sob `STIGLITZ_PROFILE=production`)
-   - **Fase 9.7** — Business Logic Authz (`lib/bizlogic_scan.py`) — reusa `lib/bizlogic.py`: read-only auto-derivado (idor_read/privesc) do histórico ZAP + 2 tokens; mutantes (idor_write/amount-tampering/race/idempotency) opt-in via `--bizlogic-mutate` + `bizlogic.yaml` + gating de profile/RoE. Dedup vs P9.5 por fingerprint.
+   - **Fase 9.7** — Business Logic Authz (`lib/bizlogic_scan.py`) — reusa `lib/bizlogic.py`: read-only auto-derivado (idor_read/privesc) do histórico ZAP + 2 tokens; mutantes (idor_write/amount-tampering/race/idempotency) opt-in via `--bizlogic-mutate` + `bizlogic.yaml` + gating de profile/RoE. Dedup vs P9.5 por `(host, path, vuln_class)`.
 10. **Fase 10** — JS Analysis + secret detection (katana)
 11. **Fase 10.5** — Testes complementares (ffuf + smuggler + wpscan/joomscan/droopescan + trufflehog)
 12. **Fase 11** — Relatório HTML + findings.json (enriquecido com `state` por fingerprint) + SARIF 2.1.0 (com `partialFingerprints`)

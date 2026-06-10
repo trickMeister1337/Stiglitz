@@ -920,9 +920,11 @@ def _is_access_finding(_f):
     return (_f.get("tool") in ("bola", "access")
             or _f.get("source") in ("bola", "access"))
 
+# Só semeia o dedup com findings de acesso (P9.5) CONFIRMADOS: um achado
+# inconclusivo da P9.5 não deve suprimir um confirmado da P9.7 (perda de fidelidade).
 _access_keys = set()
 for _vf in version_findings:
-    if _is_access_finding(_vf):
+    if _is_access_finding(_vf) and _vf.get("confirmed"):
         _access_keys.add(_bizlogic_dedup_key(_vf))
 version_findings = [
     _vf for _vf in version_findings

@@ -4,7 +4,7 @@ All notable changes to Stiglitz are documented here. Dates are approximate.
 
 ## Unreleased
 
-- **bizlogic no scan (Fase P9.7)** — `lib/bizlogic_scan.py` ativa a engine de lógica de negócio/authz no `stiglitz.sh`. Read-only (idor_read/privesc) auto-derivado do histórico ZAP + tokens; mutantes opt-in via `--bizlogic-mutate` + `bizlogic.yaml` + gating de profile (production→dry-run) + RoE. Findings deduplicados contra a P9.5 (access control) por fingerprint. `lib/bizlogic.py` permanece intacto.
+- **bizlogic no scan (Fase P9.7)** — `lib/bizlogic_scan.py` ativa a engine de lógica de negócio/authz no `stiglitz.sh`. Read-only (idor_read/privesc) auto-derivado do histórico ZAP + tokens; mutantes opt-in via `--bizlogic-mutate` + `bizlogic.yaml` + gating de profile (production→dry-run) + RoE. Findings deduplicados contra a P9.5 (access control) por `(host, path, vuln_class)` — a P9.5 confirmada vence. `lib/bizlogic.py` permanece intacto.
 
 ## v8.1 — Backlog menor: validators completos, PCI ampliado, OAuth no ZAP
 

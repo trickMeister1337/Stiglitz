@@ -43,3 +43,27 @@ def test_report_aggregates_bizlogic_and_dedups_access():
             f"amount_tampering (único do bizlogic) deveria ser mantido, veio {len(transfer)}"
     finally:
         shutil.rmtree(outdir)
+
+
+def test_inconclusive_access_does_not_suppress_confirmed_bizlogic():
+    # P9.5 (bola) inconclusiva NÃO deve suprimir um achado CONFIRMADO da P9.7
+    # no mesmo recurso — só findings de acesso confirmados semeiam o dedup.
+    outdir = tempfile.mkdtemp()
+    try:
+        _write(outdir, "access_findings.json", [
+            {"type": "idor_read_pii", "severity": "info", "source": "bola",
+             "url": "https://t.com/api/orders/123", "confirmed": False}])   # inconclusiva
+        _write(outdir, "bizlogic_findings.json", [
+            {"type": "idor_read_pii", "severity": "high", "tool": "bizlogic",
+             "url": "https://t.com/api/orders/123", "confirmed": True}])     # confirmada
+        env = dict(os.environ, OUTDIR=outdir, TARGET="t.com", DOMAIN="t.com")
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "stiglitz_report.py")],
+                           env=env, cwd=ROOT, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        findings = json.load(open(os.path.join(outdir, "findings.json"))).get("findings", [])
+        orders = [f for f in findings if f.get("url") == "https://t.com/api/orders/123"]
+        # o confirmado do bizlogic sobrevive (não suprimido pela P9.5 inconclusiva)
+        assert len(orders) == 2, \
+            f"P9.5 inconclusiva não deveria suprimir o confirmado da P9.7, veio {len(orders)}"
+    finally:
+        shutil.rmtree(outdir)
