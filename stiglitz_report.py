@@ -883,6 +883,7 @@ for _vf_file, _vf_label in [
     ('retire_findings.json',     'retire_findings'),
     ('access_findings.json',     'access_findings'),
     ('oauth_findings.json',      'oauth_findings'),
+    ('bizlogic_findings.json',   'bizlogic_findings'),
 ]:
     _vff = os.path.join(OUTDIR, 'raw', _vf_file)
     if os.path.exists(_vff):
@@ -895,6 +896,39 @@ for _vf_file, _vf_label in [
                 version_findings.append(_vf)
         except Exception as e:
             errors.append(f'{_vf_label}: {e}')
+
+# ── Dedup P9.7 (bizlogic) vs P9.5 (access) ───────────────────
+# Mesma (host,path,vuln_class) nos dois → a P9.5 (access/bola) vence e o
+# duplicado do bizlogic é descartado. Os findings nativos carregam _dedup_key
+# (test e to_report_findings); na pipeline real o bizlogic_scan o remove e o
+# bola grava source="bola" sem _dedup_key, então recomputamos a chave a partir
+# de (host, path, type) como fallback para que o dedup funcione em ambos.
+def _bizlogic_dedup_key(_f):
+    _k = _f.get("_dedup_key")
+    if _k:
+        return tuple(_k)
+    try:
+        import urllib.parse as _up
+        _sp = _up.urlsplit(_f.get("url") or _f.get("target") or "")
+        _host = (_sp.hostname or "").lower()
+        _path = _sp.path or (_f.get("url") or "")
+    except Exception:
+        _host, _path = "", (_f.get("url") or "")
+    return (_host, _path, _f.get("type", ""))
+
+def _is_access_finding(_f):
+    return (_f.get("tool") in ("bola", "access")
+            or _f.get("source") in ("bola", "access"))
+
+_access_keys = set()
+for _vf in version_findings:
+    if _is_access_finding(_vf):
+        _access_keys.add(_bizlogic_dedup_key(_vf))
+version_findings = [
+    _vf for _vf in version_findings
+    if not (_vf.get("tool") == "bizlogic"
+            and _bizlogic_dedup_key(_vf) in _access_keys)
+]
 
 # ── JS Analysis ──────────────────────────────────────────────
 js_analysis = {}
