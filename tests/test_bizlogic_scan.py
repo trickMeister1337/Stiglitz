@@ -18,6 +18,8 @@ def test_account_id_from_sub_claim():
 def test_account_id_prefers_sub_then_uid_then_user_id():
     assert BS._account_id(_jwt({"uid": "u1"}), fallback="X") == "u1"
     assert BS._account_id(_jwt({"user_id": "u2"}), fallback="X") == "u2"
+    assert BS._account_id(_jwt({"sub": "s", "uid": "u"}), fallback="X") == "s"
+    assert BS._account_id(_jwt({"uid": "u", "user_id": "ui"}), fallback="X") == "u"
 
 
 def test_account_id_fallback_when_opaque_token():
