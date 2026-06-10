@@ -99,3 +99,11 @@ def test_distinct_host_never_merges():
     ]
     out = D.dedupe(fs)
     assert len(out) == 2
+
+
+def test_summary_string():
+    fs = [{"cwe": "CWE-79", "url": "http://t/s", "param": "q", "name": "x", "tool": "nuclei"},
+          {"cwe": "CWE-79", "url": "http://t/s", "param": "q", "name": "x", "tool": "zap"}]
+    out = D.dedupe(fs)
+    s = D._summary(fs, out)
+    assert "2 findings" in s and "1" in s           # 2 -> 1 (1 merge)

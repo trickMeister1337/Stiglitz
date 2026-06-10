@@ -204,3 +204,32 @@ def dedupe(findings, threshold=None):
             out_order.append(root)
         coalesced[root].extend(groups[i])
     return [_merge(coalesced[r]) for r in out_order]
+
+
+def _summary(findings, deduped):
+    n, m = len(findings), len(deduped)
+    return f"{n} findings -> {m} após dedup ({n - m} merges)"
+
+
+def _main(argv):
+    if not argv:
+        print("uso: python3 dedup.py <findings.json>", file=sys.stderr)
+        return 2
+    try:
+        with open(argv[0], encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception as e:
+        print(f"[x] não consegui ler {argv[0]}: {e}", file=sys.stderr)
+        return 1
+    findings = data.get("findings", data) if isinstance(data, dict) else data
+    if not isinstance(findings, list):
+        print("[x] entrada não é lista de findings", file=sys.stderr)
+        return 1
+    deduped = dedupe(findings)
+    print(_summary(findings, deduped), file=sys.stderr)
+    print(json.dumps(deduped, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv[1:]))
