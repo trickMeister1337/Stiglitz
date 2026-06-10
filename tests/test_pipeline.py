@@ -49,6 +49,16 @@ def test_plan_filtra_only(outdir):
     assert [ph.key for ph in p.plan()] == ["P1", "P11"]
 
 
+def test_p9_inclui_subfases_authz_na_mesma_invocacao(outdir):
+    # P9.5/9.6/9.7 consomem o ZAP vivo iniciado pela P9 (o daemon morre no trap EXIT
+    # de cada invocação do stiglitz.sh). Logo precisam rodar na MESMA invocação que a
+    # P9, como unidade combinada (padrão P3_P4) — não como passos isolados do pipeline.
+    p = Pipeline(_cfg(outdir), runner=RecordingRunner())
+    p9 = [ph for ph in p.phases if ph.key == "P9"]
+    assert len(p9) == 1
+    assert p9[0].only == "P9 P9_5 P9_6 P9_7"
+
+
 def test_p3_p4_sao_unidade_combinada(outdir):
     p = Pipeline(_cfg(outdir), runner=RecordingRunner())
     p3p4 = [ph for ph in p.phases if ph.key == "P3_P4"]
