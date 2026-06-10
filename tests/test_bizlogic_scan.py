@@ -74,3 +74,28 @@ def test_build_config_none_when_no_endpoints():
     dump = _zap_dump([("GET", "https://t.com/api/health", 200)])
     assert BS.build_config_from_zap(dump, _jwt({"sub": "a"}), _jwt({"sub": "b"}),
                                     "https://t.com") is None
+
+
+def test_merge_manual_overrides_and_adds():
+    auto = {"base_url": "https://t.com",
+            "accounts": {"A": {"id": "a"}, "B": {"id": "b"}},
+            "endpoints": [{"name": "auto GET /x", "method": "GET", "path": "/x",
+                           "object_of": "A", "tests": ["idor_read"]}]}
+    manual = {"sentinel": "STIG_SENTINEL",
+              "endpoints": [
+                  {"name": "auto GET /x", "method": "GET", "path": "/x",
+                   "object_of": "A", "tests": ["idor_read", "privesc"]},   # override por name
+                  {"name": "transfer", "method": "POST", "path": "/transfer",
+                   "object_of": "A", "tests": ["amount_tampering"],
+                   "body": "{\"amount\":100}"},                            # novo
+              ]}
+    merged = BS.merge_manual_config(auto, manual)
+    by_name = {e["name"]: e for e in merged["endpoints"]}
+    assert by_name["auto GET /x"]["tests"] == ["idor_read", "privesc"]  # manual venceu
+    assert "transfer" in by_name
+    assert merged["sentinel"] == "STIG_SENTINEL"   # chaves topo do manual propagam
+
+
+def test_merge_manual_none_returns_auto():
+    auto = {"base_url": "x", "accounts": {}, "endpoints": []}
+    assert BS.merge_manual_config(auto, None) is auto

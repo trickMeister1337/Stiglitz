@@ -86,3 +86,19 @@ def build_config_from_zap(zap_dump_text, token_a, token_b, base_url,
         },
         "endpoints": endpoints,
     }
+
+
+def merge_manual_config(auto_cfg, manual_cfg):
+    """Mescla a config manual sobre a auto: endpoints por 'name' (manual vence),
+    e chaves de topo do manual (ex.: sentinel) propagam. None → retorna auto intacto."""
+    if not manual_cfg:
+        return auto_cfg
+    merged = dict(auto_cfg)
+    by_name = {e["name"]: e for e in auto_cfg.get("endpoints", [])}
+    for ep in manual_cfg.get("endpoints", []):
+        by_name[ep["name"]] = ep
+    merged["endpoints"] = list(by_name.values())
+    for k, v in manual_cfg.items():
+        if k != "endpoints":
+            merged[k] = v
+    return merged
