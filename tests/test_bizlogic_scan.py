@@ -129,9 +129,9 @@ def test_cli_writes_outputs(tmp_path):
     dump = _zap_dump([("GET", "https://t.com/api/orders/12345", 200)])
     with open(os.path.join(outdir, "raw", "zap_messages_a.json"), "w") as f:
         f.write(dump)
-    # idor_read é read-only e faz GET real; --base-url aponta p/ porta local recusada
-    # (ConnectionRefused instantâneo) → run() degrada p/ lista vazia SEM rede lenta.
-    # O teste valida a orquestração e a gravação dos arquivos, não o resultado da vuln.
+    # idor_read faz GET real; http_request captura URLError/OSError e retorna status 0
+    # (não lança exceção); --base-url aponta p/ porta recusada → baseline status 0 →
+    # nenhum finding confirmado. Valida orquestração e gravação dos arquivos.
     rc = BS.main(["--outdir", outdir, "--token-a", _jwt({"sub": "a"}),
                   "--token-b", _jwt({"sub": "b"}), "--base-url", "http://127.0.0.1:1",
                   "--profile", "production"])
@@ -150,3 +150,26 @@ def test_cli_skips_gracefully_without_history(tmp_path):
                   "--token-b", _jwt({"sub": "b"}), "--base-url", "https://t.com",
                   "--profile", "production"])
     assert rc == 0   # sem histórico e sem config → no-op gracioso
+
+
+def test_cli_without_mutate_forces_dryrun(tmp_path, monkeypatch):
+    outdir = str(tmp_path)
+    os.makedirs(os.path.join(outdir, "raw"), exist_ok=True)
+    cfg_path = os.path.join(outdir, "bizlogic.json")
+    with open(cfg_path, "w") as f:
+        json.dump({"base_url": "http://127.0.0.1:1",
+                   "accounts": {"A": {"id": "a", "auth": {"type": "bearer", "token": "x"}},
+                                "B": {"id": "b", "auth": {"type": "bearer", "token": "y"}}},
+                   "endpoints": [{"name": "w", "method": "PUT", "path": "/api/orders/1",
+                                  "object_of": "A", "tests": ["idor_write"]}]}, f)
+    import bizlogic as BZ
+    def _boom(*a, **kw):
+        raise AssertionError("requisição mutante disparada sem --mutate")
+    monkeypatch.setattr(BZ, "http_request", _boom)
+    rc = BS.main(["--outdir", outdir, "--token-a", "x", "--token-b", "y",
+                  "--base-url", "http://127.0.0.1:1", "--profile", "staging",
+                  "--config", cfg_path])
+    assert rc == 0
+    with open(os.path.join(outdir, "raw", "bizlogic_findings.json")) as f:
+        findings = json.load(f)
+    assert all(not f["confirmed"] for f in findings)

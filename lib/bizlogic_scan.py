@@ -90,7 +90,8 @@ def build_config_from_zap(zap_dump_text, token_a, token_b, base_url,
 
 def merge_manual_config(auto_cfg, manual_cfg):
     """Mescla a config manual sobre a auto: endpoints por 'name' (manual vence),
-    e chaves de topo do manual (ex.: sentinel) propagam. None → retorna auto intacto."""
+    e chaves de topo do manual (ex.: sentinel) propagam. None → retorna auto intacto.
+    Obs.: 'accounts' manual também substitui o derivado dos tokens."""
     if not manual_cfg:
         return auto_cfg
     merged = dict(auto_cfg)
@@ -142,26 +143,34 @@ def _strip_dedup_keys(report_findings):
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Builder de config do bizlogic p/ o scan (P9.7).")
     p.add_argument("--outdir", required=True)
-    p.add_argument("--token-a", required=True)
-    p.add_argument("--token-b", required=True)
+    p.add_argument("--token-a", default=None,
+                   help="token da conta A (preferido: env BIZLOGIC_TOKEN_A)")
+    p.add_argument("--token-b", default=None,
+                   help="token da conta B (preferido: env BIZLOGIC_TOKEN_B)")
     p.add_argument("--base-url", required=True)
     p.add_argument("--config", default=None, help="bizlogic.yaml/.json (mutantes)")
     p.add_argument("--mutate", action="store_true", help="habilita testes mutantes (RoE explícito)")
     p.add_argument("--profile", default="staging", choices=["lab", "staging", "production"])
     p.add_argument("--scope", default="")
-    p.add_argument("--timeout", type=int, default=120)
     return p.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+
+    token_a = args.token_a or os.environ.get("BIZLOGIC_TOKEN_A", "")
+    token_b = args.token_b or os.environ.get("BIZLOGIC_TOKEN_B", "")
+    if not token_a or not token_b:
+        print("  [!] bizlogic-scan: tokens ausentes (env BIZLOGIC_TOKEN_A/B) — fase pulada.")
+        return 0
+
     raw_a = os.path.join(args.outdir, "raw", "zap_messages_a.json")
     zap_text = ""
     if os.path.exists(raw_a):
         with open(raw_a, encoding="utf-8") as f:
             zap_text = f.read()
 
-    auto_cfg = build_config_from_zap(zap_text, args.token_a, args.token_b, args.base_url) \
+    auto_cfg = build_config_from_zap(zap_text, token_a, token_b, args.base_url) \
         if zap_text else None
 
     manual_cfg = None
@@ -173,20 +182,18 @@ def main(argv=None):
         return 0
 
     cfg = auto_cfg or {"base_url": args.base_url, "accounts": {
-        "A": {"id": _account_id(args.token_a, "A"), "auth": {"type": "bearer", "token": args.token_a}},
-        "B": {"id": _account_id(args.token_b, "B"), "auth": {"type": "bearer", "token": args.token_b}},
+        "A": {"id": _account_id(token_a, "A"), "auth": {"type": "bearer", "token": token_a}},
+        "B": {"id": _account_id(token_b, "B"), "auth": {"type": "bearer", "token": token_b}},
     }, "endpoints": []}
     if manual_cfg is not None:
         cfg = merge_manual_config(cfg, manual_cfg)
 
-    # Mutação: só com --mutate (consentimento RoE explícito) E profile permissivo.
+    # Mutação: só com --mutate E profile permissivo (lab/staging).
+    # A flag --mutate É o consentimento RoE explícito do operador (propagada
+    # pelo stiglitz.sh via --bizlogic-mutate); production sempre força dry-run.
     profile = args.profile
     if not args.mutate:
         profile = "production"   # força dry-run em bizlogic.run (sem mutação)
-    elif profile in ("staging", "lab"):
-        if not bizlogic.roe_gate(assume_yes=True):
-            print("  [!] bizlogic-scan: RoE negado — abortando mutação.")
-            return 1
 
     scope = [s.strip() for s in args.scope.split(",") if s.strip()]
     try:
