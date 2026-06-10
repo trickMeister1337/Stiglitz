@@ -2,6 +2,7 @@ import os, sys, json
 sys.path[:0] = [os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib")]
 import bizlogic_scan as BS
 import jwt_audit
+import bizlogic
 
 
 def _jwt(payload):
@@ -54,3 +55,22 @@ def test_derive_endpoints_picks_idlike_get_2xx():
 def test_derive_endpoints_empty_when_no_candidates():
     dump = _zap_dump([("GET", "https://t.com/api/health", 200)])
     assert BS._derive_endpoints(dump, "https://t.com", ("/admin",)) == []
+
+
+def test_build_config_full():
+    dump = _zap_dump([("GET", "https://t.com/api/orders/12345", 200)])
+    cfg = BS.build_config_from_zap(dump, _jwt({"sub": "a1"}), _jwt({"sub": "b1"}),
+                                   base_url="https://t.com")
+    assert cfg["base_url"] == "https://t.com"
+    assert cfg["accounts"]["A"]["id"] == "a1"
+    assert cfg["accounts"]["A"]["auth"] == {"type": "bearer", "token": _jwt({"sub": "a1"})}
+    assert cfg["accounts"]["B"]["id"] == "b1"
+    assert cfg["endpoints"][0]["path"] == "/api/orders/12345"
+    # Config válida segundo o próprio bizlogic
+    bizlogic.validate_config(cfg)
+
+
+def test_build_config_none_when_no_endpoints():
+    dump = _zap_dump([("GET", "https://t.com/api/health", 200)])
+    assert BS.build_config_from_zap(dump, _jwt({"sub": "a"}), _jwt({"sub": "b"}),
+                                    "https://t.com") is None

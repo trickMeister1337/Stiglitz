@@ -68,3 +68,21 @@ def _derive_endpoints(zap_dump_text, base_url, priv_prefixes=DEFAULT_PRIV_PREFIX
         eps.append({"name": f"auto {req['method']} {path}", "method": "GET",
                     "path": path, "object_of": "A", "tests": tests})
     return eps
+
+
+def build_config_from_zap(zap_dump_text, token_a, token_b, base_url,
+                          priv_prefixes=DEFAULT_PRIV_PREFIXES):
+    """Monta config bizlogic read-only do dump ZAP + 2 tokens. None se inviável."""
+    endpoints = _derive_endpoints(zap_dump_text, base_url, priv_prefixes)
+    if not endpoints:
+        return None
+    return {
+        "base_url": base_url,
+        "accounts": {
+            "A": {"id": _account_id(token_a, "A"),
+                  "auth": {"type": "bearer", "token": token_a}},
+            "B": {"id": _account_id(token_b, "B"),
+                  "auth": {"type": "bearer", "token": token_b}},
+        },
+        "endpoints": endpoints,
+    }
