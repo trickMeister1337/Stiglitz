@@ -99,3 +99,25 @@ def test_merge_manual_overrides_and_adds():
 def test_merge_manual_none_returns_auto():
     auto = {"base_url": "x", "accounts": {}, "endpoints": []}
     assert BS.merge_manual_config(auto, None) is auto
+
+
+def test_to_report_findings_maps_schema():
+    biz = [{"name": "IDOR read: orders", "vuln_class": "idor_read_pii",
+            "url": "https://t.com/api/orders/123", "method": "GET",
+            "severity": "high", "confirmed": True, "tool": "bizlogic",
+            "evidence": {"cross_account": "B"}}]
+    out = BS.to_report_findings(biz)
+    f = out[0]
+    assert f["type"] == "idor_read_pii"
+    assert f["severity"] == "high"
+    assert f["tool"] == "bizlogic"
+    assert f["url"] == "https://t.com/api/orders/123"
+    assert f["confirmed"] is True
+    assert "fingerprint" in f and f["fingerprint"]
+
+
+def test_to_report_findings_dedup_key_present():
+    biz = [{"name": "x", "vuln_class": "idor_read_pii",
+            "url": "https://t.com/api/orders/123", "method": "GET",
+            "severity": "high", "confirmed": True, "tool": "bizlogic", "evidence": {}}]
+    assert BS.to_report_findings(biz)[0]["_dedup_key"] == ("t.com", "/api/orders/123", "idor_read_pii")

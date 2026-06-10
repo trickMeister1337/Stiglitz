@@ -102,3 +102,34 @@ def merge_manual_config(auto_cfg, manual_cfg):
         if k != "endpoints":
             merged[k] = v
     return merged
+
+
+def _dedup_key(url, vuln_class):
+    """Chave de dedup estável: (host, path, vuln_class). Casa com a P9.5 quando
+    a mesma vuln_class (idor_read_pii) aparece no mesmo recurso."""
+    sp = urllib.parse.urlsplit(url or "")
+    return ((sp.hostname or "").lower(), sp.path or (url or ""), vuln_class)
+
+
+def to_report_findings(biz_findings):
+    """Transforma findings nativos do bizlogic no schema agregado pelo report
+    (campos: type, name, severity, url, tool, confirmed, detail, fingerprint).
+    Acrescenta _dedup_key para o passo de dedup vs access_findings (P9.5)."""
+    out = []
+    for f in biz_findings:
+        vc = f.get("vuln_class", "bizlogic")
+        url = f.get("url", "")
+        host, path, _ = _dedup_key(url, vc)
+        out.append({
+            "type": vc,
+            "name": f.get("name", vc),
+            "severity": f.get("severity", "medium") if f.get("confirmed") else "info",
+            "url": url,
+            "target": url,
+            "tool": f.get("tool", "bizlogic"),
+            "confirmed": bool(f.get("confirmed")),
+            "detail": json.dumps(f.get("evidence", {}), ensure_ascii=False)[:600],
+            "fingerprint": f"bizlogic:{vc}:{host}:{path}",
+            "_dedup_key": (host, path, vc),
+        })
+    return out
