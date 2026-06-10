@@ -78,6 +78,38 @@ def _cves(f):
     return {m.group(0).upper() for m in _CVE_RE.finditer(_cve_str(f))}
 
 
+def _title(f):
+    return str(f.get("name") or f.get("title") or f.get("type") or "")
+
+
+def _norm_title(f):
+    t = _VERSION_RE.sub(" ", _title(f).lower())
+    return " ".join(_WORD_RE.findall(t))
+
+
+def _evidence_txt(f):
+    raw = str(f.get("evidence") or f.get("detail") or "").lower()
+    return " ".join(_WORD_RE.findall(raw))
+
+
+def _ratio(a, b):
+    if not a and not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _score(a, b):
+    """Score combinado [0,1]. CVE compartilhado -> 1.0 (merge imediato)."""
+    if _cves(a) & _cves(b):
+        return 1.0
+    if _host(a) != _host(b):                        # defensivo (já blocado por host)
+        return 0.0
+    s = W_CLASS if _class(a) == _class(b) else 0.0
+    s += W_TITLE * _ratio(_norm_title(a), _norm_title(b))
+    s += W_EVIDENCE * _ratio(_evidence_txt(a), _evidence_txt(b))
+    return s
+
+
 def _merge(group):
     """Coalesce um grupo de findings num único. Singleton passa inalterado."""
     if len(group) == 1:
@@ -129,5 +161,38 @@ def dedupe(findings, threshold=None):
         buckets[fp].append(f)
     groups = [buckets[fp] for fp in order]
 
-    # Estágio 2 (fuzzy) entra na Task 2; por ora, 1 grupo = 1 saída.
-    return [_merge(g) for g in groups]
+    # Estágio 2 — fuzzy entre representantes do MESMO host (union-find guloso).
+    reps = [g[0] for g in groups]
+    parent = list(range(len(groups)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[max(ri, rj)] = min(ri, rj)
+
+    by_host = {}
+    for i, r in enumerate(reps):
+        by_host.setdefault(_host(r), []).append(i)
+    for idxs in by_host.values():
+        for a in range(len(idxs)):
+            for b in range(a + 1, len(idxs)):
+                try:
+                    if _score(reps[idxs[a]], reps[idxs[b]]) >= threshold:
+                        union(idxs[a], idxs[b])
+                except Exception:
+                    pass
+
+    coalesced, out_order = {}, []
+    for i in range(len(groups)):
+        root = find(i)
+        if root not in coalesced:
+            coalesced[root] = []
+            out_order.append(root)
+        coalesced[root].extend(groups[i])
+    return [_merge(coalesced[r]) for r in out_order]
