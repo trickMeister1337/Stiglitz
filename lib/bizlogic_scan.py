@@ -46,7 +46,8 @@ def _rel_path(url):
 
 def _derive_endpoints(zap_dump_text, base_url, priv_prefixes=DEFAULT_PRIV_PREFIXES):
     """Extrai endpoints read-only candidatos do dump ZAP: GET 2xx com object-ref.
-    Paths concretos (id de A embutido). object_of='A'. privesc quando bate priv_prefixes."""
+    Paths concretos (id de A embutido). object_of='A'. privesc quando bate priv_prefixes.
+    base_url é aceito por contrato da fase (não usado aqui — paths emitidos são relativos)."""
     eps = []
     seen = set()
     for req in bola.parse_zap_messages(zap_dump_text):
