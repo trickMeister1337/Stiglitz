@@ -15,16 +15,13 @@ def test_report_aggregates_bizlogic_and_dedups_access():
     try:
         # access_findings (P9.5) e bizlogic_findings (P9.7) colidem no mesmo recurso
         _write(outdir, "access_findings.json", [
-            {"type": "idor_read_pii", "severity": "high", "tool": "bola",
-             "url": "https://t.com/api/orders/123", "confirmed": True,
-             "_dedup_key": ["t.com", "/api/orders/123", "idor_read_pii"]}])
+            {"type": "idor_read_pii", "severity": "high", "source": "bola",
+             "url": "https://t.com/api/orders/123", "confirmed": True}])
         _write(outdir, "bizlogic_findings.json", [
             {"type": "idor_read_pii", "severity": "high", "tool": "bizlogic",
-             "url": "https://t.com/api/orders/123", "confirmed": True,
-             "_dedup_key": ["t.com", "/api/orders/123", "idor_read_pii"]},     # dup → removido
+             "url": "https://t.com/api/orders/123", "confirmed": True},     # dup → removido
             {"type": "amount_tampering", "severity": "high", "tool": "bizlogic",
-             "url": "https://t.com/transfer", "confirmed": True,
-             "_dedup_key": ["t.com", "/transfer", "amount_tampering"]}])       # único → mantém
+             "url": "https://t.com/transfer", "confirmed": True}])       # único → mantém
         env = dict(os.environ, OUTDIR=outdir, TARGET="t.com", DOMAIN="t.com")
         r = subprocess.run([sys.executable, os.path.join(ROOT, "stiglitz_report.py")],
                            env=env, cwd=ROOT, capture_output=True, text=True)
