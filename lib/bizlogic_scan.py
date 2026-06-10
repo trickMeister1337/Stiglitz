@@ -17,6 +17,7 @@ import jwt_audit
 import bizlogic
 
 _CLAIM_KEYS = ("sub", "uid", "user_id")
+DEFAULT_PRIV_PREFIXES = ("/admin", "/internal", "/manage")
 
 
 def _account_id(token, fallback):
@@ -32,3 +33,37 @@ def _account_id(token, fallback):
         if v not in (None, ""):
             return str(v)
     return fallback
+
+
+def _rel_path(url):
+    """Path relativo (com query, se houver) de uma URL absoluta ou já relativa."""
+    sp = urllib.parse.urlsplit(url)
+    rel = sp.path or url
+    if sp.query:
+        rel += "?" + sp.query
+    return rel
+
+
+def _derive_endpoints(zap_dump_text, base_url, priv_prefixes=DEFAULT_PRIV_PREFIXES):
+    """Extrai endpoints read-only candidatos do dump ZAP: GET 2xx com object-ref.
+    Paths concretos (id de A embutido). object_of='A'. privesc quando bate priv_prefixes."""
+    eps = []
+    seen = set()
+    for req in bola.parse_zap_messages(zap_dump_text):
+        if req.get("method") != "GET":
+            continue
+        status = req.get("status") or 0
+        if not (200 <= int(status) < 300):
+            continue
+        if not bola.is_object_ref_request(req):
+            continue
+        path = _rel_path(req.get("url") or "")
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        tests = ["idor_read"]
+        if any(path.startswith(p) for p in priv_prefixes):
+            tests.append("privesc")
+        eps.append({"name": f"auto {req['method']} {path}", "method": "GET",
+                    "path": path, "object_of": "A", "tests": tests})
+    return eps
