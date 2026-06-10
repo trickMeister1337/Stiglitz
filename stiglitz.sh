@@ -1844,7 +1844,7 @@ _biz_profile="${STIGLITZ_PROFILE:-staging}"
 if BIZLOGIC_TOKEN_A="$TOKEN_A" BIZLOGIC_TOKEN_B="$TOKEN_B" \
    python3 "$SCRIPT_DIR/lib/bizlogic_scan.py" \
         --outdir "$OUTDIR" \
-        --base-url "https://${TARGET}" --profile "$_biz_profile" \
+        --base-url "$TARGET" --profile "$_biz_profile" \
         ${STIGLITZ_SCOPE_DOMAINS:+--scope "${STIGLITZ_SCOPE_DOMAINS// /,}"} \
         ${_biz_cfg:+--config "$_biz_cfg"} \
         ${_biz_mutate:+--mutate}; then
