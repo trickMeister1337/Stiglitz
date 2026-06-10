@@ -92,7 +92,7 @@ def test_fuzzy_below_threshold_kept_separate():
 
 
 def test_distinct_host_never_merges():
-    # CVE igual mas hosts distintos -> fingerprint difere e fuzzy é blocado por host.
+    # CVE igual mas hosts distintos -> by_host isola os índices; _score nunca é chamado cross-host.
     fs = [
         {"name": "X", "cve": "CVE-2021-1234", "url": "http://a/p", "severity": "high", "tool": "nuclei"},
         {"name": "X", "cve": "CVE-2021-1234", "url": "http://b/p", "severity": "high", "tool": "nuclei"},

@@ -134,8 +134,14 @@ def _merge(group):
     fps = {_fp_of(f) for f in group}
     m["merged_from"] = sorted(fps)
     exact = len(fps) == 1
-    m["merge_score"] = 1.0 if exact else round(
-        max(_score(rep, f) for f in group if f is not rep), 4)
+    if exact:
+        m["merge_score"] = 1.0
+    else:
+        try:
+            m["merge_score"] = round(
+                max(_score(rep, f) for f in group if f is not rep), 4)
+        except Exception:
+            m["merge_score"] = None
     m["fingerprint"] = _fp_of(rep)
     return m
 
@@ -176,6 +182,8 @@ def dedupe(findings, threshold=None):
         if ri != rj:
             parent[max(ri, rj)] = min(ri, rj)
 
+    # Agrupa por host: O(n^2) só DENTRO de cada host. Findings sem host caem no bucket
+    # "" — raro em scans reais (host-less é exceção); não há cap explícito.
     by_host = {}
     for i, r in enumerate(reps):
         by_host.setdefault(_host(r), []).append(i)
