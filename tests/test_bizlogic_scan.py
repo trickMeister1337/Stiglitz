@@ -121,3 +121,32 @@ def test_to_report_findings_dedup_key_present():
             "url": "https://t.com/api/orders/123", "method": "GET",
             "severity": "high", "confirmed": True, "tool": "bizlogic", "evidence": {}}]
     assert BS.to_report_findings(biz)[0]["_dedup_key"] == ("t.com", "/api/orders/123", "idor_read_pii")
+
+
+def test_cli_writes_outputs(tmp_path):
+    outdir = str(tmp_path)
+    os.makedirs(os.path.join(outdir, "raw"), exist_ok=True)
+    dump = _zap_dump([("GET", "https://t.com/api/orders/12345", 200)])
+    with open(os.path.join(outdir, "raw", "zap_messages_a.json"), "w") as f:
+        f.write(dump)
+    # idor_read é read-only e faz GET real; --base-url aponta p/ porta local recusada
+    # (ConnectionRefused instantâneo) → run() degrada p/ lista vazia SEM rede lenta.
+    # O teste valida a orquestração e a gravação dos arquivos, não o resultado da vuln.
+    rc = BS.main(["--outdir", outdir, "--token-a", _jwt({"sub": "a"}),
+                  "--token-b", _jwt({"sub": "b"}), "--base-url", "http://127.0.0.1:1",
+                  "--profile", "production"])
+    assert rc == 0
+    assert os.path.exists(os.path.join(outdir, "raw", "bizlogic.json"))
+    assert os.path.exists(os.path.join(outdir, "raw", "bizlogic_findings.json"))
+    # bizlogic_findings.json é uma lista JSON válida
+    with open(os.path.join(outdir, "raw", "bizlogic_findings.json")) as f:
+        assert isinstance(json.load(f), list)
+
+
+def test_cli_skips_gracefully_without_history(tmp_path):
+    outdir = str(tmp_path)
+    os.makedirs(os.path.join(outdir, "raw"), exist_ok=True)
+    rc = BS.main(["--outdir", outdir, "--token-a", _jwt({"sub": "a"}),
+                  "--token-b", _jwt({"sub": "b"}), "--base-url", "https://t.com",
+                  "--profile", "production"])
+    assert rc == 0   # sem histórico e sem config → no-op gracioso

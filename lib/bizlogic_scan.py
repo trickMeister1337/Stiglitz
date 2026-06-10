@@ -133,3 +133,80 @@ def to_report_findings(biz_findings):
             "_dedup_key": (host, path, vc),
         })
     return out
+
+
+def _strip_dedup_keys(report_findings):
+    return [{k: v for k, v in f.items() if k != "_dedup_key"} for f in report_findings]
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description="Builder de config do bizlogic p/ o scan (P9.7).")
+    p.add_argument("--outdir", required=True)
+    p.add_argument("--token-a", required=True)
+    p.add_argument("--token-b", required=True)
+    p.add_argument("--base-url", required=True)
+    p.add_argument("--config", default=None, help="bizlogic.yaml/.json (mutantes)")
+    p.add_argument("--mutate", action="store_true", help="habilita testes mutantes (RoE explícito)")
+    p.add_argument("--profile", default="staging", choices=["lab", "staging", "production"])
+    p.add_argument("--scope", default="")
+    p.add_argument("--timeout", type=int, default=120)
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    raw_a = os.path.join(args.outdir, "raw", "zap_messages_a.json")
+    zap_text = ""
+    if os.path.exists(raw_a):
+        with open(raw_a, encoding="utf-8") as f:
+            zap_text = f.read()
+
+    auto_cfg = build_config_from_zap(zap_text, args.token_a, args.token_b, args.base_url) \
+        if zap_text else None
+
+    manual_cfg = None
+    if args.config and os.path.exists(args.config):
+        manual_cfg = bizlogic.load_config(args.config)
+
+    if auto_cfg is None and manual_cfg is None:
+        print("  [○] bizlogic-scan: sem histórico ZAP e sem config — fase pulada.")
+        return 0
+
+    cfg = auto_cfg or {"base_url": args.base_url, "accounts": {
+        "A": {"id": _account_id(args.token_a, "A"), "auth": {"type": "bearer", "token": args.token_a}},
+        "B": {"id": _account_id(args.token_b, "B"), "auth": {"type": "bearer", "token": args.token_b}},
+    }, "endpoints": []}
+    if manual_cfg is not None:
+        cfg = merge_manual_config(cfg, manual_cfg)
+
+    # Mutação: só com --mutate (consentimento RoE explícito) E profile permissivo.
+    profile = args.profile
+    if not args.mutate:
+        profile = "production"   # força dry-run em bizlogic.run (sem mutação)
+    elif profile in ("staging", "lab"):
+        if not bizlogic.roe_gate(assume_yes=True):
+            print("  [!] bizlogic-scan: RoE negado — abortando mutação.")
+            return 1
+
+    scope = [s.strip() for s in args.scope.split(",") if s.strip()]
+    try:
+        findings = bizlogic.run(cfg, profile=profile, scope=scope, outdir=args.outdir)
+    except Exception as e:
+        print(f"  [!] bizlogic-scan: run falhou ({e}) — fase degradada.")
+        findings = []
+
+    rep = _strip_dedup_keys(to_report_findings(findings))
+    os.makedirs(os.path.join(args.outdir, "raw"), exist_ok=True)
+    with open(os.path.join(args.outdir, "raw", "bizlogic_findings.json"), "w", encoding="utf-8") as fh:
+        json.dump(rep, fh, ensure_ascii=False, indent=2)
+    # Garante bizlogic.json mesmo quando run não gravou (lista vazia)
+    bj = os.path.join(args.outdir, "raw", "bizlogic.json")
+    if not os.path.exists(bj):
+        with open(bj, "w", encoding="utf-8") as fh:
+            json.dump(findings, fh, ensure_ascii=False, indent=2)
+    print(f"  [✓] bizlogic-scan: {len(findings)} finding(s) → raw/bizlogic_findings.json")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
