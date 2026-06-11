@@ -56,13 +56,14 @@ unificado; SLA/aging CISA KEV (`lib/prioritization.py`); compliance multi-framew
   pré-check de `exp` (`jwt_audit.exp_status` + CLI `exp-check`); AJAX Spider via `chrome-headless`
   com preflight de browser e degradação. Validado ao vivo (alvo local): spider autenticado
   descobre rota protegida, AJAX renderiza via chromium (confinamento snap não bloqueou), exp-check OK
+- ✅ **dedup semântico** (`lib/dedup.py`): colapsa duplicatas cross-tool + variantes de path/param (estágio 1 fingerprint) + fuzzy por CVE/título/evidência blocado por host (estágio 2). Auto-merge agressivo, proveniência no finding. Integrado no scan (`stiglitz_report.py`) e no RED (`evidence.py`); `STIGLITZ_DEDUP=0` desliga. CLI + lógica pura
 
 **P1 restante (ordem de retorno):**
 - (nenhum — itens P1 concluídos; próximo é o backlog P2)
 
 ## P2 — BACKLOG
 
-dedup semântico; trend multi-scan; relatório PDF (WeasyPrint); CSPM (prowler);
+trend multi-scan; relatório PDF (WeasyPrint); CSPM (prowler);
 IaC/container (trivy); multi-tenant.
 
 ## Follow-ups conhecidos (não feitos)
