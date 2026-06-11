@@ -107,3 +107,14 @@ def test_summary_string():
     out = D.dedupe(fs)
     s = D._summary(fs, out)
     assert "2 findings" in s and "1" in s           # 2 -> 1 (1 merge)
+
+
+def test_evidence_legacy_dedup_fallback():
+    import importlib
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
+    ev = importlib.import_module("evidence")
+    fs = [{"tool": "zap", "type": "xss", "target": "http://t/p"},
+          {"tool": "zap", "type": "xss", "target": "http://t/p"},
+          {"tool": "nuclei", "type": "sqli", "target": "http://t/q"}]
+    out = ev._legacy_dedup(fs)
+    assert len(out) == 2                            # colapsa a duplicata exata zap/xss
