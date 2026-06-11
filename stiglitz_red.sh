@@ -135,6 +135,7 @@ scope_guard() {
         [ "$before" != "$after" ] && info "Escopo: $phase filtrado $before→$after alvos"
     else
         rm -f "$tmp"
+        warn "scope_guard: python3 falhou — fase '$phase' rodará sem filtro de escopo"
     fi
 }
 dry_cmd() {
@@ -587,24 +588,11 @@ _build_scored_targets() {
     [ -n "$TARGET" ] && echo "$TARGET" >> "$tmp_raw"
 
     # Score + filtro
-    python3 - "$tmp_raw" "$OUTDIR/data/targets_scored.txt" "${SCOPE_DOMAINS[@]}" << 'PYEOF'
+    PYTHONPATH="$LIB" python3 - "$tmp_raw" "$OUTDIR/data/targets_scored.txt" "${SCOPE_DOMAINS[@]}" << 'PYEOF'
 import sys, re
-from urllib.parse import urlparse
+from scope import in_scope as _in_scope
 raw_f, scored_f = sys.argv[1], sys.argv[2]
 scope_domains = [d.strip().lower().lstrip('*.') for d in sys.argv[3:] if d.strip()]
-
-def in_scope(url):
-    # Sem escopo definido => não filtra (fail-open só quando o operador não delimitou)
-    if not scope_domains:
-        return True
-    try:
-        host = (urlparse(url).hostname or '').lower()
-    except Exception:
-        return False
-    if not host:
-        return False
-    # In-scope se o host for igual ou subdomínio de algum domínio do escopo
-    return any(host == d or host.endswith('.' + d) for d in scope_domains)
 
 crit_params = re.compile(
     r'[?&](id|user|account|token|pass|password|key|secret|admin|cmd|exec|'
@@ -629,7 +617,7 @@ try:
             url = line.strip()
             if not url or url in seen: continue
             if media_ext.search(url): continue
-            if not in_scope(url): continue
+            if not _in_scope(url, scope_domains): continue
             seen.add(url)
             s = 0
             if crit_params.search(url):                       s += 5

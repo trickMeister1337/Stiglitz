@@ -6,8 +6,17 @@ in-scope = host igual a um domínio do escopo ou subdomínio real dele. URL
 malformada com escopo definido => fora de escopo. Puro, sem rede. CLI filtra
 stdin → stdout. Ponto único de verdade reusado por ingest/brute/sqli/xss.
 """
+import re
 import sys
 import urllib.parse
+
+_SCORE_PREFIX = re.compile(r"^\d+\|")
+
+
+def _url_of(line):
+    """Extrai a URL de uma linha. Tolera o formato 'score|url' (prefixo numérico
+    do targets_scored.txt); deixa intactas URLs com '|' embutido no meio."""
+    return _SCORE_PREFIX.sub("", line.strip(), count=1)
 
 
 def _norm(domains):
@@ -30,9 +39,9 @@ def in_scope(url, scope_domains):
 def filter_in_scope(lines, scope_domains):
     out = []
     for line in lines:
-        u = line.strip()
-        if u and in_scope(u, scope_domains):
-            out.append(u)
+        s = line.strip()
+        if s and in_scope(_url_of(s), scope_domains):
+            out.append(s)
     return out
 
 
