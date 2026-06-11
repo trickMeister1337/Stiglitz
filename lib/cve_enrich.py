@@ -33,7 +33,7 @@ if os.path.exists(_kev_cache):
             _cache_mins = int(_cache_age // 60)
             print(f"  [✓] KEV: {len(kev_set)} CVEs carregados do cache "
                   f"({_cache_mins}min atrás)")
-        except: pass
+        except (json.JSONDecodeError, ValueError, OSError, KeyError): pass
 
 if not _kev_cached:
     try:
@@ -75,7 +75,7 @@ if os.path.exists(nuclei_file):
                 for cve in (cl.get("cve-id", []) or []):
                     if cve and cve.upper().startswith("CVE-"):
                         cves.add(cve.upper())
-            except:
+            except (json.JSONDecodeError, ValueError, AttributeError, TypeError):
                 pass
 
 # Coletar CVEs dos serviços de rede (nmap --script vulners → service_findings.json)

@@ -5,7 +5,7 @@ js_analysis.py — Análise de JS (secrets, endpoints, frameworks) → js_*.json
 Extraído de stiglitz.sh (heredoc PYJS). Recebe argumentos posicionais
 via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
-import urllib.request, urllib.parse, re, os, sys, json, ssl, hashlib, time
+import urllib.request, urllib.parse, urllib.error, re, os, sys, json, ssl, hashlib, time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -178,7 +178,7 @@ for js_url in js_list:
             for vrange, checker, detail, cve in VULN_VERSIONS.get(name,[]):
                 try:
                     if checker(ver): vulns.append({"range":vrange,"detail":detail,"cve":cve})
-                except: pass
+                except (ValueError, TypeError, AttributeError, IndexError): pass
             all_frameworks.append({"framework":name,"version":ver,"url":js_url,"vulnerable":bool(vulns),"vulns":vulns})
 
     for cp in [r'//.*(?:TODO|FIXME|password|secret|api.?key|credential|token)[^\n]*',
@@ -208,7 +208,7 @@ for ep in list(all_endpoints)[:30]:
             body = r.read(512).decode("utf-8",errors="replace")
     except urllib.error.HTTPError as e:
         st = e.code; ct = ""; body = ""
-    except: st = 0; ct = ""; body = ""
+    except (urllib.error.URLError, OSError): st = 0; ct = ""; body = ""
     probed.append({"endpoint":ep,"url":url,"status":st,"content_type":ct[:80],
         "is_json":"json" in ct,"body_preview":body[:200] if st==200 else ""})
     time.sleep(0.1)
