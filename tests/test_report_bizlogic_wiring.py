@@ -47,7 +47,11 @@ def test_report_aggregates_bizlogic_and_dedups_access():
 
 def test_inconclusive_access_does_not_suppress_confirmed_bizlogic():
     # P9.5 (bola) inconclusiva NÃO deve suprimir um achado CONFIRMADO da P9.7
-    # no mesmo recurso — só findings de acesso confirmados semeiam o dedup.
+    # no mesmo recurso. Com o dedup semântico (P2) integrado ao report, os dois
+    # colidem por fingerprint (mesma classe/host/path) e são MESCLADOS em 1: o
+    # confirmado da P9.7 (severidade alta) vence como representante e o bola
+    # inconclusivo (info) é dobrado em `sources`. A fidelidade (confirmado não-
+    # suprimido) é preservada — muda só a contagem (1 card mesclado, não 2).
     outdir = tempfile.mkdtemp()
     try:
         _write(outdir, "access_findings.json", [
@@ -62,8 +66,11 @@ def test_inconclusive_access_does_not_suppress_confirmed_bizlogic():
         assert r.returncode == 0, r.stderr
         findings = json.load(open(os.path.join(outdir, "findings.json"))).get("findings", [])
         orders = [f for f in findings if f.get("url") == "https://t.com/api/orders/123"]
-        # o confirmado do bizlogic sobrevive (não suprimido pela P9.5 inconclusiva)
-        assert len(orders) == 2, \
-            f"P9.5 inconclusiva não deveria suprimir o confirmado da P9.7, veio {len(orders)}"
+        # mesclados em 1, e o sobrevivente é o CONFIRMADO da P9.7 (severidade alta):
+        # prova que a P9.5 inconclusiva (info) não o suprimiu nem virou representante.
+        assert len(orders) == 1, \
+            f"dedup semântico deveria mesclar o recurso colidido em 1, veio {len(orders)}"
+        assert orders[0].get("severity") == "high", \
+            f"o confirmado da P9.7 (high) deveria vencer como representante, veio {orders[0].get('severity')}"
     finally:
         shutil.rmtree(outdir)
