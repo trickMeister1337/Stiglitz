@@ -57,13 +57,14 @@ unificado; SLA/aging CISA KEV (`lib/prioritization.py`); compliance multi-framew
   pré-check de `exp` (`jwt_audit.exp_status` + CLI `exp-check`); AJAX Spider via `chrome-headless`
   com preflight de browser e degradação. Validado ao vivo (alvo local): spider autenticado
   descobre rota protegida, AJAX renderiza via chromium (confinamento snap não bloqueou), exp-check OK
+- ✅ **dedup semântico** (`lib/dedup.py`): colapsa duplicatas cross-tool + variantes de path/param (estágio 1 fingerprint) + fuzzy por CVE/título/evidência blocado por host (estágio 2). Auto-merge agressivo, proveniência no finding. Integrado no scan (`stiglitz_report.py`) e no RED (`evidence.py`); `STIGLITZ_DEDUP=0` desliga. CLI + lógica pura
 
 **P1 restante (ordem de retorno):**
 - (nenhum — itens P1 concluídos; próximo é o backlog P2)
 
 ## P2 — BACKLOG
 
-dedup semântico; trend multi-scan; relatório PDF (WeasyPrint); CSPM (prowler);
+trend multi-scan; relatório PDF (WeasyPrint); CSPM (prowler);
 IaC/container (trivy); multi-tenant.
 
 ## Follow-ups conhecidos (não feitos)
@@ -82,6 +83,12 @@ IaC/container (trivy); multi-tenant.
   `--target "https://${TARGET}"`, mas `TARGET` já carrega esquema → `https://https://...`. A P9.7
   tinha o mesmo padrão e foi corrigida (usa `$TARGET`); a P9.6 permanece com o padrão antigo (não
   verificado se zera a fase como zerava na bizlogic). Avaliar/corrigir
+- **Dedup semântico × dedup bizlogic (P9.7) — decisão de comportamento:** o dedup semântico (P2)
+  roda a jusante da dedup especializada P9.7×P9.5 no `stiglitz_report.py`. Quando P9.5 inconclusiva
+  e P9.7 confirmada colidem no mesmo recurso (mesmo fingerprint), o dedup semântico as **mescla em
+  1** (o confirmado/maior-severidade vence como representante; a outra fonte entra em `sources`) —
+  decisão deliberada: dedup semântico é autoritativo, fidelidade preservada (confirmado não some),
+  muda só a contagem. `test_inconclusive_access_does_not_suppress_confirmed_bizlogic` reflete isso
 
 ## Pendência operacional
 

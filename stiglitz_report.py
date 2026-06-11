@@ -1005,6 +1005,17 @@ for f in findings:
 # Montar lista combinada (todos os tipos) antes de enriquecer com criticidade
 _all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings
 
+# (P2) Dedup semântico cross-tool + fuzzy ANTES de enrich/sort/state/SARIF/HTML —
+# garante contagem consistente em todos os artefatos. Degrada sem abortar.
+if os.environ.get("STIGLITZ_DEDUP", "1") != "0":
+    try:
+        import dedup as _dedup
+        _n_before = len(_all_f_raw)
+        _all_f_raw = _dedup.dedupe(_all_f_raw)
+        print(f"[✓] Dedup semântico: {_n_before} → {len(_all_f_raw)} findings")
+    except Exception as _dd_e:
+        print(f"[!] dedup: falhou ({_dd_e}) — mantendo findings não-deduplicados")
+
 # ── Enriquecimento de criticidade CVSS 3.1 (Environmental + Temporal KEV/EPSS)
 # Chamado AQUI — após injeção de sinais CVE nos findings Nuclei — para que
 # todos os tipos de finding recebam cvss_vector, cvss_environmental, severity_tool,

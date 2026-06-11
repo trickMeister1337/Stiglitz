@@ -156,6 +156,17 @@ def is_valid_url(url: str) -> bool:
     return True
 
 
+def _legacy_dedup(findings):
+    """Dedup cru por (tool, type, target[:60]) — fallback quando lib/dedup.py falha."""
+    seen, out = set(), []
+    for f in findings:
+        key = (f.get("tool"), f.get("type"), (f.get("target") or "")[:60])
+        if key not in seen:
+            seen.add(key)
+            out.append(f)
+    return out
+
+
 def collect_and_consolidate(outdir: str) -> Dict[str, Any]:
     """Coleta dados de todas as fontes e consolida findings deduplicados."""
 
@@ -388,13 +399,16 @@ def collect_and_consolidate(outdir: str) -> Dict[str, Any]:
             "confirmed": bf.get("confirmed", False),
         })
 
-    # Dedup
-    seen: set = set()
-    deduped = []
-    for f in findings:
-        key = (f["tool"], f["type"], f.get("target", "")[:60])
-        if key not in seen:
-            seen.add(key); deduped.append(f)
+    # Dedup semântico (lib/dedup.py) — cross-tool + fuzzy; degrada p/ dedup cru legado.
+    if os.environ.get("STIGLITZ_DEDUP", "1") != "0":
+        try:
+            import dedup as _dedup
+            deduped = _dedup.dedupe(findings)
+        except Exception as _dd_e:
+            print(f"  [!] dedup: falhou ({_dd_e}) — fallback dedup cru")
+            deduped = _legacy_dedup(findings)
+    else:
+        deduped = _legacy_dedup(findings)
 
     # Criticidade CVSS 3.1 por finding (Base+Temporal+Environmental).
     # enrich_findings lê confirmed/in_kev/epss de cada finding e infere a
