@@ -90,6 +90,26 @@ audit() {
     h=$(printf '%s|%s|%s' "$prev" "$ts" "$event" | sha256sum | cut -c1-16)
     printf '%04d | %s | %s | %s:%s\n' "$_audit_seq" "$ts" "$event" "$prev" "$h" >> "$AUDIT_LOG"
 }
+audit_seal() {
+    # Sela a CABEÇA do hash-chain com HMAC-SHA256(STIGLITZ_AUDIT_KEY). Sem chave, não sela.
+    { [ -z "$AUDIT_LOG" ] || [ ! -s "$AUDIT_LOG" ]; } && return 0
+    if [ -z "${STIGLITZ_AUDIT_KEY:-}" ]; then
+        audit "SEAL_SKIPPED reason=no_key" 2>/dev/null || true
+        return 0
+    fi
+    local head
+    head=$(awk -F'[ :]+' 'END{print $NF}' "$AUDIT_LOG" 2>/dev/null)
+    [ -z "$head" ] && return 0
+    local mac
+    if has openssl; then
+        mac=$(printf '%s' "$head" | openssl dgst -sha256 -hmac "$STIGLITZ_AUDIT_KEY" -r 2>/dev/null | cut -d' ' -f1)
+    else
+        mac=$(STIGLITZ_AUDIT_KEY="$STIGLITZ_AUDIT_KEY" python3 -c 'import os,hmac,hashlib,sys;print(hmac.new(os.environ["STIGLITZ_AUDIT_KEY"].encode(),sys.argv[1].encode(),hashlib.sha256).hexdigest())' "$head" 2>/dev/null)
+    fi
+    [ -z "$mac" ] && { warn "audit_seal: falha ao computar HMAC — não selado"; return 0; }
+    printf 'HMAC-SHA256 %s head=%s\n' "$mac" "$head" > "$AUDIT_LOG.seal"
+    chmod 600 "$AUDIT_LOG.seal" 2>/dev/null || true
+}
 dry_cmd() {
     if [ "$DRY_RUN" = true ]; then
         echo -e "  ${DIM}[DRY-RUN]${RST} $*"
@@ -1214,6 +1234,7 @@ Alvo: ${SCOPE_DOMAINS[*]}
 Perfil: ${PROFILE^^} | Modo: ${MODE^^}
 Findings: ${n_total_f} (SQLi:${n_sqli_f} XSS:${n_xss_f} Brute:${n_brute_f})
 Output: ${OUTDIR}"
+    audit_seal
 }
 
 main "$@"
