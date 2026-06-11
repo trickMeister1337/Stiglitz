@@ -448,7 +448,9 @@ phase_end() {
     echo "$1:end:$_e:dur:$_dur" >> "$PHASE_TIMES_FILE"
     printf "  ${BLUE}[⏱] Duração da fase: %dm%02ds${NC}\n" $(( _dur/60 )) $(( _dur%60 ))
 }
-if [ -s "$STIGLITZ_STATE" ]; then
+# Banner de retomada só no modo standalone; sob o pipeline.py (--only-phase, uma
+# invocação por fase) ele repetiria a cada fase e vira ruído.
+if [ -s "$STIGLITZ_STATE" ] && [ -z "$ONLY_PHASES" ]; then
     _done_phases=$(grep "=done:" "$STIGLITZ_STATE" | cut -d= -f1 | tr "\n" " ")
     echo -e "  ${YELLOW}[!] Retomando scan — fases já concluídas: ${_done_phases}${NC}"
     echo -e "  ${YELLOW}    Para reiniciar do zero: rm -rf $OUTDIR${NC}"
@@ -1406,7 +1408,30 @@ if command -v zaproxy &>/dev/null; then
                         echo -e "  ${GREEN}[✓] OpenAPI importado no ZAP — endpoints adicionados ao scan${NC}"
                         OPENAPI_FOUND=1
                     else
-                        echo -e "  ${YELLOW}[!] Spec OpenAPI encontrado mas o import no ZAP falhou: $_oa_result${NC}"
+                        # Fallback: o import nativo do ZAP rejeita specs válidos com
+                        # nomes de schema fora de ^[a-zA-Z0-9.\-_]+$ (ex.: generics .NET
+                        # com backtick). Semeamos os endpoints do spec direto no ZAP via
+                        # accessUrl para não perder a superfície de API documentada.
+                        echo -e "  ${YELLOW}[!] Import nativo do ZAP falhou: $_oa_result${NC}"
+                        python3 "$SCRIPT_DIR/lib/openapi_seed.py" \
+                            "$OUTDIR/raw/openapi_spec.json" "$TARGET" \
+                            > "$OUTDIR/raw/openapi_urls.txt" 2>/dev/null || true
+                        _oa_seeded=0
+                        if [ -s "$OUTDIR/raw/openapi_urls.txt" ]; then
+                            echo -e "  ${BLUE}[…] Fallback: semeando endpoints do spec no ZAP...${NC}"
+                            while IFS= read -r _oa_seed_url; do
+                                [ -z "$_oa_seed_url" ] && continue
+                                _oa_seed_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$_oa_seed_url" 2>/dev/null)
+                                zap_api_call "core/action/accessUrl" "url=${_oa_seed_enc}" > /dev/null 2>&1
+                                _oa_seeded=$((_oa_seeded + 1))
+                            done < "$OUTDIR/raw/openapi_urls.txt"
+                        fi
+                        if [ "$_oa_seeded" -gt 0 ]; then
+                            echo -e "  ${GREEN}[✓] $_oa_seeded endpoint(s) do OpenAPI semeados no ZAP (fallback)${NC}"
+                            OPENAPI_FOUND=1
+                        else
+                            echo -e "  ${YELLOW}[○] Fallback não produziu URLs do spec${NC}"
+                        fi
                     fi
                     break
                 fi
@@ -1794,7 +1819,7 @@ _oauth_wk="$OUTDIR/raw/oauth_well_known.json"
 : > "$_oauth_wk"
 # Descoberta passiva do well-known (degrada silenciosamente se ausente)
 for _wkp in "/.well-known/openid-configuration" "/.well-known/oauth-authorization-server"; do
-    if curl -s -S --max-time 15 "https://${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
+    if curl -s -S --max-time 15 "${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
             && [ -s "$_oauth_wk" ] && grep -q "authorization_endpoint" "$_oauth_wk"; then
         break
     fi
@@ -1813,7 +1838,7 @@ _oauth_profile="${STIGLITZ_PROFILE:-}"
 if python3 "$SCRIPT_DIR/lib/oauth_audit.py" run "$OUTDIR" \
         ${_oauth_wk:+--well-known "$_oauth_wk"} \
         ${_oauth_zap:+--zap "$_oauth_zap"} \
-        --target "https://${TARGET}" \
+        --target "$TARGET" \
         ${_oauth_profile:+--profile "$_oauth_profile"} \
         ${_oauth_active:+--active}; then
     echo -e "  ${GREEN}[✓] OAuth audit concluído → raw/oauth_findings.json${NC}"

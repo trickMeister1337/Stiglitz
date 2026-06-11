@@ -49,7 +49,7 @@ bash stiglitz.sh <target> --outdir <dir> --only-phase "P3 P4"
 Output: `scan_<domain>_<timestamp>/` (relatório `stiglitz_report.html`, gerado por `stiglitz_report.py`).
 
 ### `pipeline.py` — Orquestrador de Fases (Python)
-Dirige as fases do `stiglitz.sh` via `--only-phase`, com **checkpoint real** (pula fases já concluídas), retry por fase, dry-run e logging. A lógica das ferramentas permanece no `stiglitz.sh`; aqui mora só a orquestração. P3+P4 rodam como unidade combinada (paralelismo testssl/nuclei).
+Dirige as fases do `stiglitz.sh` via `--only-phase`, com **checkpoint real** (pula fases já concluídas), retry por fase, dry-run e logging. A lógica das ferramentas permanece no `stiglitz.sh`; aqui mora só a orquestração. P3+P4 rodam como unidade combinada (paralelismo testssl/nuclei). A fase **P9 também é combinada** (`P9 P9_5 P9_6 P9_7`): as sub-fases de authz (Access Control/OAuth/BizLogic) consomem o ZAP vivo iniciado pela P9 — que é encerrado no `trap EXIT` a cada invocação —, então rodam na mesma invocação; o gating por token degrada sozinho quando ausente.
 
 ```bash
 python3 pipeline.py <target>                       # scan completo orquestrado
@@ -144,6 +144,7 @@ Os módulos Python e bash vivem em `lib/` como **arquivos reais** (lidos diretam
 | `bola.py` | Detecção de BOLA/IDOR e BFLA (OWASP API #1, fase P9.5) — reproduz requisições do ZAP com dois tokens (`--token-a`/`-b`), confirma acesso indevido por tripla A/B/unauth + canário de corpo → `access_control.json` (classes `bola`/`idor_read_pii`/`bfla`, com fingerprint). Só GET/HEAD/OPTIONS; tokens via env. Lógica pura + CLI |
 | `oauth_audit.py` | Auditoria OAuth 2.0/OIDC (fase P9.6) — well-known + params do ZAP → findings de `redirect_uri` (CWE-601), PKCE ausente/downgrade, state/nonce, implicit flow. Probes ativos opt-in (`--oauth-active`), dry-run em `production`. Lógica pura + CLI; `send_fn` injetável (testável sem rede) |
 | `bizlogic_scan.py` | Builder de config do `bizlogic` para a fase P9.7 do scan: deriva read-only do dump ZAP (`bola.parse_zap_messages`) + claims JWT (`jwt_audit`); mescla `bizlogic.yaml` para mutantes; grava `raw/bizlogic_findings.json`. Lógica pura + CLI |
+| `openapi_seed.py` | Fallback de seeding OpenAPI/Swagger (fase P9): quando o import nativo do ZAP rejeita um spec válido (ex.: nomes de schema .NET com backtick fora de `^[a-zA-Z0-9.\-_]+$`), extrai as URLs concretas do spec (resolve `{param}`, aplica `basePath`/`servers`) → `raw/openapi_urls.txt`, semeadas no ZAP via `accessUrl`. Lógica pura + CLI; sem rede |
 | `takeover.py` | Detecção de subdomain takeover (osint.sh Fase 8) — filtro de CNAME externo ao apex + parse do JSONL do `nuclei` → `cloud/takeover_candidates.csv` (schema legado, status `CONFIRMED`). Lógica pura + CLI (`select-external`/`build-csv`); sem rede, sem domínio hardcoded |
 | `cde_scope.py`, `pan_scanner.py`, `payment_page_monitor.py`, `pci_verdicts.py` | Cobertura PCI DSS restrita ao CDE (lê `cde_targets.txt`, gitignored): PAN com Luhn+máscara (3.5.1), integridade de scripts/Magecart (6.4.3/11.6.1), tag `pci_req`. Texto dos findings em EN (deliverable) |
 | `finding_state.py` | Ledger de estado por `fingerprint`: reconcile NEW/PERSISTENT/RESOLVED/REOPENED com `first_seen`/`last_seen`/`resolved_at` + métricas (age, MTTR, SLA breach). Store JSON fora do repo em `STIGLITZ_STATE_DIR` (default `~/.stiglitz/state/`) — **nunca versiona dado de alvo**. Enriquece `findings.json` com `state` e grava `raw/state_summary.json` |
@@ -187,8 +188,8 @@ bash -n stiglitz.sh stiglitz_red.sh stiglitz_full.sh stiglitz_batch.sh osint.sh 
 # Lint (gate do CI = warning)
 shellcheck --severity=warning stiglitz.sh stiglitz_red.sh stiglitz_full.sh stiglitz_batch.sh osint.sh setup.sh lib/*.sh
 
-# Testes Python
-python3 -m pytest test_lib.py test_swarm_modules.py test_pipeline.py
+# Testes Python (suíte completa vive em tests/)
+python3 -m pytest tests/
 
 # Compilar módulos
 python3 -m py_compile stiglitz_report.py pipeline.py lib/*.py

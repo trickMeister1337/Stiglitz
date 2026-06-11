@@ -57,6 +57,22 @@ unificado; SLA/aging CISA KEV (`lib/prioritization.py`); compliance multi-framew
   pré-check de `exp` (`jwt_audit.exp_status` + CLI `exp-check`); AJAX Spider via `chrome-headless`
   com preflight de browser e degradação. Validado ao vivo (alvo local): spider autenticado
   descobre rota protegida, AJAX renderiza via chromium (confinamento snap não bloqueou), exp-check OK
+- ✅ **OpenAPI seeding fallback** (Fase 9, `lib/openapi_seed.py`): quando o `importUrl` nativo
+  do ZAP rejeita um spec válido (nomes de schema fora de `^[a-zA-Z0-9.\-_]+$` — ex.: generics
+  .NET com backtick), extrai as URLs concretas do spec (resolve `{param}`, aplica `basePath`/
+  `servers`, dedup) → `raw/openapi_urls.txt` semeadas no ZAP via `accessUrl`. Descoberto em
+  validação ao vivo (API .NET): sem o fallback, a superfície documentada — incl. endpoint
+  multi-tenant alvo de BOLA — escapava do spider/active-scan. Lógica pura + CLI (7 testes).
+  Banner "Retomando scan" silenciado sob `pipeline.py` (só standalone); suíte 550 passed / 4 skipped
+- ✅ **P9.6 base-url duplo-esquema corrigido** (Fase 9.6 OAuth): a descoberta well-known (curl)
+  e o `--target` do `oauth_audit` usavam `https://${TARGET}` com `TARGET` já normalizado com
+  esquema → `https://https://...` (zerava a fase, como zerava na bizlogic antes da P9.7). Agora
+  usam `$TARGET` direto (mesma correção da P9.7). Validado: URLs bem-formadas, shellcheck limpo
+- ✅ **P9.5 (Access Control) no orquestrador + fluxo confirmado**: a fase **P9 do `pipeline.py`
+  virou unidade combinada `P9 P9_5 P9_6 P9_7` — as sub-fases de authz consomem o ZAP vivo da P9
+  (daemon encerrado no `trap EXIT` por invocação), então rodam juntas, não como passos isolados.
+  Confirmado por teste de caracterização que os findings da P9.5 chegam ao `findings.json`
+  (com `fingerprint`) **e** ao `findings.sarif` (com `partialFingerprints`). Suíte 553 passed / 4 skipped
 - ✅ **dedup semântico** (`lib/dedup.py`): colapsa duplicatas cross-tool + variantes de path/param (estágio 1 fingerprint) + fuzzy por CVE/título/evidência blocado por host (estágio 2). Auto-merge agressivo, proveniência no finding. Integrado no scan (`stiglitz_report.py`) e no RED (`evidence.py`); `STIGLITZ_DEDUP=0` desliga. CLI + lógica pura
 
 **P1 restante (ordem de retorno):**
@@ -69,9 +85,6 @@ IaC/container (trivy); multi-tenant.
 
 ## Follow-ups conhecidos (não feitos)
 
-- **BOLA:** confirmar se os findings de P9.5 chegam ao `findings.json` enriquecido + SARIF
-  (hoje entram via agregação do report). Adicionar P9.5 ao `pipeline.py` PHASES (hoje só roda
-  no scan full, não como passo isolado do orquestrador)
 - **Cobertura PCI:** porte seletivo do swarm-pci (PAN/Luhn, Magecart, tag `pci_req`); escopo
   via `cde_targets.txt` (gitignored). Design aprovado, implementação pendente
 - **Propagação do bearer ao active scanner + browser do AJAX:** o replacer cobre o ZAP Spider
@@ -79,16 +92,17 @@ IaC/container (trivy); multi-tenant.
   rodam deslogados (requests sem `Authorization`). Propagação completa exige mais que o replacer
   (httpSender script, ou contexto forced-user adaptado a bearer estático). Não bloqueia a fronteira
   do BOLA, que depende do histórico do spider — já autenticado
-- **base-url duplo-esquema na P9.6 (OAuth):** o bloco da P9.6 invoca `oauth_audit` com
-  `--target "https://${TARGET}"`, mas `TARGET` já carrega esquema → `https://https://...`. A P9.7
-  tinha o mesmo padrão e foi corrigida (usa `$TARGET`); a P9.6 permanece com o padrão antigo (não
-  verificado se zera a fase como zerava na bizlogic). Avaliar/corrigir
 - **Dedup semântico × dedup bizlogic (P9.7) — decisão de comportamento:** o dedup semântico (P2)
   roda a jusante da dedup especializada P9.7×P9.5 no `stiglitz_report.py`. Quando P9.5 inconclusiva
   e P9.7 confirmada colidem no mesmo recurso (mesmo fingerprint), o dedup semântico as **mescla em
   1** (o confirmado/maior-severidade vence como representante; a outra fonte entra em `sources`) —
   decisão deliberada: dedup semântico é autoritativo, fidelidade preservada (confirmado não some),
   muda só a contagem. `test_inconclusive_access_does_not_suppress_confirmed_bizlogic` reflete isso
+- **OpenAPI seeding — só paths GET via `accessUrl`:** o fallback registra os nós no site-tree
+  do ZAP, mas não passa schemas de request (body/params) para endpoints mutantes (POST/PUT). Os
+  IDs de path usam um valor de amostra (`1`), então 404 é comum sem credenciais — bom p/ estrutura,
+  insuficiente p/ derivar IDOR read 2xx na P9.7. Follow-up: sanitizar nomes inválidos e reimportar
+  via `openapi/action/importFile` (recupera cobertura mutante do active scanner)
 
 ## Pendência operacional
 
