@@ -112,6 +112,31 @@ audit_seal() {
     printf 'HMAC-SHA256 %s head=%s\n' "$mac" "$head" > "$AUDIT_LOG.seal"
     chmod 600 "$AUDIT_LOG.seal" 2>/dev/null || true
 }
+scope_guard() {
+    # scope_guard <fase> <arquivo_de_alvos> — filtra in-scope se houver escopo;
+    # senão, warn alto + audit. Não-bloqueante. Filtra o arquivo in-place.
+    # Nota: open_services.txt usa formato nmap (PORT/tcp SERVICE ...) — não URLs.
+    # Para a fase 'brute', passa file="" para emitir só o warn/audit sem tentar filtrar.
+    local phase="$1" file="$2"
+    if [ "${#SCOPE_DOMAINS[@]}" -eq 0 ]; then
+        warn "ESCOPO NÃO DEFINIDO — fase '$phase' rodará sem filtro de escopo (fail-open)"
+        audit "SCOPE_NONE phase=$phase" 2>/dev/null || true
+        return 0
+    fi
+    [ -z "$file" ] && return 0
+    [ -s "$file" ] || return 0
+    local before after tmp
+    before=$(wc -l < "$file" 2>/dev/null || echo 0)
+    tmp=$(mktemp)
+    if python3 "$LIB/scope.py" "${SCOPE_DOMAINS[@]}" < "$file" > "$tmp" 2>/dev/null; then
+        after=$(wc -l < "$tmp" 2>/dev/null || echo 0)
+        mv "$tmp" "$file"
+        audit "SCOPE_FILTERED phase=$phase before=$before after=$after" 2>/dev/null || true
+        [ "$before" != "$after" ] && info "Escopo: $phase filtrado $before→$after alvos"
+    else
+        rm -f "$tmp"
+    fi
+}
 dry_cmd() {
     if [ "$DRY_RUN" = true ]; then
         echo -e "  ${DIM}[DRY-RUN]${RST} $*"
@@ -675,6 +700,8 @@ run_sqli() {
         checkpoint_done "sqli"; return 0
     fi
 
+    scope_guard "sqli" "$OUTDIR/data/targets_scored.txt"
+
     local _sqli_targets
     _sqli_targets=$(awk -F'|' '$1>=3{count++} END{print count+0}' "$OUTDIR/data/targets_scored.txt" 2>/dev/null); _sqli_targets=${_sqli_targets:-0}
     log "Fase SQLi: ${_sqli_targets} URL(s) com score≥3 (parâmetros sensíveis)"
@@ -720,6 +747,8 @@ run_xss() {
         warn "[DRY-RUN] xss: simulando dalfox"
         checkpoint_done "xss"; return 0
     fi
+
+    scope_guard "xss" "$OUTDIR/data/targets_scored.txt"
 
     local _xss_targets
     _xss_targets=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null); _xss_targets=${_xss_targets:-0}
@@ -770,6 +799,10 @@ run_brute() {
     fi
 
     # ── Brute force de serviços (SSH, FTP, DB, RDP, SMB) ──
+    # open_services.txt usa formato nmap (PORT/tcp SERVICE ...) — não URLs.
+    # scope_guard com file="" emite apenas o warn/audit SCOPE_NONE quando sem escopo;
+    # quando escopo definido, host já é SCOPE_DOMAINS[0] — alvo sempre in-scope.
+    scope_guard "brute" ""
     log "Fase Brute: iniciando brute de serviços de rede"
     source "$LIB/brute.sh"
     run_brute_phase \
