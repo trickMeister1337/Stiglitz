@@ -287,6 +287,7 @@ OUTDIR_OVERRIDE="" # Reutiliza um diretório de scan fixo (orquestrador pipeline
 ONLY_PHASES=""     # Lista de fases a executar (ex: "P4"); vazio = todas
 DRY_RUN=false      # Simular: imprime o plano e sai sem executar ferramentas
 OAUTH_ACTIVE=0     # Probes ativos OAuth/OIDC (P9.6) — opt-in via --oauth-active
+BIZLOGIC_MUTATE=0  # opt-in p/ testes mutantes de lógica de negócio (P9.7)
 
 # Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase, --dry-run, --oauth-active
 _args=("$@")
@@ -301,6 +302,7 @@ for _i in "${!_args[@]}"; do
         --only-phase)        ONLY_PHASES="${_args[$((${_i}+1))]}" ;;
         --dry-run)           DRY_RUN=true ;;
         --oauth-active)      OAUTH_ACTIVE=1 ;;
+        --bizlogic-mutate)   BIZLOGIC_MUTATE=1 ;;
     esac
 done
 
@@ -491,7 +493,7 @@ _phase_enabled() {
 _needs_network() {
     # Retorna 0 se alguma fase habilitada precisa de acesso de rede ao alvo.
     # Fases offline (P11 = geração de relatório) não requerem conectividade.
-    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P9_5 P9_6 P10 P10_5; do
+    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P9_5 P9_6 P9_7 P10 P10_5; do
         _phase_enabled "$_np" && return 0
     done
     return 1
@@ -1822,6 +1824,38 @@ fi
 phase_end "P9_6"
 phase_done "FASE_9_6"
 fi  # fim P9.6
+
+# ====================== FASE 9.7: BUSINESS LOGIC AUTHZ ======================
+if _phase_enabled "P9_7" && [ -n "$TOKEN_A" ] && [ -n "$TOKEN_B" ]; then
+phase_start "P9_7"
+phase_banner "FASE 9.7: BUSINESS LOGIC AUTHZ (IDOR/privesc/amount-tampering)"
+
+# Config manual opcional (mutantes): env ou bizlogic.yaml/json no cwd/outdir
+_biz_cfg=""
+for _c in "${STIGLITZ_BIZLOGIC_CONFIG:-}" "bizlogic.yaml" "bizlogic.json" \
+          "$OUTDIR/bizlogic.yaml" "$OUTDIR/bizlogic.json"; do
+    [ -n "$_c" ] && [ -f "$_c" ] && { _biz_cfg="$_c"; break; }
+done
+
+_biz_mutate=""
+[ "$BIZLOGIC_MUTATE" = "1" ] && _biz_mutate="1"
+_biz_profile="${STIGLITZ_PROFILE:-staging}"
+
+if BIZLOGIC_TOKEN_A="$TOKEN_A" BIZLOGIC_TOKEN_B="$TOKEN_B" \
+   python3 "$SCRIPT_DIR/lib/bizlogic_scan.py" \
+        --outdir "$OUTDIR" \
+        --base-url "$TARGET" --profile "$_biz_profile" \
+        ${STIGLITZ_SCOPE_DOMAINS:+--scope "${STIGLITZ_SCOPE_DOMAINS// /,}"} \
+        ${_biz_cfg:+--config "$_biz_cfg"} \
+        ${_biz_mutate:+--mutate}; then
+    echo -e "  ${GREEN}[✓] Business Logic concluído → raw/bizlogic_findings.json${NC}"
+else
+    echo -e "  ${YELLOW}[!] bizlogic-scan: módulo retornou erro${NC}"
+fi
+
+phase_end "P9_7"
+phase_done "FASE_9_7"
+fi  # fim P9.7
 
 if _phase_enabled "P10"; then
 phase_start "P10"

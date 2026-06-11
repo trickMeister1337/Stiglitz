@@ -50,6 +50,7 @@ unificado; SLA/aging CISA KEV (`lib/prioritization.py`); compliance multi-framew
   probes ativos opt-in com `--oauth-active` (dry-run sob `STIGLITZ_PROFILE=production`);
   classifiers CONFIRMED/REJECTED/INCONCLUSIVE → `oauth_findings.json`; 6 classes novas no
   catálogo. Suite combinada: 514 passed / 4 skipped
+- ✅ **bizlogic no scan** (fase **P9.7**, `lib/bizlogic_scan.py`): read-only auto-derivado do ZAP+tokens; mutantes opt-in (`--bizlogic-mutate` + config) com gating profile/RoE; dedup vs P9.5
 - ✅ **ZAP bearer-token propagation (spider) + AJAX render chromium** (Fase 9): bearer/header
   injetados no HttpSender ANTES do spider (helper `zap_inject_auth_headers`) → ZAP Spider e
   histórico que a P9.5 (BOLA) consome rodam autenticados (fronteira do BOLA expandida);
@@ -78,6 +79,10 @@ IaC/container (trivy); multi-tenant.
   rodam deslogados (requests sem `Authorization`). Propagação completa exige mais que o replacer
   (httpSender script, ou contexto forced-user adaptado a bearer estático). Não bloqueia a fronteira
   do BOLA, que depende do histórico do spider — já autenticado
+- **base-url duplo-esquema na P9.6 (OAuth):** o bloco da P9.6 invoca `oauth_audit` com
+  `--target "https://${TARGET}"`, mas `TARGET` já carrega esquema → `https://https://...`. A P9.7
+  tinha o mesmo padrão e foi corrigida (usa `$TARGET`); a P9.6 permanece com o padrão antigo (não
+  verificado se zera a fase como zerava na bizlogic). Avaliar/corrigir
 
 ## Pendência operacional
 
