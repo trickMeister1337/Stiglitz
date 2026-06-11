@@ -467,6 +467,19 @@ phase_skip() {
     grep -q "^$1=done:" "$STIGLITZ_STATE" 2>/dev/null
 }
 
+phase_output_ok() {
+    # phase_output_ok <fase> <artefato...> — sucesso (0) se TODOS existem e são não-vazios.
+    local phase="$1"; shift
+    local art
+    for art in "$@"; do
+        if [ ! -s "$art" ]; then
+            warn "$phase: saída ausente/vazia ($art) — não marcando como concluída (resume re-executará)"
+            return 1
+        fi
+    done
+    return 0
+}
+
 _filter_inscope_urls() {
     # Lê URLs de $1 e imprime só as in-scope, comparando o HOST da URL com $DOMAIN
     # (igual ou subdomínio real). Filtrar por substring deixaria escapar URLs como
@@ -691,7 +704,7 @@ else
     SUB_COUNT=1
 fi
 phase_end "P1"
-phase_done "FASE_1"
+phase_output_ok "FASE_1" "$OUTDIR/raw/subdomains.txt" && phase_done "FASE_1"
 echo -e "  ${GREEN}[✓] Fase 1 concluída — $SUB_COUNT alvo(s) para análise${NC}"
 
 # ====================== FASE 2: MAPEAMENTO ======================
@@ -1182,7 +1195,7 @@ if [ ! -s "$OUTDIR/raw/nuclei.json" ]; then
     echo -e "  ${YELLOW}    Verifique conectividade com o alvo e considere re-executar deletando FASE_4 do .stiglitz_state${NC}"
 fi
 phase_end "P4"
-phase_done "FASE_4"
+phase_output_ok "FASE_4" "$OUTDIR/raw/nuclei.json" && phase_done "FASE_4"
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 
@@ -1732,7 +1745,7 @@ if [ ! -s "$OUTDIR/raw/zap_alerts.json" ]; then
     echo -e "  ${YELLOW}    Verifique se o ZAP spider completou e considere re-executar deletando FASE_9 do .stiglitz_state${NC}"
 fi
 phase_end "P9"
-phase_done "FASE_9"
+phase_output_ok "FASE_9" "$OUTDIR/raw/zap_alerts.json" && phase_done "FASE_9"
         # Atualizar metadata com resultado ZAP
         python3 -c "
 import json,os
