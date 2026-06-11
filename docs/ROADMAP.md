@@ -83,6 +83,12 @@ IaC/container (trivy); multi-tenant.
   `--target "https://${TARGET}"`, mas `TARGET` já carrega esquema → `https://https://...`. A P9.7
   tinha o mesmo padrão e foi corrigida (usa `$TARGET`); a P9.6 permanece com o padrão antigo (não
   verificado se zera a fase como zerava na bizlogic). Avaliar/corrigir
+- **Dedup semântico × dedup bizlogic (P9.7) — decisão de comportamento:** o dedup semântico (P2)
+  roda a jusante da dedup especializada P9.7×P9.5 no `stiglitz_report.py`. Quando P9.5 inconclusiva
+  e P9.7 confirmada colidem no mesmo recurso (mesmo fingerprint), o dedup semântico as **mescla em
+  1** (o confirmado/maior-severidade vence como representante; a outra fonte entra em `sources`) —
+  decisão deliberada: dedup semântico é autoritativo, fidelidade preservada (confirmado não some),
+  muda só a contagem. `test_inconclusive_access_does_not_suppress_confirmed_bizlogic` reflete isso
 
 ## Pendência operacional
 
