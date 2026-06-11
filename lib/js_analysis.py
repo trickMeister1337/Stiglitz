@@ -6,6 +6,7 @@ Extraído de stiglitz.sh (heredoc PYJS). Recebe argumentos posicionais
 via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import urllib.request, urllib.parse, urllib.error, re, os, sys, json, ssl, hashlib, time
+import http.client
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -208,7 +209,7 @@ for ep in list(all_endpoints)[:30]:
             body = r.read(512).decode("utf-8",errors="replace")
     except urllib.error.HTTPError as e:
         st = e.code; ct = ""; body = ""
-    except (urllib.error.URLError, OSError): st = 0; ct = ""; body = ""
+    except (urllib.error.URLError, OSError, http.client.HTTPException): st = 0; ct = ""; body = ""
     probed.append({"endpoint":ep,"url":url,"status":st,"content_type":ct[:80],
         "is_json":"json" in ct,"body_preview":body[:200] if st==200 else ""})
     time.sleep(0.1)

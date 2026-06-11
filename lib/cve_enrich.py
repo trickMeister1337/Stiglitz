@@ -33,7 +33,7 @@ if os.path.exists(_kev_cache):
             _cache_mins = int(_cache_age // 60)
             print(f"  [✓] KEV: {len(kev_set)} CVEs carregados do cache "
                   f"({_cache_mins}min atrás)")
-        except (json.JSONDecodeError, ValueError, OSError, KeyError): pass
+        except (json.JSONDecodeError, ValueError, OSError, KeyError, TypeError): pass
 
 if not _kev_cached:
     try:

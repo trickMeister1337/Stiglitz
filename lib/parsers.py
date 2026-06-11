@@ -14,6 +14,7 @@ import sys
 import os
 import json
 import re
+import http.client
 import urllib.request
 import urllib.error
 from typing import Dict, List, Set, Tuple, Optional
@@ -319,7 +320,8 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                 if "sitemap" in rpath:
                     for loc in re.findall(r"<loc>\s*(https?://[^<]+)\s*</loc>", content):
                         add_url(loc.strip())
-        except (urllib.error.URLError, OSError, ValueError, UnicodeDecodeError):
+        except (urllib.error.URLError, OSError, ValueError, UnicodeDecodeError,
+                http.client.HTTPException):
             pass
 
     # Fonte 6: Variantes com parâmetros comuns (APENAS em URLs dinâmicas)
