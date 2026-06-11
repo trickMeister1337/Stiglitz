@@ -101,6 +101,8 @@ audit_seal() {
     head=$(awk -F'[ :]+' 'END{print $NF}' "$AUDIT_LOG" 2>/dev/null)
     [ -z "$head" ] && return 0
     local mac
+    # openssl é preferido se presente; nota: a chave aparece em `ps`/cmdline durante a
+    # chamada (limitação do -hmac). O fallback python passa a chave por env (sem exposição).
     if has openssl; then
         mac=$(printf '%s' "$head" | openssl dgst -sha256 -hmac "$STIGLITZ_AUDIT_KEY" -r 2>/dev/null | cut -d' ' -f1)
     else

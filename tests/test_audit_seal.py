@@ -60,6 +60,30 @@ def test_verify_seal_rejects_wrong_key():
     assert not ok
 
 
+def test_verify_seal_rejects_renumbered_seq():
+    d = tempfile.mkdtemp()
+    log = os.path.join(d, "audit.log"); head = _build_log(log)
+    seal = os.path.join(d, "audit.log.seal")
+    with open(seal, "w") as f:
+        f.write(f"HMAC-SHA256 {_seal_hex(head, KEY)} head={head}\n")
+    # renumera o SEQ da 2ª linha (0001 -> 0009) sem tocar nos hashes
+    lines = open(log).read().splitlines()
+    lines[1] = lines[1].replace("0001 |", "0009 |", 1)
+    open(log, "w").write("\n".join(lines) + "\n")
+    ok, msg = V.verify_seal(log, seal, KEY)
+    assert not ok
+
+
+def test_verify_seal_rejects_seal_without_head():
+    d = tempfile.mkdtemp()
+    log = os.path.join(d, "audit.log"); head = _build_log(log)
+    seal = os.path.join(d, "audit.log.seal")
+    with open(seal, "w") as f:
+        f.write(f"HMAC-SHA256 {_seal_hex(head, KEY)}\n")   # sem head=
+    ok, msg = V.verify_seal(log, seal, KEY)
+    assert not ok
+
+
 def test_bash_openssl_matches_python_hmac():
     import shutil
     if not shutil.which("openssl"):

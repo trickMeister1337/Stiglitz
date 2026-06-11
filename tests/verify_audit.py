@@ -78,6 +78,12 @@ def _head_hash(path):
                 p_h, c_h = hashes.split(":")
             except ValueError:
                 return False, f"linha {lineno}: formato inválido"
+            try:
+                seq = int(seq_str)
+            except ValueError:
+                return False, f"linha {lineno}: SEQ não numérico"
+            if seq != expected_seq:
+                return False, f"linha {lineno}: SEQ esperado {expected_seq}, obtido {seq}"
             if prev is not None and p_h != prev:
                 return False, f"linha {lineno}: prev_hash diverge"
             if _h(p_h, ts, event) != c_h:
@@ -101,7 +107,9 @@ def verify_seal(log_path, seal_path, key):
         return False, f"selo ilegível: {e}"
     if algo != "HMAC-SHA256":
         return False, f"algoritmo de selo inesperado: {algo}"
-    if sealed_head is not None and sealed_head != head:
+    if sealed_head is None:
+        return False, "campo head= ausente no arquivo de selo"
+    if sealed_head != head:
         return False, f"cabeça do selo ({sealed_head}) diverge da recomputada ({head})"
     expected = hmac.new(key.encode(), head.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, sealed_hex):
@@ -116,9 +124,13 @@ def main():
         sys.exit(2)
     log = args[0]
     if "--seal" in args:
-        seal = args[args.index("--seal") + 1]
-        key = (args[args.index("--key") + 1] if "--key" in args
-               else os.environ.get("STIGLITZ_AUDIT_KEY", ""))
+        try:
+            seal = args[args.index("--seal") + 1]
+            key = (args[args.index("--key") + 1] if "--key" in args
+                   else os.environ.get("STIGLITZ_AUDIT_KEY", ""))
+        except IndexError:
+            print("Uso: verify_audit.py <audit.log> [--seal <audit.log.seal> [--key K]]", file=sys.stderr)
+            sys.exit(2)
         if not key:
             print("selo requer chave (--key ou STIGLITZ_AUDIT_KEY)", file=sys.stderr)
             sys.exit(2)
