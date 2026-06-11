@@ -160,7 +160,7 @@ def _legacy_dedup(findings):
     """Dedup cru por (tool, type, target[:60]) — fallback quando lib/dedup.py falha."""
     seen, out = set(), []
     for f in findings:
-        key = (f.get("tool"), f.get("type"), f.get("target", "")[:60])
+        key = (f.get("tool"), f.get("type"), (f.get("target") or "")[:60])
         if key not in seen:
             seen.add(key)
             out.append(f)

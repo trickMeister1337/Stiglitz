@@ -36,7 +36,9 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 def _url(f):
-    return f.get("url") or f.get("target") or f.get("matched_at") or ""
+    # str() defensivo: tolera url/target não-string (mantém o estágio 2 robusto,
+    # simetria com a tolerância a malformados do estágio 1).
+    return str(f.get("url") or f.get("target") or f.get("matched_at") or "")
 
 
 def _host(f):

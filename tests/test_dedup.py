@@ -118,3 +118,19 @@ def test_evidence_legacy_dedup_fallback():
           {"tool": "nuclei", "type": "sqli", "target": "http://t/q"}]
     out = ev._legacy_dedup(fs)
     assert len(out) == 2                            # colapsa a duplicata exata zap/xss
+
+
+def test_dedupe_tolerates_non_string_url():
+    # url/target não-string não deve abortar o estágio 2 (degrada como malformado).
+    out = D.dedupe([{"cwe": "CWE-89", "url": 12345, "name": "x", "tool": "nuclei"},
+                    {"cwe": "CWE-79", "url": ["weird"], "name": "y", "tool": "zap"}])
+    assert isinstance(out, list) and len(out) == 2
+
+
+def test_legacy_dedup_tolerates_none_target():
+    import importlib
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
+    ev = importlib.import_module("evidence")
+    out = ev._legacy_dedup([{"tool": "zap", "type": "xss", "target": None},
+                            {"tool": "nuclei", "type": "sqli"}])   # target ausente/None
+    assert isinstance(out, list) and len(out) == 2
