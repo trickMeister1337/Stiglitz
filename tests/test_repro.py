@@ -75,3 +75,54 @@ def test_sanitize_noop_returns_unchanged():
     out, changed = R.sanitize_text("nothing sensitive here")
     assert out == "nothing sensitive here"
     assert changed is False
+
+
+def test_sanitize_redacts_basic_auth():
+    out, changed = R.sanitize_text("Authorization: Basic dXNlcjpwYXNz")
+    assert "dXNlcjpwYXNz" not in out
+    assert changed is True
+
+
+def test_sanitize_redacts_api_key_header():
+    out, changed = R.sanitize_text("X-API-Key: sk_live_abc123DEF")
+    assert "sk_live_abc123DEF" not in out
+    assert changed is True
+
+
+def test_sanitize_redacts_curl_cookie_flag():
+    out, changed = R.sanitize_text("curl -b 'sid=deadbeef' https://t/")
+    assert "deadbeef" not in out
+    assert "<SESSION>" in out
+    assert changed is True
+
+
+def test_sanitize_redacts_querystring_password_and_apikey():
+    out, _ = R.sanitize_text("https://t/login?password=hunter2&api_key=KEY123")
+    assert "hunter2" not in out
+    assert "KEY123" not in out
+
+
+def test_sanitize_redacts_json_body_secret():
+    out, changed = R.sanitize_text('{"client_secret":"shhh-very-secret","grant_type":"x"}')
+    assert "shhh-very-secret" not in out
+    assert "grant_type" in out
+    assert changed is True
+
+
+def test_sanitize_masks_pan_with_spaces():
+    out, changed = R.sanitize_text("PAN 4111 1111 1111 1111 captured")
+    assert "4111 1111 1111 1111" not in out
+    assert "411111******1111" in out
+    assert changed is True
+
+
+def test_sanitize_masks_pan_with_hyphens():
+    out, changed = R.sanitize_text("4111-1111-1111-1111")
+    assert "4111-1111-1111-1111" not in out
+    assert "411111******1111" in out
+
+
+def test_sanitize_bearer_with_percent_does_not_leak_tail():
+    out, _ = R.sanitize_text("Authorization: Bearer eyJ%41AA.bbb-ccc")
+    assert "%41AA" not in out
+    assert "bbb-ccc" not in out
