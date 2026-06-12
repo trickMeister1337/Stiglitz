@@ -32,4 +32,7 @@ def passes_gate(finding):
         return True
     if str(finding.get("confirmed_category", "")).strip().lower() in _CONFIRMED_CATS:
         return True
-    return bool(finding.get("confirmed"))
+    conf = finding.get("confirmed")
+    if isinstance(conf, str):
+        return conf.strip().lower() in {"true", "1", "yes", "confirmed"}
+    return bool(conf)

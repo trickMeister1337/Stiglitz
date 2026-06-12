@@ -21,3 +21,12 @@ def test_gate_confirmed_bool_passes():
 def test_gate_info_low_without_confirmation_fail():
     assert R.passes_gate({"severity": "info"}) is False
     assert R.passes_gate({"severity": "low"}) is False
+
+
+def test_gate_confirmed_false_does_not_pass():
+    assert R.passes_gate({"severity": "low", "confirmed": False}) is False
+    assert R.passes_gate({"severity": "info", "confirmed": "false"}) is False
+
+
+def test_gate_confirmed_string_true_passes():
+    assert R.passes_gate({"severity": "low", "confirmed": "true"}) is True
