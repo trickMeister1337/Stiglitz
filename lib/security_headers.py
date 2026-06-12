@@ -149,7 +149,7 @@ for url in urls[:20]:  # testar as 20 primeiras URLs ativas
             "present": present,
             "subdirective_issues": subdirective_issues,
         })
-    except: pass
+    except Exception: pass  # handler amplo por-URL: rede/parse podem falhar de muitas formas; não mascara KeyboardInterrupt
 
 out_file = os.path.join(outdir,"raw","security_headers.json")
 json.dump(results, open(out_file,"w"), indent=2, ensure_ascii=False)

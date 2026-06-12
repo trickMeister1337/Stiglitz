@@ -90,6 +90,54 @@ audit() {
     h=$(printf '%s|%s|%s' "$prev" "$ts" "$event" | sha256sum | cut -c1-16)
     printf '%04d | %s | %s | %s:%s\n' "$_audit_seq" "$ts" "$event" "$prev" "$h" >> "$AUDIT_LOG"
 }
+audit_seal() {
+    # Sela a CABEÇA do hash-chain com HMAC-SHA256(STIGLITZ_AUDIT_KEY). Sem chave, não sela.
+    { [ -z "$AUDIT_LOG" ] || [ ! -s "$AUDIT_LOG" ]; } && return 0
+    if [ -z "${STIGLITZ_AUDIT_KEY:-}" ]; then
+        audit "SEAL_SKIPPED reason=no_key" 2>/dev/null || true
+        return 0
+    fi
+    local head
+    head=$(awk -F'[ :]+' 'END{print $NF}' "$AUDIT_LOG" 2>/dev/null)
+    [ -z "$head" ] && return 0
+    local mac
+    # openssl é preferido se presente; nota: a chave aparece em `ps`/cmdline durante a
+    # chamada (limitação do -hmac). O fallback python passa a chave por env (sem exposição).
+    if has openssl; then
+        mac=$(printf '%s' "$head" | openssl dgst -sha256 -hmac "$STIGLITZ_AUDIT_KEY" -r 2>/dev/null | cut -d' ' -f1)
+    else
+        mac=$(STIGLITZ_AUDIT_KEY="$STIGLITZ_AUDIT_KEY" python3 -c 'import os,hmac,hashlib,sys;print(hmac.new(os.environ["STIGLITZ_AUDIT_KEY"].encode(),sys.argv[1].encode(),hashlib.sha256).hexdigest())' "$head" 2>/dev/null)
+    fi
+    [ -z "$mac" ] && { warn "audit_seal: falha ao computar HMAC — não selado"; return 0; }
+    printf 'HMAC-SHA256 %s head=%s\n' "$mac" "$head" > "$AUDIT_LOG.seal"
+    chmod 600 "$AUDIT_LOG.seal" 2>/dev/null || true
+}
+scope_guard() {
+    # scope_guard <fase> <arquivo_de_alvos> — filtra in-scope se houver escopo;
+    # senão, warn alto + audit. Não-bloqueante. Filtra o arquivo in-place.
+    # Nota: open_services.txt usa formato nmap (PORT/tcp SERVICE ...) — não URLs.
+    # Para a fase 'brute', passa file="" para emitir só o warn/audit sem tentar filtrar.
+    local phase="$1" file="$2"
+    if [ "${#SCOPE_DOMAINS[@]}" -eq 0 ]; then
+        warn "ESCOPO NÃO DEFINIDO — fase '$phase' rodará sem filtro de escopo (fail-open)"
+        audit "SCOPE_NONE phase=$phase" 2>/dev/null || true
+        return 0
+    fi
+    [ -z "$file" ] && return 0
+    [ -s "$file" ] || return 0
+    local before after tmp
+    before=$(wc -l < "$file" 2>/dev/null || echo 0)
+    tmp=$(mktemp)
+    if python3 "$LIB/scope.py" "${SCOPE_DOMAINS[@]}" < "$file" > "$tmp" 2>/dev/null; then
+        after=$(wc -l < "$tmp" 2>/dev/null || echo 0)
+        mv "$tmp" "$file"
+        audit "SCOPE_FILTERED phase=$phase before=$before after=$after" 2>/dev/null || true
+        [ "$before" != "$after" ] && info "Escopo: $phase filtrado $before→$after alvos"
+    else
+        rm -f "$tmp"
+        warn "scope_guard: python3 falhou — fase '$phase' rodará sem filtro de escopo"
+    fi
+}
 dry_cmd() {
     if [ "$DRY_RUN" = true ]; then
         echo -e "  ${DIM}[DRY-RUN]${RST} $*"
@@ -540,24 +588,11 @@ _build_scored_targets() {
     [ -n "$TARGET" ] && echo "$TARGET" >> "$tmp_raw"
 
     # Score + filtro
-    python3 - "$tmp_raw" "$OUTDIR/data/targets_scored.txt" "${SCOPE_DOMAINS[@]}" << 'PYEOF'
+    PYTHONPATH="$LIB" python3 - "$tmp_raw" "$OUTDIR/data/targets_scored.txt" "${SCOPE_DOMAINS[@]}" << 'PYEOF'
 import sys, re
-from urllib.parse import urlparse
+from scope import in_scope as _in_scope
 raw_f, scored_f = sys.argv[1], sys.argv[2]
 scope_domains = [d.strip().lower().lstrip('*.') for d in sys.argv[3:] if d.strip()]
-
-def in_scope(url):
-    # Sem escopo definido => não filtra (fail-open só quando o operador não delimitou)
-    if not scope_domains:
-        return True
-    try:
-        host = (urlparse(url).hostname or '').lower()
-    except Exception:
-        return False
-    if not host:
-        return False
-    # In-scope se o host for igual ou subdomínio de algum domínio do escopo
-    return any(host == d or host.endswith('.' + d) for d in scope_domains)
 
 crit_params = re.compile(
     r'[?&](id|user|account|token|pass|password|key|secret|admin|cmd|exec|'
@@ -582,7 +617,7 @@ try:
             url = line.strip()
             if not url or url in seen: continue
             if media_ext.search(url): continue
-            if not in_scope(url): continue
+            if not _in_scope(url, scope_domains): continue
             seen.add(url)
             s = 0
             if crit_params.search(url):                       s += 5
@@ -653,6 +688,8 @@ run_sqli() {
         checkpoint_done "sqli"; return 0
     fi
 
+    scope_guard "sqli" "$OUTDIR/data/targets_scored.txt"
+
     local _sqli_targets
     _sqli_targets=$(awk -F'|' '$1>=3{count++} END{print count+0}' "$OUTDIR/data/targets_scored.txt" 2>/dev/null); _sqli_targets=${_sqli_targets:-0}
     log "Fase SQLi: ${_sqli_targets} URL(s) com score≥3 (parâmetros sensíveis)"
@@ -698,6 +735,8 @@ run_xss() {
         warn "[DRY-RUN] xss: simulando dalfox"
         checkpoint_done "xss"; return 0
     fi
+
+    scope_guard "xss" "$OUTDIR/data/targets_scored.txt"
 
     local _xss_targets
     _xss_targets=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null); _xss_targets=${_xss_targets:-0}
@@ -748,6 +787,10 @@ run_brute() {
     fi
 
     # ── Brute force de serviços (SSH, FTP, DB, RDP, SMB) ──
+    # open_services.txt usa formato nmap (PORT/tcp SERVICE ...) — não URLs.
+    # scope_guard com file="" emite apenas o warn/audit SCOPE_NONE quando sem escopo;
+    # quando escopo definido, host já é SCOPE_DOMAINS[0] — alvo sempre in-scope.
+    scope_guard "brute" ""
     log "Fase Brute: iniciando brute de serviços de rede"
     source "$LIB/brute.sh"
     run_brute_phase \
@@ -1214,6 +1257,7 @@ Alvo: ${SCOPE_DOMAINS[*]}
 Perfil: ${PROFILE^^} | Modo: ${MODE^^}
 Findings: ${n_total_f} (SQLi:${n_sqli_f} XSS:${n_xss_f} Brute:${n_brute_f})
 Output: ${OUTDIR}"
+    audit_seal
 }
 
 main "$@"
