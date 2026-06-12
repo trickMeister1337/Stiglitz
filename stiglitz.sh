@@ -473,7 +473,7 @@ phase_output_ok() {
     local art
     for art in "$@"; do
         if [ ! -s "$art" ]; then
-            warn "$phase: saída ausente/vazia ($art) — não marcando como concluída (resume re-executará)"
+            echo -e "  ${YELLOW}[!] $phase: saída ausente/vazia ($art) — não marcada como concluída (resume re-executará)${NC}"
             return 1
         fi
     done
@@ -1192,7 +1192,7 @@ fi
 # ── Validação de output nuclei ────────────────────────────────────
 if [ ! -s "$OUTDIR/raw/nuclei.json" ]; then
     echo -e "  ${YELLOW}[!] AVISO: nuclei.json vazio ou ausente — resultado da Fase 4 pode estar incompleto.${NC}"
-    echo -e "  ${YELLOW}    Verifique conectividade com o alvo e considere re-executar deletando FASE_4 do .stiglitz_state${NC}"
+    echo -e "  ${YELLOW}    Verifique conectividade com o alvo — a fase não será marcada como concluída e o resume a re-executará${NC}"
 fi
 phase_end "P4"
 phase_output_ok "FASE_4" "$OUTDIR/raw/nuclei.json" && phase_done "FASE_4"
@@ -1742,7 +1742,7 @@ except: print(0)" 2>/dev/null)
 # ── Validação de output ZAP ───────────────────────────────────────
 if [ ! -s "$OUTDIR/raw/zap_alerts.json" ]; then
     echo -e "  ${YELLOW}[!] AVISO: zap_alerts.json vazio ou ausente — resultado da Fase 9 pode estar incompleto.${NC}"
-    echo -e "  ${YELLOW}    Verifique se o ZAP spider completou e considere re-executar deletando FASE_9 do .stiglitz_state${NC}"
+    echo -e "  ${YELLOW}    Verifique se o ZAP spider completou — a fase não será marcada como concluída e o resume a re-executará${NC}"
 fi
 phase_end "P9"
 phase_output_ok "FASE_9" "$OUTDIR/raw/zap_alerts.json" && phase_done "FASE_9"

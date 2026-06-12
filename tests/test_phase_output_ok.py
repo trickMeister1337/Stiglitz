@@ -32,3 +32,26 @@ def test_one_empty_fails():
 
 def test_one_missing_fails():
     assert "FAIL" in _run(("present", "missing"))
+
+
+def _run1(which):
+    d = tempfile.mkdtemp()
+    present = os.path.join(d, "p.txt"); open(present, "w").write("x\n")
+    empty = os.path.join(d, "e.txt"); open(empty, "w").close()
+    missing = os.path.join(d, "m.txt")
+    f = {"present": present, "empty": empty, "missing": missing}[which]
+    script = r'''
+set -e
+eval "$(awk '/^phase_output_ok\(\) \{/,/^\}/' "%s/stiglitz.sh")"
+if phase_output_ok "FASE_X" "$1"; then echo OK; else echo FAIL; fi
+''' % ROOT
+    r = subprocess.run(["bash", "-c", script, "bash", f], capture_output=True, text=True)
+    return r.stdout.strip()
+
+
+def test_single_artifact_present_ok():
+    assert "OK" in _run1("present")
+
+
+def test_single_artifact_missing_fails():
+    assert "FAIL" in _run1("missing")
