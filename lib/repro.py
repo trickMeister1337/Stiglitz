@@ -58,12 +58,18 @@ _BEARER_RE = re.compile(r"(?i)(authorization\s*:\s*bearer\s+)([A-Za-z0-9._~+/%\-
 # Authorization com esquemas não-Bearer (Basic/Digest/Negotiate/NTLM).
 _AUTH_OTHER_RE = re.compile(
     r"(?i)(authorization\s*:\s*(?:basic|digest|negotiate|ntlm)\s+)([^\s'\"\r\n]+)")
-# Headers de segredo comuns em fintech/API.
+# Headers de segredo comuns em fintech/API (linha própria de header HTTP cru;
+# valor até o fim da linha — cobre valor entre aspas, ex.: X-API-Key: "sk_...").
 _SECRET_HDR_RE = re.compile(
-    r"(?i)((?:x-api-key|x-auth-token|api-key|apikey|x-amz-security-token|"
-    r"proxy-authorization)\s*:\s*)([^\r\n'\"]+)")
-# Cookie em header HTTP.
-_COOKIE_RE = re.compile(r"(?i)((?:set-)?cookie\s*:\s*)([^\r\n'\"]+)")
+    r"(?im)^((?:x-api-key|x-auth-token|api-key|apikey|x-amz-security-token|"
+    r"proxy-authorization)\s*:\s*)([^\r\n]+)")
+# Cookie em header HTTP cru (linha própria; valor até EOL — cobre Set-Cookie: jwt="...").
+_COOKIE_RE = re.compile(r"(?im)^((?:set-)?cookie\s*:\s*)([^\r\n]+)")
+# Headers sensíveis passados via flag do curl (-H/--header '<hdr>: <valor>'): o valor
+# termina na aspa de fechamento (não engole o resto da linha/URL).
+_CURL_HDR_RE = re.compile(
+    r"(?i)((?:-H|--header)\s+['\"]\s*(?:set-cookie|cookie|x-api-key|x-auth-token|"
+    r"api-key|apikey|proxy-authorization|x-amz-security-token)\s*:\s*)([^'\"]*)")
 # Cookie em flags do curl (-b / --cookie).
 _COOKIE_FLAG_RE = re.compile(r"(?i)(\s(?:-b|--cookie)\s+)('[^']*'|\"[^\"]*\"|[^\s]+)")
 # Tokens em querystring.
@@ -98,6 +104,7 @@ def sanitize_text(text):
     changed = False
     for rx, repl in ((_BEARER_RE, r"\1<TOKEN_A>"),
                      (_AUTH_OTHER_RE, r"\1<TOKEN_A>"),
+                     (_CURL_HDR_RE, r"\1<REDACTED>"),
                      (_SECRET_HDR_RE, r"\1<TOKEN_A>"),
                      (_COOKIE_RE, r"\1<SESSION>"),
                      (_COOKIE_FLAG_RE, r"\1<SESSION>"),

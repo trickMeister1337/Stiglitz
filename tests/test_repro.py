@@ -126,3 +126,22 @@ def test_sanitize_bearer_with_percent_does_not_leak_tail():
     out, _ = R.sanitize_text("Authorization: Bearer eyJ%41AA.bbb-ccc")
     assert "%41AA" not in out
     assert "bbb-ccc" not in out
+
+
+def test_sanitize_redacts_quoted_cookie_value_raw_header():
+    out, changed = R.sanitize_text('Set-Cookie: jwt="eyJhbGciOiJ.xxx"; HttpOnly')
+    assert "eyJhbGciOiJ.xxx" not in out
+    assert changed is True
+
+
+def test_sanitize_redacts_quoted_api_key_value():
+    out, changed = R.sanitize_text('X-API-Key: "sk_live_abc"')
+    assert "sk_live_abc" not in out
+    assert changed is True
+
+
+def test_sanitize_curl_header_flag_preserves_url():
+    out, changed = R.sanitize_text("curl -H 'Cookie: session=abc' https://t/api")
+    assert "session=abc" not in out
+    assert "https://t/api" in out
+    assert changed is True
