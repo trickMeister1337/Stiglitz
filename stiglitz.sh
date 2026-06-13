@@ -748,7 +748,9 @@ else
 fi
 
 OPEN_PORTS="N/A"
-if command -v nmap &>/dev/null; then
+if [ -n "$STIGLITZ_PROXY" ]; then
+    echo -e "  ${YELLOW}[○] nmap pulado — sem suporte a proxy; rodá-lo direto vazaria atribuição ao alvo${NC}"
+elif command -v nmap &>/dev/null; then
     # Full TCP scan (-p-) + fingerprint de versão + mapeamento de CVEs por banner.
     # --script vulners consulta vulners.com e lista CVEs conhecidos da versão de cada
     # serviço (ex.: OpenSSH 7.4 → CVE-...), sinalizando software desatualizado —
@@ -1370,10 +1372,24 @@ if command -v zaproxy &>/dev/null; then
         echo -e "  ${BLUE}[…] Iniciando OWASP ZAP...${NC}"
         export JAVA_OPTS="-Xmx512m -Djava.awt.headless=true"
 
+        _ZAP_PROXY_CFG=()
+        if [ -n "$STIGLITZ_PROXY" ]; then
+            _zp_hostport="${STIGLITZ_PROXY#*://}"; _zp_host="${_zp_hostport%%:*}"; _zp_port="${_zp_hostport##*:}"
+            if printf '%s' "$STIGLITZ_PROXY" | grep -q '^socks'; then
+                _ZAP_PROXY_CFG=(-config "network.connection.socksProxy.host=${_zp_host}" \
+                                -config "network.connection.socksProxy.port=${_zp_port}" \
+                                -config "network.connection.socksProxy.enabled=true")
+            else
+                _ZAP_PROXY_CFG=(-config "network.connection.httpProxy.host=${_zp_host}" \
+                                -config "network.connection.httpProxy.port=${_zp_port}" \
+                                -config "network.connection.httpProxy.enabled=true")
+            fi
+        fi
         zaproxy -daemon \
                 -host "$ZAP_HOST" \
                 -port "$ZAP_PORT" \
                 -dir  "$ZAP_HOME" \
+                "${_ZAP_PROXY_CFG[@]}" \
                 -config api.disablekey=true \
                 > "$OUTDIR/raw/zap_daemon.log" 2>&1 &
 
@@ -1434,7 +1450,7 @@ if command -v zaproxy &>/dev/null; then
                        "/swagger-ui/swagger.json" "/docs/swagger.json")
         for _oapath in "${OPENAPI_PATHS[@]}"; do
             _oa_url="${TARGET%/}${_oapath}"
-            _oa_resp=$(curl -s --max-time 8 -w "%{http_code}" -o "$OUTDIR/raw/oa_check.tmp" "$_oa_url" 2>/dev/null)
+            _oa_resp=$(curl -s "${_PROXY_CURL[@]}" --max-time 8 -w "%{http_code}" -o "$OUTDIR/raw/oa_check.tmp" "$_oa_url" 2>/dev/null)
             if echo "$_oa_resp" | grep -q "^2"; then
                 # Validar que é um spec OpenAPI/Swagger REAL (JSON com chave de topo
                 # openapi/swagger), não uma página HTML/JS que apenas contém a palavra.
@@ -1493,7 +1509,7 @@ if command -v zaproxy &>/dev/null; then
         # ── GraphQL audit (#7): introspection nos endpoints /graphql conhecidos ──
         _gql_q='{"query":"query IntrospectionQuery { __schema { queryType { name } mutationType { name } types { name fields { name } } } }"}'
         for _gql in "$TARGET/graphql" "$TARGET/api/graphql" "$TARGET/v1/graphql" "$TARGET/query"; do
-            _gql_resp=$(curl -s -m 10 -X POST -H "Content-Type: application/json" \
+            _gql_resp=$(curl -s "${_PROXY_CURL[@]}" -m 10 -X POST -H "Content-Type: application/json" \
                 ${AUTH_TOKEN:+-H "Authorization: Bearer $AUTH_TOKEN"} \
                 -d "$_gql_q" "$_gql" 2>/dev/null)
             if echo "$_gql_resp" | grep -q '"__schema"'; then
@@ -1620,7 +1636,7 @@ if command -v zaproxy &>/dev/null; then
             zap_api_call "core/action/accessUrl" "url=${_pw_enc}" > /dev/null 2>&1
         done
         # Importar robots.txt se disponível
-        _robots=$(curl -sk --max-time 5 "${TARGET%/}/robots.txt" 2>/dev/null)
+        _robots=$(curl -sk "${_PROXY_CURL[@]}" --max-time 5 "${TARGET%/}/robots.txt" 2>/dev/null)
         if echo "$_robots" | grep -q "Disallow\|Allow"; then
             echo "$_robots" | grep -oE "/(\S+)" | while read -r _rpath; do
                 _renc=$(python3 -c \
@@ -1861,7 +1877,7 @@ _oauth_wk="$OUTDIR/raw/oauth_well_known.json"
 : > "$_oauth_wk"
 # Descoberta passiva do well-known (degrada silenciosamente se ausente)
 for _wkp in "/.well-known/openid-configuration" "/.well-known/oauth-authorization-server"; do
-    if curl -s -S --max-time 15 "${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
+    if curl -s -S "${_PROXY_CURL[@]}" --max-time 15 "${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
             && [ -s "$_oauth_wk" ] && grep -q "authorization_endpoint" "$_oauth_wk"; then
         break
     fi
