@@ -232,3 +232,41 @@ def test_no_safe_note_for_readonly_get():
     note = R.safe_note({"url": "https://t/api/profile", "name": "Missing header"},
                        "curl -sI '<TARGET>'")
     assert note == ""
+
+
+def test_build_repro_none_when_gate_fails():
+    assert R.build_repro({"severity": "info"}) is None
+
+
+def test_build_repro_uses_captured_curl():
+    f = {"severity": "high", "curl_command": "curl -i 'https://t/api'"}
+    d = R.build_repro(f, raw=True)
+    assert d["command"] == "curl -i 'https://t/api'"
+    assert d["sanitized"] is False
+
+
+def test_build_repro_builds_curl_from_request_block():
+    ev = "--- HTTP REQUEST ---\nGET /api/v1/users/123 HTTP/1.1\nHost: t.com\n\n"
+    d = R.build_repro({"severity": "high", "evidence": ev}, raw=True)
+    assert "/api/v1/users/123" in d["command"]
+    assert "t.com" in d["command"]
+
+
+def test_build_repro_template_fallback():
+    d = R.build_repro({"severity": "high", "vuln_type": "sqli"}, raw=True)
+    assert d["command"] == R.CLASS_TEMPLATES["sqli"]["command"]
+    assert d["expected"] == R.CLASS_TEMPLATES["sqli"]["expected"]
+    assert d["steps"] == R.CLASS_TEMPLATES["sqli"]["steps"]
+
+
+def test_build_repro_sanitizes_by_default():
+    f = {"severity": "high", "curl_command": "curl -H 'Authorization: Bearer eyJsecret'"}
+    d = R.build_repro(f)  # raw=False
+    assert "eyJsecret" not in d["command"]
+    assert d["sanitized"] is True
+
+
+def test_build_repro_safe_note_on_money_endpoint():
+    f = {"severity": "high", "url": "https://t/api/transfer", "vuln_type": "bola_idor"}
+    d = R.build_repro(f, raw=True)
+    assert d["safe_note"] != ""

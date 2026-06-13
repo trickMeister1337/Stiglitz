@@ -376,3 +376,27 @@ def safe_note(finding, command=""):
     if _MONEY_RE.search(blob) or method in ("POST", "PUT", "PATCH", "DELETE"):
         return _SAFE_NOTE
     return ""
+
+
+# ── Orquestrador ──────────────────────────────────────────────────────────────
+def build_repro(finding, raw=False):
+    """Bloco estruturado de reprodução, ou None se o finding não passa no gate."""
+    if not passes_gate(finding):
+        return None
+    cls = _classify(finding)
+    tpl = CLASS_TEMPLATES.get(cls, CLASS_TEMPLATES["generic"])
+    captured = (_command_from_curl_field(finding)
+                or _curl_from_request_block(finding.get("evidence", ""),
+                                            finding.get("url", "")))
+    command = captured or tpl["command"]
+    sanitized = False
+    if not raw:
+        command, sanitized = sanitize_command(command)
+    return {
+        "prerequisites": tpl["prerequisites"],
+        "steps": list(tpl["steps"]),
+        "command": command,
+        "expected": tpl["expected"],
+        "sanitized": sanitized,
+        "safe_note": safe_note(finding, command),
+    }
