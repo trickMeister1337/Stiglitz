@@ -270,3 +270,34 @@ def test_build_repro_safe_note_on_money_endpoint():
     f = {"severity": "high", "url": "https://t/api/transfer", "vuln_type": "bola_idor"}
     d = R.build_repro(f, raw=True)
     assert d["safe_note"] != ""
+
+
+def test_render_panel_empty_when_gate_fails():
+    assert R.render_panel_html({"severity": "info"}, raw=True) == ""
+
+
+def test_render_panel_contains_sections():
+    out = R.render_panel_html({"severity": "high", "vuln_type": "sqli"}, raw=True)
+    assert "How to Reproduce / Proof" in out
+    assert "Expected Result" in out
+    assert "<pre" in out
+    assert "<ol" in out
+
+
+def test_render_panel_sanitized_badge_and_no_leak():
+    f = {"severity": "high", "curl_command": "curl -H 'Authorization: Bearer eyJsecret'"}
+    out = R.render_panel_html(f, raw=False)
+    assert "values sanitized" in out
+    assert "eyJsecret" not in out
+
+
+def test_cli_outputs_json(tmp_path):
+    import subprocess
+    p = tmp_path / "f.json"
+    p.write_text(json.dumps({"severity": "high", "vuln_type": "sqli"}))
+    repro_py = os.path.join(os.path.dirname(__file__), "..", "lib", "repro.py")
+    r = subprocess.run([sys.executable, repro_py, str(p)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert data["expected"]

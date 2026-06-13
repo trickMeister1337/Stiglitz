@@ -400,3 +400,47 @@ def build_repro(finding, raw=False):
         "sanitized": sanitized,
         "safe_note": safe_note(finding, command),
     }
+
+
+# ── HTML do painel (EN, deliverable) ──────────────────────────────────────────
+def render_panel_html(finding, raw=False):
+    """HTML do painel 'How to Reproduce / Proof'; '' se o finding não passa no gate."""
+    data = build_repro(finding, raw=raw)
+    if not data:
+        return ""
+    esc = html.escape
+    steps = "".join("<li>%s</li>" % esc(s) for s in data["steps"])
+    out = ['<div class="repro-box" style="margin:10px 0;padding:12px 14px;'
+           'border-left:4px solid #2d6cdf;background:#f4f7fc;border-radius:4px">',
+           '<strong style="color:#1b3a6b">How to Reproduce / Proof</strong>']
+    if data["sanitized"]:
+        out.append('<span style="background:#2d6cdf;color:#fff;padding:1px 7px;'
+                   'border-radius:3px;font-size:10px;margin-left:8px">values sanitized</span>')
+    if data["prerequisites"]:
+        out.append('<p style="margin:8px 0 2px"><em>Prerequisites:</em> %s</p>'
+                   % esc(data["prerequisites"]))
+    out.append('<ol style="margin:6px 0 6px 18px">%s</ol>' % steps)
+    out.append('<p style="margin:6px 0 2px"><em>Command:</em></p>')
+    out.append('<pre class="evidence-box">%s</pre>' % esc(data["command"]))
+    out.append('<p style="margin:6px 0 2px"><em>Expected Result (Proof):</em> %s</p>'
+               % esc(data["expected"]))
+    if data["safe_note"]:
+        out.append('<p style="margin:6px 0 0;color:#8a6d00"><em>&#9888; %s</em></p>'
+                   % esc(data["safe_note"]))
+    out.append('</div>')
+    return "".join(out)
+
+
+# ── CLI (debug) ───────────────────────────────────────────────────────────────
+def main(path):
+    with open(path, encoding="utf-8") as fh:
+        finding = json.load(fh)
+    result = build_repro(finding, raw=os.environ.get("STIGLITZ_REPRO_RAW") == "1")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("uso: python3 lib/repro.py <finding.json>", file=sys.stderr)
+        sys.exit(2)
+    main(sys.argv[1])
