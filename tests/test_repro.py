@@ -301,3 +301,31 @@ def test_cli_outputs_json(tmp_path):
     assert r.returncode == 0
     data = json.loads(r.stdout)
     assert data["expected"]
+
+
+def test_render_panel_escapes_html_in_command():
+    f = {"severity": "high",
+         "curl_command": "curl 'https://t/?q=<script>alert(1)</script>'"}
+    out = R.render_panel_html(f, raw=True)
+    assert "<script>alert(1)</script>" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_cli_raw_env_disables_sanitization(tmp_path):
+    import subprocess
+    p = tmp_path / "f.json"
+    p.write_text(json.dumps({"severity": "high",
+                             "curl_command": "curl -H 'Authorization: Bearer eyJsecret'"}))
+    repro_py = os.path.join(os.path.dirname(__file__), "..", "lib", "repro.py")
+    env = dict(os.environ, STIGLITZ_REPRO_RAW="1")
+    r = subprocess.run([sys.executable, repro_py, str(p)],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0
+    assert "eyJsecret" in r.stdout
+
+
+def test_cli_no_arg_exits_2():
+    import subprocess
+    repro_py = os.path.join(os.path.dirname(__file__), "..", "lib", "repro.py")
+    r = subprocess.run([sys.executable, repro_py], capture_output=True, text=True)
+    assert r.returncode == 2
