@@ -17,6 +17,7 @@ import sys
 import threading
 import urllib.error
 import urllib.request
+import netproxy
 from urllib.parse import urlparse
 
 REQUIRED_TOP = ("base_url", "accounts", "endpoints")
@@ -39,7 +40,17 @@ class _ScopedRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-_OPENER = urllib.request.build_opener(_ScopedRedirectHandler())
+_OPENER = None
+
+
+def _get_opener():
+    """Opener com o handler de redirect escopado + proxy (se STIGLITZ_PROXY). Lazy:
+    se o proxy não puder ser construído (SOCKS sem PySocks), levanta ProxyUnavailable
+    (URLError) — capturado no envio, sem fallback direto."""
+    global _OPENER
+    if _OPENER is None:
+        _OPENER = netproxy.build_opener(_ScopedRedirectHandler())
+    return _OPENER
 
 
 def load_config(path):
@@ -116,7 +127,7 @@ def http_request(method, url, headers, body, timeout=15):
         hdrs.setdefault("Content-Type", "application/json")
     req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
     try:
-        with _OPENER.open(req, timeout=timeout) as resp:
+        with _get_opener().open(req, timeout=timeout) as resp:
             raw = resp.read().decode(errors="replace")
             return Response(resp.status, raw, dict(resp.headers))
     except urllib.error.HTTPError as e:
