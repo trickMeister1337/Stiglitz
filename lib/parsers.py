@@ -14,7 +14,9 @@ import sys
 import os
 import json
 import re
+import http.client
 import urllib.request
+import urllib.error
 from typing import Dict, List, Set, Tuple, Optional
 
 
@@ -151,7 +153,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                     add_url(obj.get("host", ""))
                     for u in re.findall(r"https?://[^\s'\"]+", obj.get("curl-command", "")):
                         add_url(u)
-                except:
+                except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
                     pass
 
     # Fonte 2: ZAP (todas as URLs)
@@ -161,7 +163,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
         try:
             with open(path) as f:
                 raw = json.load(f)
-        except:
+        except (json.JSONDecodeError, ValueError, OSError):
             continue
         alerts = _normalize_zap_alerts(raw)
         for a in alerts:
@@ -201,7 +203,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                     try:
                         obj = json.loads(line)
                         add_url(obj.get("url", ""))
-                    except:
+                    except (json.JSONDecodeError, ValueError):
                         pass
                 else:
                     parts = line.split()
@@ -219,7 +221,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                 for r in results:
                     if isinstance(r, dict):
                         add_url(r.get("url", ""))
-        except:
+        except (json.JSONDecodeError, ValueError, OSError, AttributeError):
             pass
 
     # Fonte 4b: Katana URLs (crawler do Stiglitz — URLs reais com parâmetros)
@@ -231,7 +233,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                     url = line.strip()
                     if url and url.startswith("http"):
                         add_url(url)
-        except:
+        except (OSError, UnicodeDecodeError):
             pass
 
     # Fonte 4c: JS Analysis (endpoints descobertos em arquivos JavaScript)
@@ -253,7 +255,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
             for probe in js_data.get("endpoint_probes", []):
                 if isinstance(probe, dict):
                     add_url(probe.get("url", ""))
-        except:
+        except (json.JSONDecodeError, ValueError, OSError, AttributeError, TypeError):
             pass
 
     # Fonte 4d: OpenAPI spec (rotas de API — alvos primários para SQLi)
@@ -280,7 +282,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                                     pname = param.get("name", "")
                                     if pname:
                                         urls_with_params.add(f"{full_url}?{pname}=1")
-        except:
+        except (json.JSONDecodeError, ValueError, OSError, AttributeError, TypeError):
             pass
 
     # Fonte 4e: Exploit confirmations do Stiglitz (URLs já confirmadas vulneráveis)
@@ -297,7 +299,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                         # Estas URLs são CONFIRMADAS — adicionar com prioridade
                         if "?" in url:
                             urls_with_params.add(url)
-        except:
+        except (json.JSONDecodeError, ValueError, OSError, AttributeError):
             pass
 
     # Fonte 5: robots.txt e sitemap.xml
@@ -318,7 +320,8 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                 if "sitemap" in rpath:
                     for loc in re.findall(r"<loc>\s*(https?://[^<]+)\s*</loc>", content):
                         add_url(loc.strip())
-        except:
+        except (urllib.error.URLError, OSError, ValueError, UnicodeDecodeError,
+                http.client.HTTPException):
             pass
 
     # Fonte 6: Variantes com parâmetros comuns (APENAS em URLs dinâmicas)

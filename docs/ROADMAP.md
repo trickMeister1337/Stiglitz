@@ -73,13 +73,15 @@ unificado; SLA/aging CISA KEV (`lib/prioritization.py`); compliance multi-framew
   (daemon encerrado no `trap EXIT` por invocação), então rodam juntas, não como passos isolados.
   Confirmado por teste de caracterização que os findings da P9.5 chegam ao `findings.json`
   (com `fingerprint`) **e** ao `findings.sarif` (com `partialFingerprints`). Suíte 553 passed / 4 skipped
+- ✅ **dedup semântico** (`lib/dedup.py`): colapsa duplicatas cross-tool + variantes de path/param (estágio 1 fingerprint) + fuzzy por CVE/título/evidência blocado por host (estágio 2). Auto-merge agressivo, proveniência no finding. Integrado no scan (`stiglitz_report.py`) e no RED (`evidence.py`); `STIGLITZ_DEDUP=0` desliga. CLI + lógica pura
+- ✅ **hardening (Frente 5)**: 4 reforços — (a) 14 bare `except:` → tipos específicos em `lib/*.py` (para de mascarar `KeyboardInterrupt`/bugs); (b) selo HMAC do `audit.log` no finalize (`audit.log.seal`, chave `STIGLITZ_AUDIT_KEY`, `verify_audit.py --seal`); (c) `lib/scope.py` como ponto único de escopo + `scope_guard` aplica `in_scope` em brute/sqli/xss (filtra com escopo, warn/audit sem escopo); (d) `phase_output_ok` valida saída (existe+não-vazio) antes de `phase_done` no checkpoint (P1/P4/P9), evitando que o resume pule fase falha em silêncio
 
 **P1 restante (ordem de retorno):**
 - (nenhum — itens P1 concluídos; próximo é o backlog P2)
 
 ## P2 — BACKLOG
 
-dedup semântico; trend multi-scan; relatório PDF (WeasyPrint); CSPM (prowler);
+trend multi-scan; relatório PDF (WeasyPrint); CSPM (prowler);
 IaC/container (trivy); multi-tenant.
 
 ## Follow-ups conhecidos (não feitos)
@@ -91,6 +93,12 @@ IaC/container (trivy); multi-tenant.
   rodam deslogados (requests sem `Authorization`). Propagação completa exige mais que o replacer
   (httpSender script, ou contexto forced-user adaptado a bearer estático). Não bloqueia a fronteira
   do BOLA, que depende do histórico do spider — já autenticado
+- **Dedup semântico × dedup bizlogic (P9.7) — decisão de comportamento:** o dedup semântico (P2)
+  roda a jusante da dedup especializada P9.7×P9.5 no `stiglitz_report.py`. Quando P9.5 inconclusiva
+  e P9.7 confirmada colidem no mesmo recurso (mesmo fingerprint), o dedup semântico as **mescla em
+  1** (o confirmado/maior-severidade vence como representante; a outra fonte entra em `sources`) —
+  decisão deliberada: dedup semântico é autoritativo, fidelidade preservada (confirmado não some),
+  muda só a contagem. `test_inconclusive_access_does_not_suppress_confirmed_bizlogic` reflete isso
 - **OpenAPI seeding — só paths GET via `accessUrl`:** o fallback registra os nós no site-tree
   do ZAP, mas não passa schemas de request (body/params) para endpoints mutantes (POST/PUT). Os
   IDs de path usam um valor de amostra (`1`), então 404 é comum sem credenciais — bom p/ estrutura,

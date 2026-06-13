@@ -146,9 +146,11 @@ Os módulos Python e bash vivem em `lib/` como **arquivos reais** (lidos diretam
 | `bizlogic_scan.py` | Builder de config do `bizlogic` para a fase P9.7 do scan: deriva read-only do dump ZAP (`bola.parse_zap_messages`) + claims JWT (`jwt_audit`); mescla `bizlogic.yaml` para mutantes; grava `raw/bizlogic_findings.json`. Lógica pura + CLI |
 | `openapi_seed.py` | Fallback de seeding OpenAPI/Swagger (fase P9): quando o import nativo do ZAP rejeita um spec válido (ex.: nomes de schema .NET com backtick fora de `^[a-zA-Z0-9.\-_]+$`), extrai as URLs concretas do spec (resolve `{param}`, aplica `basePath`/`servers`) → `raw/openapi_urls.txt`, semeadas no ZAP via `accessUrl`. Lógica pura + CLI; sem rede |
 | `takeover.py` | Detecção de subdomain takeover (osint.sh Fase 8) — filtro de CNAME externo ao apex + parse do JSONL do `nuclei` → `cloud/takeover_candidates.csv` (schema legado, status `CONFIRMED`). Lógica pura + CLI (`select-external`/`build-csv`); sem rede, sem domínio hardcoded |
+| `scope.py` | Escopo de engajamento — `in_scope(url, scope_domains)` (host igual/subdomínio; **fail-open só sem escopo**) + `filter_in_scope` (tolera o formato `score|url` do `targets_scored.txt`, preserva a linha). Ponto único de verdade reusado pelo ingest/scoring e pelas fases ofensivas (brute/sqli/xss via `scope_guard`). Lógica pura + CLI (filtra stdin) |
 | `repro.py` | Bloco "How to Reproduce / Proof" do relatório (item 6 fintech): gate (confirmado/High/Critical), captura do comando real (curl/HTTP request) com fallback de template por classe, sanitização de Bearer/cookie/PAN/PII por padrão (`--repro-raw`/`STIGLITZ_REPRO_RAW=1` desliga), `safe_note` non-destructive p/ endpoints de dinheiro, e `render_panel_html` (EN). Lógica pura + CLI; reusa `pan_scanner`/`pii_detect`. Consumido pelo `stiglitz_report.py` |
 | `cde_scope.py`, `pan_scanner.py`, `payment_page_monitor.py`, `pci_verdicts.py` | Cobertura PCI DSS restrita ao CDE (lê `cde_targets.txt`, gitignored): PAN com Luhn+máscara (3.5.1), integridade de scripts/Magecart (6.4.3/11.6.1), tag `pci_req`. Texto dos findings em EN (deliverable) |
 | `finding_state.py` | Ledger de estado por `fingerprint`: reconcile NEW/PERSISTENT/RESOLVED/REOPENED com `first_seen`/`last_seen`/`resolved_at` + métricas (age, MTTR, SLA breach). Store JSON fora do repo em `STIGLITZ_STATE_DIR` (default `~/.stiglitz/state/`) — **nunca versiona dado de alvo**. Enriquece `findings.json` com `state` e grava `raw/state_summary.json` |
+| `dedup.py` | Dedup semântico de findings (P2) — colapsa duplicatas cross-tool + variantes de path/param via fingerprint (estágio 1) e fuzzy por CVE/título/evidência blocado por host (estágio 2). Auto-merge agressivo; proveniência no finding (`sources`/`merged_from`/`merge_score`). Roda no scan (`stiglitz_report.py`, antes de state/SARIF) e no RED (`evidence.py`). `STIGLITZ_DEDUP=0` desliga; `STIGLITZ_DEDUP_THRESHOLD` ajusta. Lógica pura + CLI |
 | `trackers/` (`base.py`, `defectdojo.py`) | Interface genérica de tracker + adapter DefectDojo (push via reimport-scan SARIF, dedup nativa por `partialFingerprints`). Opt-in via env; degrada sem erro (padrão `oob.py`). HTTP injetável (testável sem rede) |
 | `recon.sh`, `crawl.sh`, `sqli.sh`, `xss.sh`, `brute.sh`, `msf.sh`, `web.sh` | Módulos bash do `stiglitz_red.sh` |
 
@@ -196,6 +198,13 @@ python3 -m py_compile stiglitz_report.py pipeline.py lib/*.py
 ```
 
 CI (`.github/workflows/ci.yml`): 3 jobs — bash syntax + shellcheck (gate warning) + smoke dry-run; unit tests; integration scan (Juice Shop).
+
+**Audit trail (RED):** o `audit.log` é um hash-chain tamper-evident; com `STIGLITZ_AUDIT_KEY` definido, o `stiglitz_red.sh` grava no finalize um selo `audit.log.seal` = `HMAC-SHA256(chave, cabeça-do-chain)` (sem chave, degrada com `SEAL_SKIPPED`). Verificar offline:
+```bash
+python3 tests/verify_audit.py <scan_dir>/audit.log                                   # só o chain
+python3 tests/verify_audit.py <scan_dir>/audit.log --seal <scan_dir>/audit.log.seal --key "$STIGLITZ_AUDIT_KEY"
+```
+Fronteira de ameaça: o selo detecta adulteração/re-encadeamento por quem tem acesso ao arquivo mas **não** à chave; não protege contra quem detém a chave (mesma máquina durante o run).
 
 ---
 
