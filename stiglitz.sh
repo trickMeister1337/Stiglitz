@@ -289,6 +289,7 @@ DRY_RUN=false      # Simular: imprime o plano e sai sem executar ferramentas
 OAUTH_ACTIVE=0     # Probes ativos OAuth/OIDC (P9.6) — opt-in via --oauth-active
 BIZLOGIC_MUTATE=0  # opt-in p/ testes mutantes de lógica de negócio (P9.7)
 REPRO_RAW=0        # bloco de repro sem sanitização (uso interno) — opt-in via --repro-raw
+STIGLITZ_PROXY="${STIGLITZ_PROXY:-}"  # proxy HTTP/SOCKS p/ tráfego do alvo — opt-in via --proxy
 
 # Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase, --dry-run, --oauth-active
 _args=("$@")
@@ -305,11 +306,29 @@ for _i in "${!_args[@]}"; do
         --oauth-active)      OAUTH_ACTIVE=1 ;;
         --bizlogic-mutate)   BIZLOGIC_MUTATE=1 ;;
         --repro-raw)         REPRO_RAW=1 ;;
+        --proxy)             STIGLITZ_PROXY="${_args[$((${_i}+1))]}" ;;
     esac
 done
 
 # --token/-t é apelido de --token-a; AUTH_TOKEN (usado pela P9/nuclei) reflete o token A
 [ -z "$TOKEN_A" ] && [ -n "$AUTH_TOKEN" ] && TOKEN_A="$AUTH_TOKEN"
+
+# ── Proxy (opt-in via --proxy / STIGLITZ_PROXY) ───────────────────────────────
+# Aplicado SOMENTE a tráfego que toca o alvo. Controle (ZAP API localhost),
+# enriquecimento (NVD/EPSS/KEV), notificações e subfinder (DNS passivo) vão direto.
+if [ -n "$STIGLITZ_PROXY" ]; then
+    if ! printf '%s' "$STIGLITZ_PROXY" | grep -qE '^(https?|socks5h?)://[^/]+'; then
+        echo -e "  ${RED}[✗] --proxy inválido: '${STIGLITZ_PROXY}'. Use http(s)://host:porta ou socks5(h)://host:porta${NC}" >&2
+        exit 1
+    fi
+    echo -e "  ${BLUE}[…] Modo proxy ativo: ${STIGLITZ_PROXY} (só tráfego do alvo; nmap será pulado)${NC}"
+fi
+export STIGLITZ_PROXY
+
+# shellcheck disable=SC2034  # arrays expandidos nas invocações que tocam o alvo (vazio = sem proxy)
+_PROXY_GO=();      [ -n "$STIGLITZ_PROXY" ] && _PROXY_GO=(-proxy "$STIGLITZ_PROXY")
+_PROXY_CURL=();    [ -n "$STIGLITZ_PROXY" ] && _PROXY_CURL=(-x "$STIGLITZ_PROXY")
+_PROXY_TESTSSL=(); [ -n "$STIGLITZ_PROXY" ] && _PROXY_TESTSSL=(--proxy "${STIGLITZ_PROXY#*://}")
 [ -n "$TOKEN_A" ] && AUTH_TOKEN="$TOKEN_A"
 
 # Atribuir alvo se não for flag
