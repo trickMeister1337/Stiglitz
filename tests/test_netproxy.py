@@ -2,6 +2,7 @@
 import os, sys
 import urllib.request
 import urllib.error
+import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import netproxy as N
 
@@ -48,3 +49,23 @@ def test_make_opener_with_ssl_context_has_https_handler(monkeypatch):
     ctx = ssl.create_default_context()
     opener = N.make_opener(ssl_context=ctx)
     assert any(isinstance(h, urllib.request.HTTPSHandler) for h in opener.handlers)
+
+
+def test_unknown_scheme_fails_closed(monkeypatch):
+    monkeypatch.setenv("STIGLITZ_PROXY", "ftp://x:1")
+    with pytest.raises(N.ProxyUnavailable):
+        N._proxy_handlers()
+
+
+def test_socks_make_opener_no_direct_https_handler(monkeypatch):
+    import ssl
+    monkeypatch.setenv("STIGLITZ_PROXY", "socks5://127.0.0.1:9050")
+    ctx = ssl.create_default_context()
+    try:
+        opener = N.make_opener(ssl_context=ctx)
+    except N.ProxyUnavailable:
+        return  # PySocks ausente — make_opener falha fechado, sem opener direto
+    https_chain = opener.handle_open.get("https", [])
+    assert https_chain
+    assert type(https_chain[0]).__name__ == "SocksiPyHandler", \
+        [type(h).__name__ for h in https_chain]

@@ -38,45 +38,67 @@ def _warn_once_socks(reason):
               f"(sem fallback direto, p/ não vazar atribuição)", file=sys.stderr)
 
 
+def _is_socks():
+    """True se STIGLITZ_PROXY é um proxy SOCKS."""
+    return proxy_url().lower().startswith(("socks5://", "socks5h://"))
+
+
 def _proxy_handlers(ssl_context=None):
-    """Handlers de proxy p/ o opener. [] se sem proxy. Levanta ProxyUnavailable se
-    SOCKS sem PySocks (o chamador pula; nunca conexão direta)."""
+    """Handlers de proxy p/ o opener. [] só quando NÃO há proxy. Levanta
+    ProxyUnavailable se o proxy estiver configurado mas não puder ser construído
+    (SOCKS sem PySocks, esquema não suportado, host/porta inválidos) — fail-closed:
+    o chamador pula, NUNCA conexão direta."""
     url = proxy_url()
     if not url:
         return []
-    if url.startswith(("http://", "https://")):
+    low = url.lower()
+    if low.startswith(("http://", "https://")):
         return [urllib.request.ProxyHandler({"http": url, "https": url})]
-    if url.startswith(("socks5://", "socks5h://")):
+    if low.startswith(("socks5://", "socks5h://")):
         try:
             import socks  # PySocks
             from sockshandler import SocksiPyHandler
         except ImportError:
             _warn_once_socks("PySocks não instalado")
             raise ProxyUnavailable("SOCKS requer PySocks (pip install PySocks)")
-        host, _, port = url.split("://", 1)[1].partition(":")
-        kw = {"rdns": url.startswith("socks5h://")}
+        rest = url.split("://", 1)[1]
+        host, _, port = rest.partition(":")
+        if not host:
+            raise ProxyUnavailable(f"host de proxy SOCKS ausente em {url!r}")
+        try:
+            port_n = int(port or 1080)
+        except ValueError:
+            raise ProxyUnavailable(f"porta de proxy SOCKS inválida em {url!r}")
+        kw = {"rdns": low.startswith("socks5h://")}
         if ssl_context is not None:
             kw["context"] = ssl_context
-        return [SocksiPyHandler(socks.PROXY_TYPE_SOCKS5, host, int(port or 1080), **kw)]
-    return []  # esquema desconhecido — a validação no stiglitz.sh já barra
+        return [SocksiPyHandler(socks.PROXY_TYPE_SOCKS5, host, port_n, **kw)]
+    # esquema não suportado: fail-closed (nunca conexão direta com proxy configurado)
+    raise ProxyUnavailable(f"STIGLITZ_PROXY com esquema não suportado: {url!r}")
 
 
 def make_opener(ssl_context=None):
-    """OpenerDirector com proxy (se configurado) + ssl_context p/ HTTPS."""
+    """OpenerDirector com proxy (se configurado) + ssl_context p/ HTTPS.
+
+    Com proxy SOCKS, o ssl_context é entregue ao SocksiPyHandler (que já trata HTTPS);
+    NÃO se adiciona um HTTPSHandler separado, senão ele venceria a cadeia https e o
+    tráfego HTTPS sairia DIRETO (vazamento de atribuição)."""
+    proxy_handlers = _proxy_handlers(ssl_context=ssl_context)
     handlers = []
-    if ssl_context is not None:
+    if ssl_context is not None and not _is_socks():
         handlers.append(urllib.request.HTTPSHandler(context=ssl_context))
-    handlers.extend(_proxy_handlers(ssl_context=ssl_context))
+    handlers.extend(proxy_handlers)
     return urllib.request.build_opener(*handlers)
 
 
 def build_opener(*extra_handlers, ssl_context=None):
     """build_opener incluindo os handlers de proxy. Para módulos com handlers próprios
-    (ex.: bizlogic _ScopedRedirectHandler)."""
+    (ex.: bizlogic _ScopedRedirectHandler). Mesma regra do make_opener p/ SOCKS+ssl."""
+    proxy_handlers = _proxy_handlers(ssl_context=ssl_context)
     handlers = list(extra_handlers)
-    if ssl_context is not None:
+    if ssl_context is not None and not _is_socks():
         handlers.append(urllib.request.HTTPSHandler(context=ssl_context))
-    handlers.extend(_proxy_handlers(ssl_context=ssl_context))
+    handlers.extend(proxy_handlers)
     return urllib.request.build_opener(*handlers)
 
 
