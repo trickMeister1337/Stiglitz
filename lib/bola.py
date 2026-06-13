@@ -11,6 +11,7 @@ import os
 import re
 import json
 import urllib.parse
+import netproxy
 
 # Limiares ajustáveis (defaults conservadores — preferir FN a FP).
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -215,7 +216,7 @@ def replay(req, token):
         return {"status": 0, "body": ""}
     if method not in SAFE_METHODS:
         return {"status": 0, "body": ""}
-    cmd = ["curl", "-s", "-S", "--max-time", "15", "-X", method,
+    cmd = ["curl", *netproxy.curl_proxy_args(), "-s", "-S", "--max-time", "15", "-X", method,
            "-o", "-", "-w", "\n__HTTP_STATUS__:%{http_code}", "--", url]
     if token:
         cmd += ["-H", f"Authorization: Bearer {token}"]

@@ -335,7 +335,7 @@ def send_probe(probe, timeout=15):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return (0, "", "")
-    cmd = ["curl", "-s", "-S", "--max-time", str(timeout), "-o", "-",
+    cmd = ["curl", *netproxy.curl_proxy_args(), "-s", "-S", "--max-time", str(timeout), "-o", "-",
            "-w", "\n__HTTP_STATUS__:%{http_code}\n__LOCATION__:%{redirect_url}", "--", url]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)

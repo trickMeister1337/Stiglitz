@@ -69,3 +69,10 @@ def test_socks_make_opener_no_direct_https_handler(monkeypatch):
     assert https_chain
     assert type(https_chain[0]).__name__ == "SocksiPyHandler", \
         [type(h).__name__ for h in https_chain]
+
+
+def test_curl_proxy_args(monkeypatch):
+    monkeypatch.delenv("STIGLITZ_PROXY", raising=False)
+    assert N.curl_proxy_args() == []
+    monkeypatch.setenv("STIGLITZ_PROXY", "socks5h://127.0.0.1:9050")
+    assert N.curl_proxy_args() == ["-x", "socks5h://127.0.0.1:9050"]

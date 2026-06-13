@@ -106,3 +106,10 @@ def urlopen(req, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, context=None):
     """Drop-in p/ urllib.request.urlopen roteado pelo proxy (se configurado).
     `context` = ssl context (mesma semântica do urlopen)."""
     return make_opener(ssl_context=context).open(req, timeout=timeout)
+
+
+def curl_proxy_args():
+    """Args de proxy p/ um comando curl construído à mão (subprocess): [] sem proxy,
+    senão ['-x', url]. curl suporta http(s) e socks5(h) nativamente — sem PySocks."""
+    url = proxy_url()
+    return ["-x", url] if url else []

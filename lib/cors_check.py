@@ -16,6 +16,7 @@ Uso:    python3 cors_check.py <OUTDIR> <TARGET>
 """
 import subprocess, json, sys, os, re
 from urllib.parse import urlparse
+import netproxy
 
 if len(sys.argv) < 3:
     print("Uso: cors_check.py <OUTDIR> <TARGET>")
@@ -65,7 +66,7 @@ def test_cors(url):
     """Faz OPTIONS preflight e retorna dict com headers CORS encontrados."""
     try:
         r = subprocess.run(
-            ["curl", "-sk", "-X", "OPTIONS", "--max-time", "10", "-D", "-",
+            ["curl", *netproxy.curl_proxy_args(), "-sk", "-X", "OPTIONS", "--max-time", "10", "-D", "-",
              "-o", "/dev/null",
              "-H", f"Origin: {EVIL_ORIGIN}",
              "-H", "Access-Control-Request-Method: POST",

@@ -10,6 +10,7 @@ Além da presença/ausência dos headers, valida subdiretivas críticas:
   - CSP:  unsafe-inline, unsafe-eval, default-src ausente, wildcards
 """
 import subprocess, json, sys, os, re
+import netproxy
 outdir = sys.argv[1]
 httpx_file = os.path.join(outdir,"raw","httpx_results.txt")
 
@@ -106,7 +107,7 @@ if os.path.exists(httpx_file):
 for url in urls[:20]:  # testar as 20 primeiras URLs ativas
     try:
         r = subprocess.run(
-            ["curl","-sk","-I","--max-time","10","-L",url],
+            ["curl", *netproxy.curl_proxy_args(), "-sk","-I","--max-time","10","-L",url],
             capture_output=True, text=True, timeout=15
         )
         headers_raw = r.stdout.lower()
