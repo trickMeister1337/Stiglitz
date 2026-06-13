@@ -152,6 +152,8 @@ def sanitize_command(text):
 
 # ── Captura do comando real ───────────────────────────────────────────────────
 _CURL_FIELDS = ("curl_command", "curl_reproducible", "curl-command", "curl")
+# Sentinela "--- HTTP REQUEST ---": formato com que o relatório guarda a requisição
+# capturada na evidence (ZAP/nuclei).
 _REQ_BLOCK_RE = re.compile(
     r"---\s*HTTP REQUEST\s*---\s*\n(.*?)(?=\n---|\Z)", re.DOTALL | re.IGNORECASE)
 
@@ -163,6 +165,11 @@ def _command_from_curl_field(finding):
         if v and str(v).strip():
             return str(v).strip()
     return None
+
+
+def _shq(s):
+    """Escapa aspas simples para uso seguro dentro de '...' no shell."""
+    return s.replace("'", "'\\''")
 
 
 def _curl_from_request_block(evidence, url=""):
@@ -193,11 +200,15 @@ def _curl_from_request_block(evidence, url=""):
                 host = hv.strip()
             else:
                 headers.append((hk.strip(), hv.strip()))
-    full_url = url or (("https://" + host + path) if host else path)
-    cmd = "curl -i -s -X %s '%s'" % (method, full_url)
+    # path em absolute-form (ex.: "GET http://host/p HTTP/1.1") — ZAP/proxies usam isso.
+    if path.startswith(("http://", "https://")):
+        full_url = url or path
+    else:
+        full_url = url or (("https://" + host + path) if host else path)
+    cmd = "curl -i -s -X %s '%s'" % (method, _shq(full_url))
     for hk, hv in headers:
-        cmd += " \\\n  -H '%s: %s'" % (hk, hv)
+        cmd += " \\\n  -H '%s: %s'" % (_shq(hk), _shq(hv))
     body = "\n".join(body_lines).strip()
     if body:
-        cmd += " \\\n  --data '%s'" % body.replace("'", "'\\''")
+        cmd += " \\\n  --data '%s'" % _shq(body)
     return cmd

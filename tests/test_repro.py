@@ -163,3 +163,24 @@ def test_curl_from_request_block_parses():
 
 def test_curl_from_request_block_none_when_absent():
     assert R._curl_from_request_block("no block here", "") is None
+
+
+def test_curl_from_request_block_absolute_form():
+    ev = "--- HTTP REQUEST ---\nGET http://t.com/api/users HTTP/1.1\nHost: t.com\n\n"
+    cmd = R._curl_from_request_block(ev, "")
+    assert "http://t.com/api/users" in cmd
+    assert "t.comhttp" not in cmd
+
+
+def test_curl_from_request_block_with_body():
+    ev = ('--- HTTP REQUEST ---\nPOST /login HTTP/1.1\nHost: t.com\n'
+          'Content-Type: application/json\n\n{"user":"a","pass":"b"}')
+    cmd = R._curl_from_request_block(ev, "")
+    assert "-X POST" in cmd
+    assert "--data '{\"user\":\"a\",\"pass\":\"b\"}'" in cmd
+
+
+def test_curl_from_request_block_escapes_single_quote_in_path():
+    ev = "--- HTTP REQUEST ---\nGET /search?q=it's HTTP/1.1\nHost: t.com\n\n"
+    cmd = R._curl_from_request_block(ev, "")
+    assert "'\\''" in cmd
