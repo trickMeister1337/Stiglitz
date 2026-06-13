@@ -145,3 +145,21 @@ def test_sanitize_curl_header_flag_preserves_url():
     assert "session=abc" not in out
     assert "https://t/api" in out
     assert changed is True
+
+
+def test_command_from_curl_field_priority():
+    assert R._command_from_curl_field({"curl_command": "A", "curl": "B"}) == "A"
+    assert R._command_from_curl_field({"curl": "B"}) == "B"
+    assert R._command_from_curl_field({}) is None
+
+
+def test_curl_from_request_block_parses():
+    ev = "--- HTTP REQUEST ---\nGET /api/v1/users/123 HTTP/1.1\nHost: t.com\nAccept: */*\n\n"
+    cmd = R._curl_from_request_block(ev, "")
+    assert "curl" in cmd and "-X GET" in cmd
+    assert "https://t.com/api/v1/users/123" in cmd
+    assert "Accept: */*" in cmd
+
+
+def test_curl_from_request_block_none_when_absent():
+    assert R._curl_from_request_block("no block here", "") is None

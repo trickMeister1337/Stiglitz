@@ -148,3 +148,56 @@ def sanitize_text(text):
 def sanitize_command(text):
     """Mesma política de sanitize_text (alias semântico para comandos)."""
     return sanitize_text(text)
+
+
+# ── Captura do comando real ───────────────────────────────────────────────────
+_CURL_FIELDS = ("curl_command", "curl_reproducible", "curl-command", "curl")
+_REQ_BLOCK_RE = re.compile(
+    r"---\s*HTTP REQUEST\s*---\s*\n(.*?)(?=\n---|\Z)", re.DOTALL | re.IGNORECASE)
+
+
+def _command_from_curl_field(finding):
+    """Primeiro campo de curl não-vazio do finding, ou None."""
+    for k in _CURL_FIELDS:
+        v = finding.get(k)
+        if v and str(v).strip():
+            return str(v).strip()
+    return None
+
+
+def _curl_from_request_block(evidence, url=""):
+    """Monta um curl a partir do bloco '--- HTTP REQUEST ---' da evidence, ou None."""
+    m = _REQ_BLOCK_RE.search(evidence or "")
+    if not m:
+        return None
+    lines = m.group(1).strip().splitlines()
+    if not lines:
+        return None
+    parts = lines[0].split()
+    method = parts[0] if parts else "GET"
+    path = parts[1] if len(parts) > 1 else "/"
+    host = ""
+    headers = []
+    body_lines = []
+    in_body = False
+    for ln in lines[1:]:
+        if not in_body and ln.strip() == "":
+            in_body = True
+            continue
+        if in_body:
+            body_lines.append(ln)
+            continue
+        if ":" in ln:
+            hk, _, hv = ln.partition(":")
+            if hk.strip().lower() == "host":
+                host = hv.strip()
+            else:
+                headers.append((hk.strip(), hv.strip()))
+    full_url = url or (("https://" + host + path) if host else path)
+    cmd = "curl -i -s -X %s '%s'" % (method, full_url)
+    for hk, hv in headers:
+        cmd += " \\\n  -H '%s: %s'" % (hk, hv)
+    body = "\n".join(body_lines).strip()
+    if body:
+        cmd += " \\\n  --data '%s'" % body.replace("'", "'\\''")
+    return cmd
