@@ -33,6 +33,8 @@ try:
     import repro  # noqa: E402
 except Exception:
     repro = None
+import scope  # noqa: E402  (fronteira de escopo p/ alertas de scanner)
+import finding_quality  # noqa: E402  (FP de disclosure ruidoso + enriquecimento JS)
 REPRO_RAW = os.environ.get("STIGLITZ_REPRO_RAW") == "1"
 
 # Tabelas CWE → CVSS sintético, impacto, remediação + helpers cwe_enrich/
@@ -267,6 +269,16 @@ zap_file = os.path.join(OUTDIR,"raw","zap_alerts.json")
 if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
     try:
         zap_data = json.load(open(zap_file,"r",encoding="utf-8"))
+        # ── Fronteira de escopo: descarta alertas de hosts fora do alvo ──────
+        # O AJAX spider (browser headless) pode navegar para terceiros (ex.: um
+        # link para google.com) e gerar alertas que vazariam para o relatório do
+        # cliente. Filtramos por host in-scope antes de qualquer processamento.
+        _zap_all_alerts = zap_data.get("alerts", [])
+        _zap_inscope = scope.filter_alerts_in_scope(_zap_all_alerts, DOMAIN)
+        _zap_dropped = len(_zap_all_alerts) - len(_zap_inscope)
+        if _zap_dropped:
+            errors.append(f"ZAP: {_zap_dropped} alerta(s) fora de escopo descartado(s) (host != {DOMAIN})")
+        zap_data = {"alerts": _zap_inscope}
         rmap = {"high":"high","medium":"medium","low":"low","informational":"info"}
         SKIP_CONFIDENCE = {"false positive"}
 
@@ -310,11 +322,21 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                 if not url_is_real(alert_url):
                     errors.append(f"ZAP URL filtrada (redirect artefato): {alert_url[:80]}")
                     continue
+                # ── Qualidade: FP previsível (disclosure ruidoso em asset estático,
+                # ex.: Timestamp Disclosure num .js minificado de terceiro) é
+                # rebaixado para info, sem deixar a reclassificação CWE inflá-lo.
+                _force_info = finding_quality.is_low_value_zap_alert(a.get("name",""), alert_url)
+                # Nome mais acionável p/ "Vulnerable JS Library" genérico do ZAP.
+                _enriched_name = finding_quality.enrich_vulnerable_js(
+                    a.get("name",""), alert_url, a.get("evidence","") or "")
+                _display_name = _enriched_name or a.get("name","Alerta")
                 # Reclassificar severidade via CVSS do CWE (Opção C — tabela sintética)
                 _cweid = str(a.get("cweid","") or "")
                 _cwe_data = cwe_enrich(_cweid)
                 sev_reclassified = False
-                if _cwe_data:
+                if _force_info:
+                    sev = "info"
+                elif _cwe_data:
                     sev_from_cvss = cvss_to_sev(_cwe_data["cvss"])
                     if sev_from_cvss and sev_from_cvss != sev_orig:
                         sev = sev_from_cvss
@@ -339,7 +361,7 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                 _cves = re.findall(r"CVE-\d{4}-\d{4,7}", _refs, re.IGNORECASE)
                 _cve_str = ", ".join(sorted(set(c.upper() for c in _cves))) if _cves \
                     else f"CWE-{a.get('cweid','N/A')}"
-                f_entry = {"source":"OWASP ZAP","name":a.get("name","Alerta"),
+                f_entry = {"source":"OWASP ZAP","name":_display_name,
                     "severity":sev,
                     "severity_orig":sev_orig,
                     "severity_reclassified":sev_reclassified,
@@ -356,7 +378,7 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                 # Critical/High → card único por nome (melhor evidência + lista de URLs)
                 # Medium        → card único por nome (melhor evidência + lista de URLs)
                 # Low/Info      → tabela compacta agrupada
-                name = a.get("name","Alerta")
+                name = _display_name
                 url  = a.get("url","")
                 if sev in ("low","info"):
                     if name not in zap_low_groups:
@@ -1007,8 +1029,22 @@ for f in findings:
         f.setdefault('severity_reclassified', False)
 
 
+# (Cobertura) Meta-finding: superfície de API autenticada não testada por falta de
+# token — registra no deliverable que o 0-High reflete só a casca não-autenticada.
+coverage_findings = []
+_cg_path = _raw(".coverage_gap_authed_api")
+if os.path.exists(_cg_path):
+    try:
+        _cg_n = int((open(_cg_path).read().strip() or "0"))
+    except (ValueError, OSError):
+        _cg_n = 0
+    _cg = finding_quality.coverage_gap_finding(
+        _cg_n, has_token=bool(os.environ.get("AUTH_TOKEN", "")))
+    if _cg:
+        coverage_findings.append(_cg)
+
 # Montar lista combinada (todos os tipos) antes de enriquecer com criticidade
-_all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings
+_all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings + coverage_findings
 
 # (P2) Dedup semântico cross-tool + fuzzy ANTES de enrich/sort/state/SARIF/HTML —
 # garante contagem consistente em todos os artefatos. Degrada sem abortar.
@@ -1078,6 +1114,17 @@ for _f_tag in all_f:
 import cde_scope as _cde, pci_verdicts as _pv
 _cde_targets = _cde.load_targets()
 _pv.tag_all(all_f, _cde_targets)
+
+# Swagger/OpenAPI público é info por padrão; em escopo CDE revela a arquitetura da
+# API de pagamentos (information disclosure sensível) → eleva para medium.
+for _sf in all_f:
+    if "public swagger" in (_sf.get("name", "").lower()):
+        _new_sev = finding_quality.swagger_exposure_severity(
+            _cde.in_cde_scope(_sf.get("url", ""), _cde_targets))
+        if _new_sev != _sf.get("severity"):
+            _sf["severity_orig"] = _sf.get("severity")
+            _sf["severity"] = _new_sev
+            _sf["severity_reclassified"] = True
 
 # (P1) Estado de finding por fingerprint: SLA real, MTTR, retest cross-scan.
 try:
@@ -2329,6 +2376,16 @@ if errors: print(f"[!] {len(errors)} warning(s) — see report")
 # ── findings.json ─────────────────────────────────────────────────
 try:
     risk_level = stxt.split(" — ")[0] if " — " in stxt else stxt
+    # O summary do findings.json reflete EXATAMENTE o array exportado (all_f) —
+    # invariante summary.total == len(findings), exigida pelos consumers (DefectDojo,
+    # stiglitz_diff.py, CI). O `stats` global é a contagem do HTML, que tem outra
+    # base (inclui Low/Info do ZAP agrupados e trata e-mail em seção dedicada).
+    _js_stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for _jf in all_f:
+        _jsv = _jf.get("severity", "")
+        if _jsv in _js_stats:
+            _js_stats[_jsv] += 1
+    _js_total = len(all_f)
     findings_out = {
         "schema_version": "1.0",
         "scan": {
@@ -2339,10 +2396,10 @@ try:
             "phase_times": phase_times,
         },
         "summary": {
-            "total": total,
-            "critical": stats["critical"], "high": stats["high"],
-            "medium": stats["medium"], "low": stats["low"],
-            "info": stats["info"], "kev_count": kev_count,
+            "total": _js_total,
+            "critical": _js_stats["critical"], "high": _js_stats["high"],
+            "medium": _js_stats["medium"], "low": _js_stats["low"],
+            "info": _js_stats["info"], "kev_count": kev_count,
             "confirmed": sum(1 for c in confirmations if c.get("confirmed")),
         },
         "findings": [

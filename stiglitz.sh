@@ -518,6 +518,40 @@ for line in sys.stdin:
 ' "$DOMAIN" < "$1" 2>/dev/null || true
 }
 
+# ── Descoberta de OpenAPI/Swagger (reutilizável) ──────────────────────────────
+# Sonda paths comuns de spec; se achar um spec válido, grava raw/openapi_spec.json
+# e extrai as URLs concretas (lib/openapi_seed.py) em raw/openapi_urls.txt.
+# Chamada CEDO (Fase 4) para alimentar o Nuclei com a superfície REAL da API — não
+# só a raiz —, essencial em APIs que dão 404 na raiz (katana/spider sem seed).
+# Idempotente (no-op se openapi_urls.txt já existe); degrada em silêncio.
+discover_openapi_urls() {
+    local _outdir="$1" _target="$2"
+    [ -s "$_outdir/raw/openapi_urls.txt" ] && return 0
+    local _paths=("/swagger.json" "/swagger/v1/swagger.json" "/openapi.json"
+                  "/api/swagger.json" "/api/openapi.json" "/api-docs"
+                  "/v1/swagger.json" "/v2/swagger.json" "/v3/swagger.json"
+                  "/swagger-ui/swagger.json" "/docs/swagger.json")
+    local _p _url _code
+    for _p in "${_paths[@]}"; do
+        _url="${_target%/}${_p}"
+        _code=$(curl -s "${_PROXY_CURL[@]}" --max-time 8 -w "%{http_code}" \
+                -o "$_outdir/raw/oa_seed.tmp" "$_url" 2>/dev/null)
+        if echo "$_code" | grep -q "^2" && \
+           python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if isinstance(d,dict) and ('openapi' in d or 'swagger' in d) else 1)" \
+                "$_outdir/raw/oa_seed.tmp" 2>/dev/null; then
+            cp "$_outdir/raw/oa_seed.tmp" "$_outdir/raw/openapi_spec.json"
+            python3 "$SCRIPT_DIR/lib/openapi_seed.py" \
+                "$_outdir/raw/openapi_spec.json" "$_target" \
+                > "$_outdir/raw/openapi_urls.txt" 2>/dev/null || true
+            rm -f "$_outdir/raw/oa_seed.tmp"
+            [ -s "$_outdir/raw/openapi_urls.txt" ] && return 0
+            return 1
+        fi
+    done
+    rm -f "$_outdir/raw/oa_seed.tmp"
+    return 1
+}
+
 _phase_enabled() {
     # Retorna 0 se a fase deve rodar. Sem --only-phase, todas rodam (comportamento padrão).
     # Com --only-phase "P4 P9", apenas as listadas (match por palavra) rodam.
@@ -758,11 +792,23 @@ elif command -v nmap &>/dev/null; then
     # --version-intensity 7: fingerprint mais preciso (evita rótulos errados como
     # "ssl/rtsp"). -p- é abrangente porém lento: NMAP_TIMEOUT (default 30min) protege
     # o pipeline. -oX gera XML estruturado consumido por lib/service_versions.py.
-    echo -e "  ${BLUE}[…] Executando nmap (full TCP scan + vulners — pode levar vários minutos)...${NC}"
-    timeout "${NMAP_TIMEOUT:-1800}" nmap -p- \
+    # Edge gerenciado (CNAME → LB/CDN cloud) só expõe portas web e não revela
+    # banner de versão; nmap -p- aqui são minutos jogados fora (o LB dropa/rate-
+    # limita 65k portas). Detecta pelo CNAME e degrada para as portas web típicas.
+    _NMAP_SCOPE="-p-"; _NMAP_LABEL="full TCP scan (-p-)"
+    _cname=$(dig +short CNAME "$DOMAIN" 2>/dev/null | tr 'A-Z' 'a-z')
+    if printf '%s' "$_cname" | grep -qE 'elb\.amazonaws\.com|cloudfront\.net|cloudflare|akamai|azureedge|fastly|edgekey|edgesuite|awsglobalaccelerator|googleusercontent'; then
+        _NMAP_SCOPE="-p 80,443,8080,8443,8000,8888"
+        _NMAP_LABEL="edge gerenciado (CDN/LB cloud) — portas web apenas"
+    fi
+    unset _cname
+    echo -e "  ${BLUE}[…] Executando nmap (${_NMAP_LABEL} + vulners)...${NC}"
+    # shellcheck disable=SC2086  # _NMAP_SCOPE deve expandir em múltiplos args (-p N,N | -p-)
+    timeout "${NMAP_TIMEOUT:-1800}" nmap $_NMAP_SCOPE \
          -T4 -sV --version-intensity 7 --open \
          --script vulners \
          "$DOMAIN" -oN "$OUTDIR/raw/nmap.txt" -oX "$OUTDIR/raw/nmap.xml" > /dev/null 2>&1
+    unset _NMAP_SCOPE _NMAP_LABEL
     OPEN_PORTS=$(grep -E "^[0-9]+/tcp.*open" "$OUTDIR/raw/nmap.txt" 2>/dev/null \
                  | awk '{print $1}' | tr '\n' ' ' | sed 's/ $//')
     OPEN_PORTS=${OPEN_PORTS:-nenhuma}
@@ -1065,6 +1111,22 @@ except: pass
     # links/redirects para domínios externos (SSO, refs em JS) que NÃO podem
     # receber probes. Filtro por host (não substring); mesmo critério no feed ZAP.
     _filter_inscope_urls "$OUTDIR/raw/katana_urls.txt" >> "$_nuclei_list"
+    # OpenAPI/Swagger: alimenta o Nuclei com os endpoints REAIS da API (não só a
+    # raiz). Decisivo p/ APIs que dão 404 na raiz — onde katana/spider não têm seed
+    # e o Nuclei varreria apenas a raiz, perdendo toda a superfície documentada.
+    if discover_openapi_urls "$OUTDIR" "$TARGET"; then
+        _oa_n=$(wc -l < "$OUTDIR/raw/openapi_urls.txt" | tr -d ' ')
+        _filter_inscope_urls "$OUTDIR/raw/openapi_urls.txt" >> "$_nuclei_list"
+        echo -e "  ${GREEN}[✓]${NC} OpenAPI: ${_oa_n} endpoint(s) da API adicionados ao feed do Nuclei"
+        # Meta-aviso de cobertura: superfície de API documentada + sem token = o
+        # risco real (BOLA/IDOR/lógica de negócio) fica INTESTADO. O 0-High final
+        # não deve ser lido como "seguro". Sinaliza ao operador e ao relatório.
+        if [ -z "${AUTH_TOKEN:-}" ] && [ -z "${TOKEN_A:-}" ]; then
+            echo -e "  ${YELLOW}[!] ${_oa_n} endpoint(s) de API documentados — nenhum token fornecido: a superfície AUTENTICADA (BOLA/IDOR/lógica) NÃO será testada. Use --token-a/--token-b para cobertura real.${NC}"
+            printf '%s' "$_oa_n" > "$OUTDIR/raw/.coverage_gap_authed_api"
+        fi
+        unset _oa_n
+    fi
     # Endpoints históricos do OSINT (wayback/gau) alimentam a varredura
     if [ -n "$OSINT_DIR" ] && [ -s "$OSINT_DIR/endpoints_historical.txt" ]; then
         cat "$OSINT_DIR/endpoints_historical.txt" >> "$_nuclei_list"
@@ -1150,6 +1212,9 @@ if os.path.exists(mf):
         NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null); NUCLEI_COUNT=${NUCLEI_COUNT:-0}
         echo -e "  ${GREEN}[✓] $NUCLEI_COUNT vulnerabilidade(s) encontrada(s)${NC}"
     fi
+    # Sentinela: o nuclei EXECUTOU (independe de ter achado algo). A validação da
+    # fase usa isto para distinguir "0 findings" (resultado válido) de "não rodou".
+    touch "$OUTDIR/raw/.nuclei_ran"
 
     # ── DAST fuzzing ativo (#1/#5): nuclei -dast sobre parâmetros ──────────────
     # Injeção ATIVA (SQLi/XSS/SSTI/redirect/prototype-pollution) em parâmetros — o
@@ -1221,12 +1286,18 @@ except: print(0)" 2>/dev/null)
     echo -e "  ${GREEN}[✓] testssl concluído — $TLS_ISSUES problema(s) TLS detectado(s)${NC}"
 fi
 # ── Validação de output nuclei ────────────────────────────────────
-if [ ! -s "$OUTDIR/raw/nuclei.json" ]; then
-    echo -e "  ${YELLOW}[!] AVISO: nuclei.json vazio ou ausente — resultado da Fase 4 pode estar incompleto.${NC}"
-    echo -e "  ${YELLOW}    Verifique conectividade com o alvo — a fase não será marcada como concluída e o resume a re-executará${NC}"
-fi
+# 0 findings é um RESULTADO VÁLIDO (alvo sem matches de template), não falha de
+# execução. Se o nuclei rodou (sentinela), a fase está concluída mesmo com
+# nuclei.json vazio — só re-executa no resume se nem chegou a rodar.
 phase_end "P4"
-phase_output_ok "FASE_4" "$OUTDIR/raw/nuclei.json" && phase_done "FASE_4"
+if [ -s "$OUTDIR/raw/nuclei.json" ]; then
+    phase_done "FASE_4"
+elif [ -f "$OUTDIR/raw/.nuclei_ran" ]; then
+    echo -e "  ${BLUE}[i] nuclei: 0 finding(s) — resultado válido (alvo sem matches de template); fase concluída.${NC}"
+    phase_done "FASE_4"
+else
+    echo -e "  ${YELLOW}[!] nuclei não executou (binário ausente ou erro) — Fase 4 incompleta; o resume a re-executará.${NC}"
+fi
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 

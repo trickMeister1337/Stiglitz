@@ -45,6 +45,29 @@ def filter_in_scope(lines, scope_domains):
     return out
 
 
+def filter_alerts_in_scope(alerts, domain):
+    """Filtra alert-dicts de scanner (ex.: ZAP) mantendo só os in-scope.
+
+    O ZAP (sobretudo o AJAX spider, que dirige um browser headless) pode navegar
+    para fora do escopo e gerar alertas sobre hosts de terceiros — que então
+    vazam para o relatório do cliente. Esta é a fronteira que impede isso.
+
+    Alertas sem 'url'/'uri' são mantidos (o consumidor aplica o alvo como
+    fallback). Sem domínio => fail-open (lista intacta), coerente com in_scope.
+    """
+    if not domain:
+        return alerts
+    sd = [domain]
+    out = []
+    for a in alerts:
+        if not isinstance(a, dict):
+            continue
+        url = a.get("url") or a.get("uri") or ""
+        if not url or in_scope(url, sd):
+            out.append(a)
+    return out
+
+
 def _main(argv):
     # uso: scope.py <dom1> [dom2 ...]  (lê URLs do stdin, imprime as in-scope)
     for u in filter_in_scope(sys.stdin.read().splitlines(), argv):

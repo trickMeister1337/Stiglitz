@@ -31,6 +31,20 @@ W_EVIDENCE = 0.20
 _SEV_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2,
              "info": 1, "informational": 1}
 _CVE_RE = re.compile(r"CVE-\d{4}-\d+", re.I)
+
+# Headers de segurança ausentes são reportados por DUAS fontes (módulo próprio
+# Security Headers + alertas do ZAP) com fraseados diferentes. Normalizamos para um
+# nome canônico p/ colapsar o mesmo header/host independentemente do texto.
+_HEADER_ALIASES = [
+    ("content-security-policy", re.compile(r"content.security.policy|\bcsp\b", re.I)),
+    ("x-frame-options", re.compile(r"x.frame.options|clickjack|frame.ancestors", re.I)),
+    ("x-content-type-options", re.compile(r"x.content.type.options|mime.?sniff|nosniff", re.I)),
+    ("strict-transport-security", re.compile(r"strict.transport.security|\bhsts\b", re.I)),
+    ("referrer-policy", re.compile(r"referrer.policy", re.I)),
+    ("permissions-policy", re.compile(r"permissions.policy|feature.policy", re.I)),
+    ("x-xss-protection", re.compile(r"x.xss.protection", re.I)),
+]
+_MISSING_HDR_RE = re.compile(r"missing|not set|not configured|ausente|header", re.I)
 _VERSION_RE = re.compile(r"\b\d+(?:\.\d+)+\b")
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -100,12 +114,30 @@ def _ratio(a, b):
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 
+def _missing_header_key(f):
+    """Nome canônico do header de segurança ausente que o finding descreve, ou
+    None se não for um finding de 'header ausente'. Une o módulo Security Headers
+    e os alertas de header do ZAP sob a mesma chave."""
+    title = _title(f).lower()
+    if not _MISSING_HDR_RE.search(title):
+        return None
+    for canon, rx in _HEADER_ALIASES:
+        if rx.search(title):
+            return canon
+    return None
+
+
 def _score(a, b):
     """Score combinado [0,1]. CVE compartilhado -> 1.0 (merge imediato)."""
     if _cves(a) & _cves(b):
         return 1.0
     if _host(a) != _host(b):                        # defensivo (já blocado por host)
         return 0.0
+    # Mesmo header de segurança ausente no mesmo host = mesmo problema, mesmo com
+    # fraseado/fonte diferentes (módulo próprio vs ZAP) -> merge.
+    ka = _missing_header_key(a)
+    if ka and ka == _missing_header_key(b):
+        return 1.0
     s = W_CLASS if _class(a) == _class(b) else 0.0
     s += W_TITLE * _ratio(_norm_title(a), _norm_title(b))
     s += W_EVIDENCE * _ratio(_evidence_txt(a), _evidence_txt(b))
