@@ -358,3 +358,21 @@ CLASS_TEMPLATES = {
         "expected": "The response reproduces the vulnerable behavior described in this finding.",
     },
 }
+
+# ── Aviso non-destructive (movimentação de dinheiro / mutação) ────────────────
+_MONEY_RE = re.compile(
+    r"transfer|refund|withdraw|payout|payment|charge|deposit|"
+    r"delete|create|update|remove", re.I)
+_SAFE_NOTE = ("Non-destructive validation: prefer a staging environment, use an "
+              "idempotency-key, or a read-only variant before replaying on production.")
+
+
+def safe_note(finding, command=""):
+    """Aviso non-destructive p/ classes de dinheiro/mutação; '' caso contrário."""
+    blob = " ".join(str(finding.get(k, "")) for k in
+                    ("url", "name", "vuln_type", "type"))
+    m = re.search(r"-X\s+([A-Za-z]+)", command or "")
+    method = m.group(1).upper() if m else ""
+    if _MONEY_RE.search(blob) or method in ("POST", "PUT", "PATCH", "DELETE"):
+        return _SAFE_NOTE
+    return ""

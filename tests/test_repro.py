@@ -216,3 +216,19 @@ def test_classify_remaining_classes():
     assert R._classify({"name": "Default login auth bypass"}) == "auth_bypass"
     assert R._classify({"name": "Missing security header: CSP"}) == "missing_security_header"
     assert R._classify({"name": "Weak TLS cipher"}) == "tls_weak"
+
+
+def test_safe_note_for_money_url():
+    note = R.safe_note({"url": "https://t/api/transfer", "name": "BOLA"}, "")
+    assert note != ""
+
+
+def test_safe_note_for_mutating_method():
+    note = R.safe_note({"url": "https://t/api/x"}, "curl -i -s -X POST '<TARGET>'")
+    assert note != ""
+
+
+def test_no_safe_note_for_readonly_get():
+    note = R.safe_note({"url": "https://t/api/profile", "name": "Missing header"},
+                       "curl -sI '<TARGET>'")
+    assert note == ""
