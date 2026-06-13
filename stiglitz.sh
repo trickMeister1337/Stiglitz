@@ -739,6 +739,7 @@ ACTIVE_COUNT=0
 if command -v httpx &>/dev/null; then
     cat "$OUTDIR/raw/subdomains.txt" | \
         httpx -silent -status-code -title -tech-detect -timeout 5 \
+              "${_PROXY_GO[@]}" \
               -o "$OUTDIR/raw/httpx_results.txt" 2>"$OUTDIR/raw/httpx_error.log"
     [ -f "$OUTDIR/raw/httpx_results.txt" ] && \
         ACTIVE_COUNT=$(grep -c . "$OUTDIR/raw/httpx_results.txt" 2>/dev/null); ACTIVE_COUNT=${ACTIVE_COUNT:-0}
@@ -796,6 +797,7 @@ if command -v katana &>/dev/null; then
     [ -z "$KATANA_JS_FLAGS" ] && \
         echo -e "  ${YELLOW}[!] Chromium não encontrado — katana em modo HTTP apenas${NC}"
     katana -u "$TARGET" \
+        "${_PROXY_GO[@]}" \
         $KATANA_JS_FLAGS \
         -d 5 \
         -kf all \
@@ -949,9 +951,12 @@ phase_banner "FASE 3/11: ANÁLISE TLS (testssl) — paralelo com nuclei"
 TLS_ISSUES=0
 TLS_PID=""
 TESTSSL_TIMEOUT=480              # 8 min — suficiente para análise completa
-if command -v testssl &>/dev/null; then
+if [ -n "$STIGLITZ_PROXY" ] && printf '%s' "$STIGLITZ_PROXY" | grep -q '^socks'; then
+    echo -e "  ${YELLOW}[○] testssl pulado — proxy SOCKS (testssl --proxy é HTTP-only)${NC}"
+elif command -v testssl &>/dev/null; then
     echo -e "  ${BLUE}[…] Iniciando testssl em background (timeout: ${TESTSSL_TIMEOUT}s)...${NC}"
     timeout "$TESTSSL_TIMEOUT" testssl --color 0 --warnings off --quiet \
+            "${_PROXY_TESTSSL[@]}" \
             --fast \
             --jsonfile "$OUTDIR/raw/testssl.json" \
             "$DOMAIN" > "$OUTDIR/raw/testssl.log" 2>&1 &
@@ -1079,6 +1084,7 @@ except: pass
         _batch_pids=""
         for _batch in "$_batch_dir"/batch_*; do
             timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_batch" \
+                "${_PROXY_GO[@]}" \
                 -tags "$_nuclei_base_tags" \
                 -severity critical,high,medium,low \
                 -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
@@ -1106,6 +1112,7 @@ except: pass
     fi
 
     [ "${_nuclei_skip:-0}" = "1" ] || timeout "$NUCLEI_TIMEOUT" nuclei "${_nuclei_input[@]}" \
+        "${_PROXY_GO[@]}" \
            -tags "$_nuclei_base_tags" \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
@@ -1131,6 +1138,7 @@ if os.path.exists(mf):
         # evasão (inclui -H Authorization do --token) e templates custom — senão o
         # fallback varreria apenas a raiz e perderia o token em scans autenticados.
         timeout "$NUCLEI_TIMEOUT" nuclei -l "$_nuclei_list" \
+            "${_PROXY_GO[@]}" \
                -tags cve,exposure,misconfig,default-login,takeover,xss,sqli \
                -severity critical,high,medium \
                -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
@@ -1162,6 +1170,7 @@ if os.path.exists(mf):
         if [ "${_dast_n:-0}" -gt 0 ]; then
             echo -e "  ${BLUE}[…] nuclei -dast: fuzzing ativo em ${_dast_n} endpoint(s) parametrizado(s)...${NC}"
             timeout "$NUCLEI_TIMEOUT" nuclei -l "$OUTDIR/raw/dast_urls.txt" -dast -silent \
+                "${_PROXY_GO[@]}" \
                    -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
                    -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
                    -jsonl -o "$OUTDIR/raw/nuclei_dast.json" \
@@ -2300,6 +2309,7 @@ NODEJS_PATHS
     if [ -n "$_wordlist" ]; then
         echo -e "  ${BLUE}[…]${NC} ffuf: testando $(wc -l < "$_wordlist") endpoints (timeout 90s)..."
         timeout 90 ffuf \
+            "${_PROXY_GO[@]}" \
             -u "${TARGET}/FUZZ" \
             -w "$_wordlist" \
             -mc 200,201,204,301,302,307,401,403,405 \
