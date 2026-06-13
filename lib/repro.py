@@ -220,6 +220,8 @@ def _classify(finding):
     blob = " ".join(str(finding.get(k, "")) for k in (
         "cve", "vuln_type", "type", "name", "other", "id", "source",
         "template_id")).lower()
+    if "nosql" in blob:
+        return "generic"
     if "sql" in blob:
         return "sqli"
     if "bola" in blob or "idor" in blob or "cwe-639" in blob:
@@ -281,7 +283,7 @@ CLASS_TEMPLATES = {
             "Render the response and confirm the marker executes as script.",
         ],
         "command": "curl -i -s \"<TARGET>/<endpoint>?q=<svg/onload=alert(1)>\"",
-        "expected": "The payload is reflected unencoded and executes in the browser context, proving Cross-Site Scripting.",
+        "expected": "The payload is reflected unencoded in the response; rendering it in a browser executes the script, proving Cross-Site Scripting.",
     },
     "ssrf": {
         "prerequisites": "An out-of-band listener (e.g. interactsh/Collaborator URL).",
@@ -331,19 +333,19 @@ CLASS_TEMPLATES = {
     "missing_security_header": {
         "prerequisites": "Network access to the target.",
         "steps": [
-            "Request the resource and inspect the response headers.",
-            "Confirm the security header is absent.",
+            "Request the resource and inspect the full set of response headers.",
+            "Confirm the expected security header is not present.",
         ],
-        "command": "curl -sI '<TARGET>' | grep -iE 'strict-transport-security|content-security-policy|x-frame-options'",
-        "expected": "The expected security header is missing from the response.",
+        "command": "curl -sI '<TARGET>'",
+        "expected": "The response headers do not include the expected control (e.g. Strict-Transport-Security, Content-Security-Policy, or X-Frame-Options), confirming the security header is absent.",
     },
     "tls_weak": {
-        "prerequisites": "openssl or testssl.sh available locally.",
+        "prerequisites": "openssl (or testssl.sh) available locally. <TARGET_HOST> is the hostname only (no scheme/path).",
         "steps": [
             "Negotiate the weak protocol/cipher against the host.",
             "Confirm the handshake succeeds.",
         ],
-        "command": "echo | openssl s_client -connect <HOST>:443 -tls1_1 2>/dev/null | grep -E 'Protocol|Cipher'",
+        "command": "echo | openssl s_client -connect <TARGET_HOST>:443 -tls1_1 2>/dev/null | grep -E 'Protocol|Cipher'",
         "expected": "The handshake completes with the weak protocol/cipher, proving an insecure TLS configuration.",
     },
     "generic": {

@@ -200,3 +200,19 @@ def test_class_templates_have_required_keys():
     for cls, tpl in R.CLASS_TEMPLATES.items():
         assert set(tpl) >= {"prerequisites", "steps", "command", "expected"}
         assert tpl["steps"] and tpl["command"] and tpl["expected"]
+
+
+def test_classify_nosql_not_sqli():
+    assert R._classify({"vuln_type": "nosql_injection"}) == "generic"
+    assert R._classify({"template_id": "nosql-injection-mongodb"}) == "generic"
+
+
+def test_classify_remaining_classes():
+    assert R._classify({"name": "BFLA - broken function level authorization"}) == "bfla"
+    assert R._classify({"cve": "CWE-918", "name": "SSRF"}) == "ssrf"
+    assert R._classify({"vuln_type": "ssti"}) == "ssti"
+    assert R._classify({"name": "Reflected XSS"}) == "xss"
+    assert R._classify({"name": "OAuth redirect_uri not validated"}) == "oauth_redirect_uri"
+    assert R._classify({"name": "Default login auth bypass"}) == "auth_bypass"
+    assert R._classify({"name": "Missing security header: CSP"}) == "missing_security_header"
+    assert R._classify({"name": "Weak TLS cipher"}) == "tls_weak"
