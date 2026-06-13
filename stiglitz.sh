@@ -288,6 +288,7 @@ ONLY_PHASES=""     # Lista de fases a executar (ex: "P4"); vazio = todas
 DRY_RUN=false      # Simular: imprime o plano e sai sem executar ferramentas
 OAUTH_ACTIVE=0     # Probes ativos OAuth/OIDC (P9.6) — opt-in via --oauth-active
 BIZLOGIC_MUTATE=0  # opt-in p/ testes mutantes de lógica de negócio (P9.7)
+REPRO_RAW=0        # bloco de repro sem sanitização (uso interno) — opt-in via --repro-raw
 
 # Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase, --dry-run, --oauth-active
 _args=("$@")
@@ -303,6 +304,7 @@ for _i in "${!_args[@]}"; do
         --dry-run)           DRY_RUN=true ;;
         --oauth-active)      OAUTH_ACTIVE=1 ;;
         --bizlogic-mutate)   BIZLOGIC_MUTATE=1 ;;
+        --repro-raw)         REPRO_RAW=1 ;;
     esac
 done
 
@@ -2519,6 +2521,9 @@ _report_py="$(dirname "$0")/stiglitz_report.py"
 if [ ! -f "$_report_py" ]; then
     _report_py="$(cd "$(dirname "$0")" && pwd)/stiglitz_report.py"
 fi
+
+# Repasse da política de sanitização do bloco "How to Reproduce/Proof" (P11).
+export STIGLITZ_REPRO_RAW="$REPRO_RAW"
 
 if [ -f "$_report_py" ]; then
     echo -e "  ${BLUE}[…] Gerando relatório (stiglitz_report.py)${NC}"
