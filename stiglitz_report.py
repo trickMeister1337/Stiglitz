@@ -29,6 +29,11 @@ from report.cwe_data import (  # noqa: E402
 from report.sarif import build_sarif  # noqa: E402
 from report.exec_summary import build_exec_summary  # noqa: E402
 from report_helpers import inject_cve_signals  # noqa: E402
+try:
+    import repro  # noqa: E402
+except Exception:
+    repro = None
+REPRO_RAW = os.environ.get("STIGLITZ_REPRO_RAW") == "1"
 
 # Tabelas CWE → CVSS sintético, impacto, remediação + helpers cwe_enrich/
 # cvss_to_sev estão em lib/report/cwe_data.py (importado acima).
@@ -1302,6 +1307,7 @@ def render_finding(f):
                'source-zap')
     confirmed_badge = ''
     _cat = _confirmed_category(f)
+    f["confirmed_category"] = _cat
     if _cat == "exploit":
         confirmed_badge = ('<span style="background:#7a0000;color:white;padding:2px 8px;'
             'border-radius:4px;font-size:10px;font-weight:bold;margin-left:6px;'
@@ -1310,10 +1316,11 @@ def render_finding(f):
         confirmed_badge = ('<span style="background:#1b5e20;color:white;padding:2px 8px;'
             'border-radius:4px;font-size:10px;font-weight:bold;margin-left:6px;'
             'border:1px solid #2e7d32">✓ VERIFIED</span>')
+    repro_panel = repro.render_panel_html(f, raw=REPRO_RAW) if repro else ""
     return f'''<div class="vuln {f['severity']}">
   <h3>{html.escape(f.get('name',''))} <span class="source-badge {src_cls}">{f.get('source','')}</span> {badge(f['severity'])}{reclassify_badge}{confirmed_badge}</h3>
   <table>{rows}
-  </table></div>'''
+  </table>{repro_panel}</div>'''
 
 # Email Security: apenas na tabela dedicada, sem cards.
 # testssl.sh: critical/high viram cards; medium/low/info ficam só na tabela TLS.
