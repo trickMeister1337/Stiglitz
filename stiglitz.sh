@@ -317,8 +317,8 @@ done
 # Aplicado SOMENTE a tráfego que toca o alvo. Controle (ZAP API localhost),
 # enriquecimento (NVD/EPSS/KEV), notificações e subfinder (DNS passivo) vão direto.
 if [ -n "$STIGLITZ_PROXY" ]; then
-    if ! printf '%s' "$STIGLITZ_PROXY" | grep -qE '^(https?|socks5h?)://[^/]+'; then
-        echo -e "  ${RED}[✗] --proxy inválido: '${STIGLITZ_PROXY}'. Use http(s)://host:porta ou socks5(h)://host:porta${NC}" >&2
+    if ! printf '%s' "$STIGLITZ_PROXY" | grep -qE '^(https?|socks5h?)://[^/@]+$'; then
+        echo -e "  ${RED}[✗] --proxy inválido: '${STIGLITZ_PROXY}'. Use http(s)://host:porta ou socks5(h)://host:porta (sem credenciais user:pass@ — proxy autenticado não suportado nesta entrega)${NC}" >&2
         exit 1
     fi
     echo -e "  ${BLUE}[…] Modo proxy ativo: ${STIGLITZ_PROXY} (só tráfego do alvo; nmap será pulado)${NC}"
@@ -565,7 +565,7 @@ echo -ne "  ${BLUE}[…]${NC} Verificando acesso ao alvo..."
 HTTP_CODE=""
 for _try_url in "$TARGET" "${TARGET/https:\/\//http://}" "${TARGET/http:\/\//https://}"; do
     [ -z "$_try_url" ] && continue
-    _code=$(curl -s -o /dev/null -w "%{http_code}" \
+    _code=$(curl -s "${_PROXY_CURL[@]}" -o /dev/null -w "%{http_code}" \
         --max-time 20 --connect-timeout 10 \
         -L --max-redirs 5 \
         -k \
