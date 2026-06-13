@@ -21,6 +21,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import netproxy
 
 
 class OAuthError(Exception):
@@ -58,7 +59,7 @@ def refresh_access_token(timeout=15):
                  "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with netproxy.urlopen(req, timeout=timeout) as resp:
             payload = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         raise OAuthError(f"HTTP {e.code} do token endpoint: {e.reason}") from None

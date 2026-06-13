@@ -8,6 +8,7 @@ Uso: python3 payment_page_monitor.py <outdir> <target> [previous_outdir]
 """
 import os, sys, re, json, ssl, hashlib, urllib.request
 from urllib.parse import urlsplit, urljoin
+import netproxy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cde_scope
@@ -54,7 +55,7 @@ def _ssl_ctx():
 
 def _fetch(url, timeout=12, limit=None):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as r:
+    with netproxy.urlopen(req, timeout=timeout, context=_ssl_ctx()) as r:
         data = r.read(limit) if limit else r.read()
         csp = r.headers.get("Content-Security-Policy", "")
         return data, csp

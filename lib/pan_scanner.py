@@ -9,6 +9,7 @@ Uso: python3 pan_scanner.py <outdir> <target>
 Limitação conhecida: detecta apenas PANs em dígitos contíguos; números com espaços/hífens (ex.: "4111 1111 1111 1111") não são casados.
 """
 import os, sys, re, json, ssl, urllib.request
+import netproxy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cde_scope
@@ -57,7 +58,7 @@ def _fetch(url, timeout=10):
     ctx_ssl.check_hostname = False
     ctx_ssl.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=timeout, context=ctx_ssl) as r:
+    with netproxy.urlopen(req, timeout=timeout, context=ctx_ssl) as r:
         return r.read(2_000_000).decode("utf-8", "ignore")
 
 

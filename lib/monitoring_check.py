@@ -6,6 +6,7 @@ Extraído de stiglitz.sh (heredoc PYMONITORING). Recebe argumentos posicionais
 via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, re, json, urllib.request, urllib.error, ssl
+import netproxy
 
 outdir, target = sys.argv[1], sys.argv[2].rstrip("/")
 ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
@@ -26,7 +27,7 @@ def fetch(url, attempts=3, backoff=4):
     for attempt in range(attempts):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            r = urllib.request.urlopen(req, timeout=10, context=ctx)
+            r = netproxy.urlopen(req, timeout=10, context=ctx)
             return r.read().decode("utf-8", errors="replace"), r.status
         except urllib.error.HTTPError as e:
             return "", e.code

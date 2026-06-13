@@ -15,6 +15,7 @@ import os
 import re
 import json
 import urllib.parse
+import netproxy
 
 WELL_KNOWN_PATHS = (
     "/.well-known/openid-configuration",
@@ -318,7 +319,7 @@ def fetch_well_known(base_url, timeout=15):
     for path in WELL_KNOWN_PATHS:
         try:
             req = urllib.request.Request(base + path, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with netproxy.urlopen(req, timeout=timeout) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
             if body.strip():
                 return body

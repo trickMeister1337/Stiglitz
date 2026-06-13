@@ -7,6 +7,7 @@ via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import urllib.request, urllib.parse, urllib.error, re, os, sys, json, ssl, hashlib, time
 import http.client
+import netproxy
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -23,7 +24,7 @@ HEADERS = {"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chro
 def fetch(url, timeout=15):
     try:
         req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+        with netproxy.urlopen(req, timeout=timeout, context=ctx) as r:
             return r.read().decode("utf-8", errors="replace"), r.status
     except Exception as e:
         return None, str(e)
@@ -204,7 +205,7 @@ for ep in list(all_endpoints)[:30]:
     try:
         req = urllib.request.Request(url, headers=HEADERS, method="GET")
         req.add_unredirected_header("Accept","application/json,text/html,*/*")
-        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
+        with netproxy.urlopen(req, timeout=8, context=ctx) as r:
             st = r.status; ct = r.headers.get("Content-Type","")
             body = r.read(512).decode("utf-8",errors="replace")
     except urllib.error.HTTPError as e:

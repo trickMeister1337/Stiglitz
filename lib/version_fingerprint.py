@@ -6,6 +6,7 @@ Extraído de stiglitz.sh (heredoc PYVERSION). Recebe argumentos posicionais
 via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, json, re, urllib.request, urllib.error, ssl
+import netproxy
 
 outdir = sys.argv[1]
 target = sys.argv[2].rstrip("/")
@@ -19,7 +20,7 @@ def fetch(url, timeout=8, attempts=3, backoff=4):
     for attempt in range(attempts):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            with netproxy.urlopen(req, timeout=timeout, context=ctx) as r:
                 return r.read().decode("utf-8", errors="replace"), r.status
         except urllib.error.HTTPError as e:
             # Resposta definitiva (404 = endpoint ausente, 403 = bloqueado).

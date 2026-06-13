@@ -6,6 +6,7 @@ Extraído de stiglitz.sh (heredoc PYRATELIMIT). Recebe argumentos posicionais
 via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, re, json, time, urllib.request, urllib.error, ssl
+import netproxy
 
 outdir, target = sys.argv[1], sys.argv[2].rstrip("/")
 ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
@@ -23,7 +24,7 @@ def post(url, body, content_type, attempts=2, backoff=3):
         try:
             req = urllib.request.Request(url, data=body, method="POST",
                   headers={"User-Agent": "Mozilla/5.0", "Content-Type": content_type})
-            r = urllib.request.urlopen(req, timeout=8, context=ctx)
+            r = netproxy.urlopen(req, timeout=8, context=ctx)
             return r.status, dict(r.headers)
         except urllib.error.HTTPError as e:
             return e.code, dict(e.headers)

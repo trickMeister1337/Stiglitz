@@ -6,6 +6,7 @@ Extraído de stiglitz.sh (heredoc PYSECSCAN). Recebe argumentos posicionais
 via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, re, json, ssl, urllib.request, urllib.error
+import netproxy
 
 outdir, target, domain = sys.argv[1], sys.argv[2].rstrip('/'), sys.argv[3]
 ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
@@ -14,7 +15,7 @@ findings = []
 def fetch(url, timeout=10):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Stiglitz-Scanner/2.0"})
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+        with netproxy.urlopen(req, timeout=timeout, context=ctx) as r:
             return r.status, r.read(65536).decode("utf-8", errors="replace"), dict(r.headers)
     except Exception:
         return None, None, {}

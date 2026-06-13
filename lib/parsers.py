@@ -17,6 +17,7 @@ import re
 import http.client
 import urllib.request
 import urllib.error
+import netproxy
 from typing import Dict, List, Set, Tuple, Optional
 
 
@@ -307,7 +308,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
         try:
             req_url = f"https://{target}{rpath}"
             req = urllib.request.Request(req_url, headers={"User-Agent": "Stiglitz-RED/1.0"})
-            resp = urllib.request.urlopen(req, timeout=10)
+            resp = netproxy.urlopen(req, timeout=10)
             if resp.status == 200:
                 content = resp.read().decode("utf-8", errors="ignore")
                 if "robots" in rpath:
