@@ -212,3 +212,147 @@ def _curl_from_request_block(evidence, url=""):
     if body:
         cmd += " \\\n  --data '%s'" % _shq(body)
     return cmd
+
+
+# ── Classificação e templates de fallback ─────────────────────────────────────
+def _classify(finding):
+    """Deriva a classe de reprodução a partir de cve/vuln_type/name/source/template."""
+    blob = " ".join(str(finding.get(k, "")) for k in (
+        "cve", "vuln_type", "type", "name", "other", "id", "source",
+        "template_id")).lower()
+    if "sql" in blob:
+        return "sqli"
+    if "bola" in blob or "idor" in blob or "cwe-639" in blob:
+        return "bola_idor"
+    if "bfla" in blob or "function level" in blob:
+        return "bfla"
+    if "ssrf" in blob or "cwe-918" in blob:
+        return "ssrf"
+    if "ssti" in blob:
+        return "ssti"
+    if "xss" in blob or "cwe-79" in blob:
+        return "xss"
+    if "introspection" in blob or "graphql" in blob:
+        return "graphql_introspection"
+    if "redirect_uri" in blob or "open redirect" in blob or "cwe-601" in blob:
+        return "oauth_redirect_uri"
+    if "auth" in blob and ("bypass" in blob or "default" in blob):
+        return "auth_bypass"
+    if "header" in blob and ("missing" in blob or "security" in blob):
+        return "missing_security_header"
+    if "tls" in blob or "ssl" in blob or "cipher" in blob or "certificate" in blob:
+        return "tls_weak"
+    return "generic"
+
+
+CLASS_TEMPLATES = {
+    "bola_idor": {
+        "prerequisites": "Two accounts (user A and user B); a valid session token for user A.",
+        "steps": [
+            "Authenticate as user A and capture a request returning an object you own (note the object id).",
+            "Replace the object id in the path/parameter with an id belonging to user B.",
+            "Replay the request using user A's token.",
+        ],
+        "command": "curl -i -s '<TARGET>/<endpoint>/<OTHER_USER_ID>' \\\n  -H 'Authorization: Bearer <TOKEN_A>'",
+        "expected": "HTTP 200 returning user B's data with user A's token proves Broken Object Level Authorization (BOLA/IDOR).",
+    },
+    "bfla": {
+        "prerequisites": "A low-privilege account token and the path of a privileged function.",
+        "steps": [
+            "Identify an administrative/privileged endpoint from the documentation or crawl.",
+            "Call it using the low-privilege account token.",
+        ],
+        "command": "curl -i -s -X POST '<TARGET>/<admin_endpoint>' \\\n  -H 'Authorization: Bearer <LOW_PRIV_TOKEN>'",
+        "expected": "The privileged action succeeds with a low-privilege token, proving Broken Function Level Authorization (BFLA).",
+    },
+    "sqli": {
+        "prerequisites": "A parameter reachable by the captured request.",
+        "steps": [
+            "Send the parameter with a benign boolean payload (e.g. ' OR '1'='1).",
+            "Compare the response with a false condition (e.g. ' OR '1'='2).",
+        ],
+        "command": "curl -i -s \"<TARGET>/<endpoint>?id=1'%20OR%20'1'='1\"",
+        "expected": "A measurable, condition-dependent difference (rows, length, timing) between the true and false payloads proves SQL injection.",
+    },
+    "xss": {
+        "prerequisites": "A reflected/stored parameter and a browser to render the response.",
+        "steps": [
+            "Inject a unique marker payload into the parameter.",
+            "Render the response and confirm the marker executes as script.",
+        ],
+        "command": "curl -i -s \"<TARGET>/<endpoint>?q=<svg/onload=alert(1)>\"",
+        "expected": "The payload is reflected unencoded and executes in the browser context, proving Cross-Site Scripting.",
+    },
+    "ssrf": {
+        "prerequisites": "An out-of-band listener (e.g. interactsh/Collaborator URL).",
+        "steps": [
+            "Set the URL/host parameter to your OOB listener address.",
+            "Send the request and watch the listener for an inbound callback.",
+        ],
+        "command": "curl -i -s '<TARGET>/<endpoint>?url=http://<OOB_LISTENER>/'",
+        "expected": "An inbound request from the target to the OOB listener proves Server-Side Request Forgery.",
+    },
+    "ssti": {
+        "prerequisites": "A parameter reflected into a server-side template.",
+        "steps": [
+            "Inject a template arithmetic payload into the parameter.",
+            "Confirm the server evaluates it.",
+        ],
+        "command": "curl -i -s '<TARGET>/<endpoint>?name={{7*7}}'",
+        "expected": "The response contains 49 (evaluated expression), proving Server-Side Template Injection.",
+    },
+    "oauth_redirect_uri": {
+        "prerequisites": "A registered client_id for the authorization endpoint.",
+        "steps": [
+            "Build an authorization request with redirect_uri pointing to an attacker-controlled host.",
+            "Open the URL and observe whether the server redirects there with a code/token.",
+        ],
+        "command": "curl -i -s '<TARGET>/authorize?client_id=<CLIENT_ID>&response_type=code&redirect_uri=https://attacker.example/cb'",
+        "expected": "The server accepts the unregistered redirect_uri and forwards the authorization code, proving an open redirect / token leak (CWE-601).",
+    },
+    "graphql_introspection": {
+        "prerequisites": "Network access to the GraphQL endpoint.",
+        "steps": [
+            "Send the introspection query to the GraphQL endpoint.",
+            "Confirm the full schema (types/mutations) is returned.",
+        ],
+        "command": "curl -i -s '<TARGET>/graphql' \\\n  -H 'Content-Type: application/json' \\\n  --data '{\"query\":\"{ __schema { types { name } } }\"}'",
+        "expected": "The endpoint returns the schema, exposing all types and mutations (introspection should be disabled in production).",
+    },
+    "auth_bypass": {
+        "prerequisites": "The protected endpoint path.",
+        "steps": [
+            "Request the protected endpoint with no/invalid credentials, or with default credentials.",
+            "Confirm access is granted.",
+        ],
+        "command": "curl -i -s '<TARGET>/<protected_endpoint>'",
+        "expected": "The protected resource is served without valid authentication, proving an authentication bypass.",
+    },
+    "missing_security_header": {
+        "prerequisites": "Network access to the target.",
+        "steps": [
+            "Request the resource and inspect the response headers.",
+            "Confirm the security header is absent.",
+        ],
+        "command": "curl -sI '<TARGET>' | grep -iE 'strict-transport-security|content-security-policy|x-frame-options'",
+        "expected": "The expected security header is missing from the response.",
+    },
+    "tls_weak": {
+        "prerequisites": "openssl or testssl.sh available locally.",
+        "steps": [
+            "Negotiate the weak protocol/cipher against the host.",
+            "Confirm the handshake succeeds.",
+        ],
+        "command": "echo | openssl s_client -connect <HOST>:443 -tls1_1 2>/dev/null | grep -E 'Protocol|Cipher'",
+        "expected": "The handshake completes with the weak protocol/cipher, proving an insecure TLS configuration.",
+    },
+    "generic": {
+        "prerequisites": "Network access to the target and the captured request below.",
+        "steps": [
+            "Send the request shown in the Command field to the target.",
+            "Compare the response against the Expected Result to confirm the issue.",
+        ],
+        "command": "curl -i -s '<TARGET>/<endpoint>'",
+        "expected": "The response reproduces the vulnerable behavior described in this finding.",
+    },
+}

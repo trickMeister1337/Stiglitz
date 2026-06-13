@@ -184,3 +184,19 @@ def test_curl_from_request_block_escapes_single_quote_in_path():
     ev = "--- HTTP REQUEST ---\nGET /search?q=it's HTTP/1.1\nHost: t.com\n\n"
     cmd = R._curl_from_request_block(ev, "")
     assert "'\\''" in cmd
+
+
+def test_classify_known_classes():
+    assert R._classify({"vuln_type": "sqli"}) == "sqli"
+    assert R._classify({"cve": "CWE-639", "name": "IDOR"}) == "bola_idor"
+    assert R._classify({"name": "GraphQL introspection enabled"}) == "graphql_introspection"
+
+
+def test_classify_unknown_is_generic():
+    assert R._classify({"vuln_type": "zzz-unmapped"}) == "generic"
+
+
+def test_class_templates_have_required_keys():
+    for cls, tpl in R.CLASS_TEMPLATES.items():
+        assert set(tpl) >= {"prerequisites", "steps", "command", "expected"}
+        assert tpl["steps"] and tpl["command"] and tpl["expected"]
