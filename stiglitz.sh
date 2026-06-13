@@ -325,7 +325,6 @@ if [ -n "$STIGLITZ_PROXY" ]; then
 fi
 export STIGLITZ_PROXY
 
-# shellcheck disable=SC2034  # arrays expandidos nas invocações que tocam o alvo (vazio = sem proxy)
 _PROXY_GO=();      [ -n "$STIGLITZ_PROXY" ] && _PROXY_GO=(-proxy "$STIGLITZ_PROXY")
 _PROXY_CURL=();    [ -n "$STIGLITZ_PROXY" ] && _PROXY_CURL=(-x "$STIGLITZ_PROXY")
 _PROXY_TESTSSL=(); [ -n "$STIGLITZ_PROXY" ] && _PROXY_TESTSSL=(--proxy "${STIGLITZ_PROXY#*://}")
@@ -2309,7 +2308,7 @@ NODEJS_PATHS
     if [ -n "$_wordlist" ]; then
         echo -e "  ${BLUE}[…]${NC} ffuf: testando $(wc -l < "$_wordlist") endpoints (timeout 90s)..."
         timeout 90 ffuf \
-            "${_PROXY_GO[@]}" \
+            "${_PROXY_CURL[@]}" \
             -u "${TARGET}/FUZZ" \
             -w "$_wordlist" \
             -mc 200,201,204,301,302,307,401,403,405 \
