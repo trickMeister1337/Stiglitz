@@ -1152,7 +1152,7 @@ except: pass
                 -severity critical,high,medium,low \
                 -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
                 -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" \
-                "${NUCLEI_TEMPLATES_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
+                "${NUCLEI_EVASION_FLAGS[@]}" \
                 -jsonl -o "${_batch}.json" \
                 > /dev/null 2>/dev/null &
             _batch_pids="$_batch_pids $!"
@@ -1180,7 +1180,7 @@ except: pass
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
            -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" \
-           "${NUCLEI_TEMPLATES_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
+           "${NUCLEI_EVASION_FLAGS[@]}" \
            -jsonl -o "$OUTDIR/raw/nuclei.json" \
            > /dev/null 2>"$OUTDIR/raw/nuclei_error.log"
 
@@ -1206,11 +1206,30 @@ if os.path.exists(mf):
                -severity critical,high,medium \
                -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
                -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" \
-               "${NUCLEI_TEMPLATES_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
+               "${NUCLEI_EVASION_FLAGS[@]}" \
                -jsonl -o "$OUTDIR/raw/nuclei.json" \
                > /dev/null 2>>"$OUTDIR/raw/nuclei_error.log"
         NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null); NUCLEI_COUNT=${NUCLEI_COUNT:-0}
         echo -e "  ${GREEN}[✓] $NUCLEI_COUNT vulnerabilidade(s) encontrada(s)${NC}"
+    fi
+    # Templates custom: passada DEDICADA. No Nuclei, `-t <dir>` SUBSTITUI o repositório
+    # oficial (não adiciona) — misturá-lo às invocações por -tags acima reduziria os
+    # ~5913 templates oficiais a só os do dir custom. Por isso roda separado, sem -tags,
+    # anexando ao nuclei.json (mesmo padrão da fase 'info').
+    if [ "${_nuclei_skip:-0}" != "1" ] && [ "${#NUCLEI_TEMPLATES_FLAGS[@]}" -gt 0 ]; then
+        timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_nuclei_list" \
+            "${_PROXY_GO[@]}" "${NUCLEI_TEMPLATES_FLAGS[@]}" \
+            -severity critical,high,medium,low,info \
+            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
+            -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
+            -jsonl -o "$OUTDIR/raw/nuclei_custom.json" \
+            > /dev/null 2>>"$OUTDIR/raw/nuclei_error.log" || true
+        if [ -s "$OUTDIR/raw/nuclei_custom.json" ]; then
+            cat "$OUTDIR/raw/nuclei_custom.json" >> "$OUTDIR/raw/nuclei.json"
+            _cust_n=$(grep -c . "$OUTDIR/raw/nuclei_custom.json" 2>/dev/null); _cust_n=${_cust_n:-0}
+            echo -e "  ${GREEN}[✓]${NC} Templates custom: ${_cust_n} resultado(s) anexado(s)"
+            unset _cust_n
+        fi
     fi
     # Sentinela: o nuclei EXECUTOU (independe de ter achado algo). A validação da
     # fase usa isto para distinguir "0 findings" (resultado válido) de "não rodou".
