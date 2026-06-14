@@ -2210,24 +2210,48 @@ if _pci_findings:
         "<table><tr><th>Req</th><th>Sev</th><th>Finding</th><th>Asset</th></tr>"
         + rows + "</table>")
 
-# ── Compliance Mapping section (#10) ─────────────────────────
-_comp_summary = _comp_map.compliance_summary(all_f)
+# ── Compliance Mapping section — PCI DSS only (PASS/FAIL/N-A) ─
+_raw_dir = os.path.join(OUTDIR, "raw")
+def _raw_has(_n):
+    return os.path.exists(os.path.join(_raw_dir, _n))
+_coverage = {
+    "headers":    _raw_has("security_headers.json"),
+    "services":   _raw_has("service_findings.json"),
+    "cde":        bool(_pci_findings),
+    "tls":        _raw_has("testssl.json"),
+    "webapp":     _raw_has("nuclei.json") or _raw_has("zap_alerts.json"),
+    "components": _raw_has("nuclei.json"),
+    "authz":      _raw_has("access_control.json"),
+    "authn":      _raw_has("access_control.json"),
+    "logging":    False,
+}
+_posture = _comp_map.pci_posture(all_f, _coverage)
 compliance_section_html = ""
-if any(_comp_summary.get(fw) for fw in _comp_summary):
-    _fw_labels = {"owasp": "OWASP Top 10 2021", "pci": "PCI DSS 4.0.1",
-                  "iso": "ISO 27001:2022", "nist": "NIST 800-53 Rev5", "asvs": "OWASP ASVS 4.0"}
-    _blocks = ""
-    for _fw in ("owasp", "pci", "iso", "nist", "asvs"):
-        _ctrls = _comp_summary.get(_fw, {})
-        if not _ctrls:
-            continue
-        _rows = "".join(f"<tr><td>{html.escape(c)}</td><td>{n}</td></tr>"
-                        for c, n in sorted(_ctrls.items(), key=lambda kv: (-kv[1], kv[0])))
-        _blocks += (f"<h3>{_fw_labels[_fw]}</h3>"
-                    f"<table><tr><th>Control</th><th>Findings</th></tr>{_rows}</table>")
-    compliance_section_html = ("<h2>Compliance Mapping</h2>"
-        "<p>Findings mapped to security/compliance frameworks via CWE crosswalk "
-        "(OWASP, PCI DSS, ISO 27001, NIST 800-53, ASVS).</p>" + _blocks)
+if _posture:
+    _fail = [p for p in _posture if p["verdict"] == "FAIL"]
+    _pass = [p for p in _posture if p["verdict"] == "PASS"]
+    _na = [p for p in _posture if p["verdict"] == "N/A"]
+    _gaps = ", ".join(f"{p['req']} ({p['count']})"
+                      for p in sorted(_fail, key=lambda p: -p["count"])[:4])
+    _summary = (f"PCI DSS 4.0.1 — {len(_posture)} requirements assessed: "
+                f"{len(_fail)} FAIL, {len(_pass)} PASS, {len(_na)} N/A."
+                + (f" Top gaps: {_gaps}." if _gaps else ""))
+    _vcolor = {"FAIL": "#c0392b", "PASS": "#27ae60", "N/A": "#888"}
+    _rows = ""
+    for p in _posture:
+        _tf = html.escape("; ".join(p["top_findings"])) if p["verdict"] == "FAIL" else ""
+        _rows += (f"<tr><td>{html.escape(p['req'])}</td>"
+                  f"<td><span style='color:{_vcolor[p['verdict']]};font-weight:bold'>"
+                  f"{p['verdict']}</span></td>"
+                  f"<td>{p['count'] or ''}</td>"
+                  f"<td style='font-size:12px'>{_tf}</td></tr>")
+    compliance_section_html = (
+        "<h2>Compliance Mapping — PCI DSS 4.0.1</h2>"
+        f"<p>{html.escape(_summary)}</p>"
+        "<p style='font-size:12px;color:#666'>FAIL = finding mapped to the requirement; "
+        "PASS = capability exercised, no finding; N/A = capability not exercised in this scan.</p>"
+        "<table><tr><th>Requirement</th><th>Verdict</th><th>Findings</th><th>Top findings</th></tr>"
+        + _rows + "</table>")
 
 # ── Remediation SLA — overdue (CISA KEV BOD 22-01) (#9) ──────
 _overdue = [f for f in all_f if (f.get("sla") or {}).get("overdue")]
