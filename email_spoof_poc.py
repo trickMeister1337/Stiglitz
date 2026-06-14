@@ -99,16 +99,6 @@ def _decode(resp):
     return resp.decode(errors="replace") if isinstance(resp, (bytes, bytearray)) else str(resp)
 
 
-def _require_ok(code, resp, label, ok=(250,)):
-    """smtplib.mail()/rcpt() não lançam em 4xx/5xx — exige código 2xx ou aborta.
-
-    Garante que 'accepted' reflita a aceitação real de cada estágio SMTP, e não
-    apenas o código final do DATA (que pode mascarar uma rejeição em MAIL/RCPT).
-    """
-    if code not in ok:
-        raise smtplib.SMTPException(f"{label} rejeitado: {code} {_decode(resp)}")
-
-
 def _quiet_close(s):
     if s is not None:
         try:
@@ -119,9 +109,10 @@ def _quiet_close(s):
 
 def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
                    timeout=15, smtp_factory=smtplib.SMTP):
-    """Entrega direta na porta 25, tentando cada MX. Captura o transcript."""
+    """Entrega direta na porta 25, tentando cada MX. Classifica o estágio."""
     transcript = []
     last_err = None
+    stage = "TRANSPORT_FAILED"  # default: nem conectou
     for host in mx_hosts:
         s = None
         try:
@@ -132,13 +123,18 @@ def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
             transcript.append(f"EHLO {helo} -> {code} {_decode(resp)}")
             code, resp = s.mail(mail_from)
             transcript.append(f"MAIL FROM:<{mail_from}> -> {code} {_decode(resp)}")
-            _require_ok(code, resp, "MAIL FROM")
+            if code != 250:
+                stage = "BLOCKED_BY_RELAY"
+                raise smtplib.SMTPException(f"MAIL FROM rejeitado: {code} {_decode(resp)}")
             code, resp = s.rcpt(rcpt_to)
             transcript.append(f"RCPT TO:<{rcpt_to}> -> {code} {_decode(resp)}")
-            _require_ok(code, resp, "RCPT TO", ok=(250, 251))
+            if code not in (250, 251):
+                stage = "BLOCKED_BY_RELAY"
+                raise smtplib.SMTPException(f"RCPT TO rejeitado: {code} {_decode(resp)}")
             code, resp = s.data(msg_bytes)
             transcript.append(f"DATA -> {code} {_decode(resp)}")
-            accepted = code == 250
+            stage = "QUEUED" if code == 250 else "BLOCKED_BY_RELAY"
+            accepted = stage == "QUEUED"
             # A mensagem já foi entregue: uma falha no QUIT não deve disparar
             # retry a outro MX (evita reenvio duplicado do email forjado).
             try:
@@ -146,14 +142,15 @@ def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
             except Exception:
                 _quiet_close(s)
             return {"method": "direct", "mx_used": host, "accepted": accepted,
-                    "transcript": transcript}
+                    "smtp_stage": stage, "transcript": transcript}
         except Exception as e:
             transcript.append(f"ERROR {host}: {e}")
             last_err = e
             _quiet_close(s)
             continue
     return {"method": "direct", "mx_used": None, "accepted": False,
-            "transcript": transcript, "error": str(last_err) if last_err else None}
+            "smtp_stage": stage, "transcript": transcript,
+            "error": str(last_err) if last_err else None}
 
 
 def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_bytes,
@@ -161,6 +158,7 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
     """Entrega via relay configurado (STARTTLS+login se user fornecido)."""
     transcript = []
     s = None
+    stage = "TRANSPORT_FAILED"
     try:
         transcript.append(f"CONNECTING relay {host}:{port}")
         s = smtp_factory(host, port, timeout=timeout)
@@ -175,24 +173,29 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
             transcript.append("STARTTLS + AUTH")
         code, resp = s.mail(mail_from)
         transcript.append(f"MAIL FROM:<{mail_from}> -> {code} {_decode(resp)}")
-        _require_ok(code, resp, "MAIL FROM")
+        if code != 250:
+            stage = "BLOCKED_BY_RELAY"
+            raise smtplib.SMTPException(f"MAIL FROM rejeitado: {code} {_decode(resp)}")
         code, resp = s.rcpt(rcpt_to)
         transcript.append(f"RCPT TO:<{rcpt_to}> -> {code} {_decode(resp)}")
-        _require_ok(code, resp, "RCPT TO", ok=(250, 251))
+        if code not in (250, 251):
+            stage = "BLOCKED_BY_RELAY"
+            raise smtplib.SMTPException(f"RCPT TO rejeitado: {code} {_decode(resp)}")
         code, resp = s.data(msg_bytes)
         transcript.append(f"DATA -> {code} {_decode(resp)}")
-        accepted = code == 250
+        stage = "QUEUED" if code == 250 else "BLOCKED_BY_RELAY"
+        accepted = stage == "QUEUED"
         try:
             s.quit()
         except Exception:
             _quiet_close(s)
         return {"method": "relay", "mx_used": host, "accepted": accepted,
-                "transcript": transcript}
+                "smtp_stage": stage, "transcript": transcript}
     except Exception as e:
         transcript.append(f"ERROR relay {host}: {e}")
         _quiet_close(s)
         return {"method": "relay", "mx_used": host, "accepted": False,
-                "transcript": transcript, "error": str(e)}
+                "smtp_stage": stage, "transcript": transcript, "error": str(e)}
 
 
 def roe_gate(forged_from, to_addr, method, assume_yes=False, interactive=None):

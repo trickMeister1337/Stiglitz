@@ -263,6 +263,43 @@ class TestDelivery(unittest.TestCase):
         # Apenas uma conexão deve ter sido aberta (sem retry ao mx2).
         self.assertEqual(len(FakeSMTP.instances), 1)
 
+    def test_stage_queued_on_250(self):
+        import email_spoof_poc as esp
+        result = esp.deliver_direct(["mx1.example.com"], "h", "a@b.com",
+                                    "c@d.com", b"RAW", smtp_factory=FakeSMTP)
+        self.assertEqual(result["smtp_stage"], "QUEUED")
+        self.assertTrue(result["accepted"])
+
+    def test_stage_blocked_when_rcpt_refused(self):
+        import email_spoof_poc as esp
+
+        class RcptRefused(FakeSMTP):
+            def rcpt(self, addr):
+                self.commands.append(("rcpt", addr))
+                return (550, b"relaying denied")
+
+        result = esp.deliver_direct(["mx1.example.com"], "h", "a@b.com",
+                                    "c@d.com", b"RAW", smtp_factory=RcptRefused)
+        self.assertEqual(result["smtp_stage"], "BLOCKED_BY_RELAY")
+        self.assertFalse(result["accepted"])
+
+    def test_stage_transport_failed_on_connect_error(self):
+        import email_spoof_poc as esp
+
+        class FailConnect(FakeSMTP):
+            def __init__(self, host, port, timeout=15):
+                raise OSError("refused")
+
+        result = esp.deliver_direct(["mx1.example.com"], "h", "a@b.com",
+                                    "c@d.com", b"RAW", smtp_factory=FailConnect)
+        self.assertEqual(result["smtp_stage"], "TRANSPORT_FAILED")
+
+    def test_relay_stage_queued(self):
+        import email_spoof_poc as esp
+        result = esp.deliver_relay("relay.test", 587, "user", "pass", "h",
+                                   "a@b.com", "c@d.com", b"RAW", smtp_factory=FakeSMTP)
+        self.assertEqual(result["smtp_stage"], "QUEUED")
+
 
 class TestGateAndOutput(unittest.TestCase):
     def test_roe_gate_passes_with_assume_yes(self):
