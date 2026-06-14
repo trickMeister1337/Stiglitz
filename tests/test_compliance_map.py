@@ -40,3 +40,51 @@ def test_tag_finding_adds_compliance_block():
     C.tag_finding(f)
     assert "compliance" in f
     assert f["compliance"]["owasp"].startswith("A10")  # SSRF
+
+
+def test_pci_posture_fail_when_finding_maps_to_req():
+    # CWE-79 → pci 6.2.4 no crosswalk
+    out = C.pci_posture([{"cve": "CWE-79"}], coverage={"webapp": True})
+    by = {p["req"]: p for p in out}
+    assert by["6.2.4"]["verdict"] == "FAIL"
+    assert by["6.2.4"]["count"] == 1
+
+
+def test_pci_posture_pass_when_covered_and_no_finding():
+    out = C.pci_posture([], coverage={"tls": True})
+    by = {p["req"]: p for p in out}
+    assert by["4.2.1"]["verdict"] == "PASS"
+
+
+def test_pci_posture_na_when_capability_not_run():
+    out = C.pci_posture([], coverage={"tls": False})
+    by = {p["req"]: p for p in out}
+    assert by["4.2.1"]["verdict"] == "N/A"
+
+
+def test_pci_posture_authz_na_without_token_signal():
+    out = C.pci_posture([], coverage={"authz": False, "authn": False})
+    by = {p["req"]: p for p in out}
+    assert by["7.2.1"]["verdict"] == "N/A"
+    assert by["8.3.1"]["verdict"] == "N/A"
+
+
+def test_pci_posture_fail_precedes_coverage():
+    out = C.pci_posture([{"pci_req": "4.2.1", "name": "TLS 1.0"}], coverage={"tls": False})
+    by = {p["req"]: p for p in out}
+    assert by["4.2.1"]["verdict"] == "FAIL"
+
+
+def test_pci_posture_top_findings_only_on_fail():
+    out = C.pci_posture([{"cve": "CWE-79", "name": "Reflected XSS"}],
+                        coverage={"webapp": True})
+    by = {p["req"]: p for p in out}
+    assert by["6.2.4"]["top_findings"] == ["Reflected XSS"]
+    # requisitos não-FAIL não carregam top_findings
+    assert by["4.2.1"]["top_findings"] == []
+
+
+def test_pci_posture_sorts_numerically():
+    out = C.pci_posture([], coverage={})
+    reqs = [p["req"] for p in out]
+    assert reqs.index("2.2.1") < reqs.index("10.2.1")

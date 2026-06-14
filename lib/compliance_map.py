@@ -84,3 +84,62 @@ def compliance_summary(findings):
             if control:
                 summary[fw][control] = summary[fw].get(control, 0) + 1
     return summary
+
+
+# Requisito PCI → chave de capacidade do scan (sinal de "a fase rodou").
+# Universo = requisitos que o scanner consegue exercitar (crosswalk _MAP + pci_verdicts).
+_REQ_COVERAGE = {
+    "2.2.1":  "headers",     # hardening / misconfig
+    "2.2.5":  "services",    # serviços de rede expostos
+    "3.2":    "cde",         # proteção de dados no CDE
+    "4.2.1":  "tls",         # TLS forte
+    "6.2.4":  "webapp",      # app seguro (injeção/XSS/CSRF/SSRF)
+    "6.3.3":  "components",  # componentes atualizados
+    "7.2.1":  "authz",       # controle de acesso
+    "8.3.1":  "authn",       # autenticação
+    "8.3.4":  "authn",
+    "8.6.1":  "authn",
+    "10.2.1": "logging",     # logging/monitoring — DAST não exercita → só FAIL se houver finding
+}
+
+
+def _req_key(req):
+    """Ordena requisitos PCI numericamente ('2.2.1' antes de '10.2.1')."""
+    return tuple(int(x) for x in re.findall(r"\d+", req))
+
+
+def pci_posture(findings, coverage=None):
+    """Veredito PASS/FAIL/N-A por requisito PCI.
+
+    FAIL: >=1 finding mapeado (CWE->pci OU campo pci_req).
+    PASS: sem finding e a capacidade de cobertura está ativa em `coverage`.
+    N/A:  capacidade não exercida (default conservador — nunca PASS falso).
+
+    Retorna lista de {req, verdict, count, top_findings} ordenada por requisito.
+    """
+    coverage = coverage or {}
+    counts, tops = {}, {}
+    for f in findings:
+        reqs = set()
+        fr = frameworks_for_cwe(extract_cwe(f))
+        if fr.get("pci"):
+            reqs.add(fr["pci"])
+        if f.get("pci_req"):
+            reqs.add(f["pci_req"])
+        for r in reqs:
+            counts[r] = counts.get(r, 0) + 1
+            bucket = tops.setdefault(r, [])
+            name = f.get("name")
+            if name and len(bucket) < 3:
+                bucket.append(name)
+    out = []
+    for req in sorted(set(_REQ_COVERAGE) | set(counts), key=_req_key):
+        n = counts.get(req, 0)
+        if n > 0:
+            verdict = "FAIL"
+        else:
+            cov_key = _REQ_COVERAGE.get(req)
+            verdict = "PASS" if (cov_key and coverage.get(cov_key)) else "N/A"
+        out.append({"req": req, "verdict": verdict, "count": n,
+                    "top_findings": tops.get(req, [])})
+    return out
