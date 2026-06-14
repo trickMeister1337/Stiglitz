@@ -353,5 +353,36 @@ class TestGateAndOutput(unittest.TestCase):
             self.assertNotIn("send", data)
 
 
+class TestParseAuthResults(unittest.TestCase):
+    def test_extracts_dmarc_spf_dkim(self):
+        import email_spoof_poc as esp
+        h = ("Authentication-Results: mx.google.com; "
+             "dmarc=fail (p=NONE sp=NONE) header.from=target.com; "
+             "spf=softfail smtp.mailfrom=target.com; dkim=none")
+        r = esp.parse_auth_results(h)
+        self.assertEqual(r["dmarc"], "fail")
+        self.assertEqual(r["spf"], "softfail")
+        self.assertEqual(r["dkim"], "none")
+
+    def test_handles_multiline_header(self):
+        import email_spoof_poc as esp
+        h = "Authentication-Results: mx.test;\n  dmarc=pass\n  spf=pass\n  dkim=pass"
+        r = esp.parse_auth_results(h)
+        self.assertEqual(r["dmarc"], "pass")
+
+    def test_missing_fields_are_none(self):
+        import email_spoof_poc as esp
+        r = esp.parse_auth_results("Authentication-Results: mx.test; spf=pass")
+        self.assertEqual(r["spf"], "pass")
+        self.assertIsNone(r["dmarc"])
+        self.assertIsNone(r["dkim"])
+
+    def test_empty_input_all_none(self):
+        import email_spoof_poc as esp
+        r = esp.parse_auth_results("")
+        self.assertIsNone(r["dmarc"])
+        self.assertIsNone(r["spf"])
+
+
 if __name__ == "__main__":
     unittest.main()

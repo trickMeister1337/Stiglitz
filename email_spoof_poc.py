@@ -14,6 +14,7 @@ import email.message
 import email.utils
 import json
 import os
+import re
 import smtplib
 import sys
 
@@ -50,6 +51,24 @@ def compute_verdict(records, forged_from):
         "spf_note_en": spf_note,
         "forged_envelope": {"mail_from": forged_from, "header_from": forged_from},
     }
+
+
+def parse_auth_results(header):
+    """Extrai os veredictos de um header Authentication-Results.
+
+    Tolerante a múltiplas linhas e à ausência de campos. Retorna dict com
+    dmarc/spf/dkim/compauth → valor minúsculo ('pass'|'fail'|'none'|...) ou None.
+    """
+    keys = ("dmarc", "spf", "dkim", "compauth")
+    out = {k: None for k in keys}
+    if not header:
+        return out
+    flat = " ".join(str(header).splitlines())
+    for key in keys:
+        m = re.search(r'\b' + key + r'=([a-zA-Z]+)', flat, re.IGNORECASE)
+        if m:
+            out[key] = m.group(1).lower()
+    return out
 
 
 def build_message(forged_from, to_addr, subject, body):
