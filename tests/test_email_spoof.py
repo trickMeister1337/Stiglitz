@@ -457,6 +457,24 @@ class TestSendRouting(unittest.TestCase):
                           "--smtp", "relay.test:587", "--roe-accept", "--outdir", d])
             mdirect.assert_not_called()
 
+    def test_queued_writes_pending_manual_confirmation(self):
+        import json, tempfile
+        from unittest import mock
+        import email_spoof_poc as esp
+        relay_result = {"method": "relay", "mx_used": "relay.test", "accepted": True,
+                        "smtp_stage": "QUEUED", "transcript": ["DATA -> 250 ok"]}
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch("email_security.analyze", return_value=self._spoofable()), \
+                 mock.patch.object(esp, "deliver_relay", return_value=relay_result):
+                esp.main(["example.com", "--send", "--to", "x@test.com",
+                          "--smtp", "relay.test:587", "--roe-accept", "--outdir", d])
+            with open(os.path.join(d, "spoof_evidence.json")) as f:
+                data = json.load(f)
+        self.assertEqual(data["empirical_verdict"]["status"], "QUEUED_PENDING_CONFIRMATION")
+        self.assertIsNone(data["manual_confirmation"]["landed"])
+        self.assertIn("message_id", data["manual_confirmation"])
+        self.assertEqual(data["send"]["smtp_stage"], "QUEUED")
+
 
 class TestEmpiricalVerdict(unittest.TestCase):
     def _analytic(self):

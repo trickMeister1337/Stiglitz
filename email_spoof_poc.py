@@ -257,7 +257,7 @@ def roe_gate(forged_from, to_addr, method, assume_yes=False, interactive=None):
     return ans.strip() == "EU AUTORIZO"
 
 
-def write_evidence(outdir, domain, records, verdict, send):
+def write_evidence(outdir, domain, records, verdict, send, empirical=None, manual=None):
     """Grava spoof_evidence.json e (se houve envio) smtp_transcript.txt."""
     os.makedirs(outdir, exist_ok=True)
     evidence = {
@@ -266,6 +266,10 @@ def write_evidence(outdir, domain, records, verdict, send):
         "dns_records": records,
         "verdict": verdict,
     }
+    if empirical is not None:
+        evidence["empirical_verdict"] = empirical
+    if manual is not None:
+        evidence["manual_confirmation"] = manual
     if send is not None:
         transcript = send.get("transcript", [])
         evidence["send"] = {k: v for k, v in send.items() if k != "transcript"}
@@ -384,11 +388,38 @@ def main(argv=None):
             "mx_used": result.get("mx_used"),
             "delivery_method": result.get("method", "direct"),
             "message_id": msg_id,
-            "accepted": result["accepted"],
+            "smtp_stage": result.get("smtp_stage"),
+            "accepted": result.get("accepted", False),
             "transcript": result["transcript"],
         }
-        status = "ACEITO (250)" if result["accepted"] else "REJEITADO/FALHOU"
-        print(f"  [SMTP] {status} via {send['delivery_method']} (mx={send['mx_used']})")
+        stage = result.get("smtp_stage", "TRANSPORT_FAILED")
+        print(f"  [SMTP] stage={stage} via {send['delivery_method']} (mx={send['mx_used']})")
+
+        empirical = compute_empirical_verdict(verdict, stage, landed=None, auth=None)
+        manual = None
+        if stage == "QUEUED":
+            manual = {
+                "message_id": msg_id,
+                "forged_from": forged_from,
+                "recipient": args.to,
+                "landed": None,
+                "authentication_results": None,
+                "instructions_en": (
+                    f"Open mailbox {args.to}, find the message with Message-ID {msg_id}, "
+                    f"copy its Authentication-Results header, then run: "
+                    f"python3 email_spoof_poc.py --finalize {outdir} "
+                    f"--auth-results \"<header>\" --landed inbox|spam|not_delivered"),
+            }
+            print("\n  [CONFIRMAÇÃO MANUAL] Email enfileirado. Para fechar a prova:")
+            print(f"      1) Abra a caixa {args.to} e localize Message-ID {msg_id}")
+            print("      2) Copie o header Authentication-Results")
+            print(f"      3) python3 email_spoof_poc.py --finalize {outdir} "
+                  "--auth-results \"<header>\" --landed inbox|spam")
+        print(f"  [VERDITO EMPÍRICO] {empirical['status']} — {empirical['impact_en']}")
+
+        write_evidence(outdir, domain, records, verdict, send, empirical=empirical, manual=manual)
+        print(f"  [✓] Evidência em {outdir}/spoof_evidence.json")
+        return 0
 
     write_evidence(outdir, domain, records, verdict, send)
     print(f"  [✓] Evidência em {outdir}/spoof_evidence.json")
