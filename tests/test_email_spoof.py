@@ -421,6 +421,43 @@ class TestParseAuthResults(unittest.TestCase):
         self.assertIsNone(r["spf"])
 
 
+class TestSendRouting(unittest.TestCase):
+    def _spoofable(self):
+        return {"spf": {"status": "MISSING", "severity": "high"},
+                "dmarc": {"status": "MISSING", "severity": "high"},
+                "dkim": {"status": "NOT_FOUND", "severity": "low"}}
+
+    def test_relay_is_primary_when_smtp_given(self):
+        import tempfile
+        from unittest import mock
+        import email_spoof_poc as esp
+        relay_result = {"method": "relay", "mx_used": "relay.test", "accepted": True,
+                        "smtp_stage": "QUEUED", "transcript": ["DATA -> 250 ok"]}
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch("email_security.analyze", return_value=self._spoofable()), \
+                 mock.patch.object(esp, "deliver_relay", return_value=relay_result) as mrelay, \
+                 mock.patch.object(esp, "deliver_direct") as mdirect:
+                rc = esp.main(["example.com", "--send", "--to", "x@test.com",
+                               "--smtp", "relay.test:587", "--roe-accept", "--outdir", d])
+            self.assertEqual(rc, 0)
+            mrelay.assert_called_once()
+            mdirect.assert_not_called()
+
+    def test_no_direct_fallback_without_allow_direct(self):
+        import tempfile
+        from unittest import mock
+        import email_spoof_poc as esp
+        blocked = {"method": "relay", "mx_used": "relay.test", "accepted": False,
+                   "smtp_stage": "BLOCKED_BY_RELAY", "transcript": ["MAIL -> 553"]}
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch("email_security.analyze", return_value=self._spoofable()), \
+                 mock.patch.object(esp, "deliver_relay", return_value=blocked), \
+                 mock.patch.object(esp, "deliver_direct") as mdirect:
+                esp.main(["example.com", "--send", "--to", "x@test.com",
+                          "--smtp", "relay.test:587", "--roe-accept", "--outdir", d])
+            mdirect.assert_not_called()
+
+
 class TestEmpiricalVerdict(unittest.TestCase):
     def _analytic(self):
         return {"status": "SPOOFABLE_INBOX", "impact_en": "x"}

