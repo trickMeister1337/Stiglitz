@@ -421,5 +421,51 @@ class TestParseAuthResults(unittest.TestCase):
         self.assertIsNone(r["spf"])
 
 
+class TestEmpiricalVerdict(unittest.TestCase):
+    def _analytic(self):
+        return {"status": "SPOOFABLE_INBOX", "impact_en": "x"}
+
+    def test_transport_failed_is_inconclusive(self):
+        import email_spoof_poc as esp
+        v = esp.compute_empirical_verdict(self._analytic(), "TRANSPORT_FAILED")
+        self.assertEqual(v["status"], "INCONCLUSIVE_TRANSPORT")
+        self.assertEqual(v["severity"], "info")
+
+    def test_blocked_by_relay(self):
+        import email_spoof_poc as esp
+        v = esp.compute_empirical_verdict(self._analytic(), "BLOCKED_BY_RELAY")
+        self.assertEqual(v["status"], "BLOCKED_BY_RELAY")
+
+    def test_queued_without_confirmation_is_pending(self):
+        import email_spoof_poc as esp
+        v = esp.compute_empirical_verdict(self._analytic(), "QUEUED")
+        self.assertEqual(v["status"], "QUEUED_PENDING_CONFIRMATION")
+
+    def test_inbox_dmarc_fail_is_proven_critical(self):
+        import email_spoof_poc as esp
+        v = esp.compute_empirical_verdict(self._analytic(), "QUEUED",
+                                          landed="inbox", auth={"dmarc": "fail"})
+        self.assertEqual(v["status"], "SPOOF_PROVEN_INBOX")
+        self.assertEqual(v["severity"], "critical")
+
+    def test_spam_dmarc_fail_is_proven_spam(self):
+        import email_spoof_poc as esp
+        v = esp.compute_empirical_verdict(self._analytic(), "QUEUED",
+                                          landed="spam", auth={"dmarc": "fail"})
+        self.assertEqual(v["status"], "SPOOF_PROVEN_SPAM")
+
+    def test_dmarc_pass_is_not_spoofable(self):
+        import email_spoof_poc as esp
+        v = esp.compute_empirical_verdict(self._analytic(), "QUEUED",
+                                          landed="inbox", auth={"dmarc": "pass"})
+        self.assertEqual(v["status"], "NOT_SPOOFABLE")
+
+    def test_not_delivered(self):
+        import email_spoof_poc as esp
+        v = esp.compute_empirical_verdict(self._analytic(), "QUEUED",
+                                          landed="not_delivered", auth={"dmarc": "fail"})
+        self.assertEqual(v["status"], "NOT_DELIVERED")
+
+
 if __name__ == "__main__":
     unittest.main()

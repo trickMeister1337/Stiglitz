@@ -71,6 +71,45 @@ def parse_auth_results(header):
     return out
 
 
+def compute_empirical_verdict(analytic, smtp_stage, landed=None, auth=None):
+    """Combina o verdito analítico (DNS) com a confirmação empírica.
+
+    smtp_stage: 'TRANSPORT_FAILED' | 'BLOCKED_BY_RELAY' | 'QUEUED'
+    landed:     'inbox' | 'spam' | 'not_delivered' | None (sem confirmação)
+    auth:       dict de parse_auth_results (ou None)
+    """
+    auth = auth or {}
+    dmarc = (auth.get("dmarc") or "").lower()
+    if smtp_stage == "TRANSPORT_FAILED":
+        return {"status": "INCONCLUSIVE_TRANSPORT", "severity": "info",
+                "impact_en": "Delivery transport failed (port 25 blocked or sending-IP "
+                             "reputation) — NOT a proof the domain is protected."}
+    if smtp_stage == "BLOCKED_BY_RELAY":
+        return {"status": "BLOCKED_BY_RELAY", "severity": "info",
+                "impact_en": "The sending path refused the forged envelope (MAIL/RCPT/DATA) "
+                             "before delivery."}
+    # smtp_stage == QUEUED
+    if landed is None:
+        return {"status": "QUEUED_PENDING_CONFIRMATION", "severity": "pending",
+                "impact_en": "Message queued for delivery; awaiting manual inbox confirmation "
+                             "(Authentication-Results)."}
+    if landed == "not_delivered":
+        return {"status": "NOT_DELIVERED", "severity": "info",
+                "impact_en": "Message was queued but never reached the mailbox "
+                             "(silently dropped/discarded)."}
+    if dmarc == "pass":
+        return {"status": "NOT_SPOOFABLE", "severity": "info",
+                "impact_en": "Receiver authenticated the message (dmarc=pass) — the forged "
+                             "From: did not bypass DMARC."}
+    if landed == "spam":
+        return {"status": "SPOOF_PROVEN_SPAM", "severity": "medium",
+                "impact_en": f"Forged From: delivered but quarantined/spam-foldered "
+                             f"(dmarc={dmarc or 'n/a'})."}
+    return {"status": "SPOOF_PROVEN_INBOX", "severity": "critical",
+            "impact_en": f"Forged From: of the exact domain delivered to the inbox with "
+                         f"dmarc={dmarc or 'n/a'} — spoofing proven."}
+
+
 def build_message(forged_from, to_addr, subject, body):
     """Monta o email forjado. Retorna (EmailMessage, message_id capturado)."""
     msg = email.message.EmailMessage()
