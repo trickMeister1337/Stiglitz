@@ -150,6 +150,33 @@ def test_parse_args_outdir_default():
     assert cfg.outdir.startswith("scan_api.alvo.com_")
 
 
+def test_parse_args_profile():
+    cfg = parse_args(["https://x.com", "--profile", "production"])
+    assert cfg.profile == "production"
+
+
+def test_parse_args_profile_default_none():
+    # Sem --profile o pipeline não força perfil — herda o que o ambiente definir.
+    cfg = parse_args(["https://x.com"])
+    assert cfg.profile is None
+
+
+def test_run_exporta_profile_para_subprocesso(outdir, monkeypatch):
+    # O stiglitz.sh lê o perfil via env STIGLITZ_PROFILE; o pipeline precisa
+    # exportá-lo para que as sub-invocações (oauth/bizlogic) o respeitem.
+    monkeypatch.delenv("STIGLITZ_PROFILE", raising=False)
+    p = Pipeline(_cfg(outdir, only=["P1"], profile="production"), runner=RecordingRunner())
+    p.run(log=lambda *a: None)
+    assert os.environ["STIGLITZ_PROFILE"] == "production"
+
+
+def test_run_sem_profile_nao_mexe_no_env(outdir, monkeypatch):
+    monkeypatch.setenv("STIGLITZ_PROFILE", "staging")
+    p = Pipeline(_cfg(outdir, only=["P1"]), runner=RecordingRunner())
+    p.run(log=lambda *a: None)
+    assert os.environ["STIGLITZ_PROFILE"] == "staging"  # preservado
+
+
 def test_domain_of():
     assert _domain_of("https://api.alvo.com:8443/path") == "api.alvo.com"
     assert _domain_of("alvo.com") == "alvo.com"

@@ -106,6 +106,7 @@ class PipelineConfig:
     resume: bool = True              # pular fases já marcadas 'done'
     dry_run: bool = False
     extra_args: list[str] = field(default_factory=list)  # --token, --osint-dir, ...
+    profile: str | None = None       # staging|lab|production → exportado como STIGLITZ_PROFILE
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +143,10 @@ class Pipeline:
         return subprocess.run(cmd).returncode
 
     def run(self, log=print) -> int:
+        # O stiglitz.sh não aceita --profile; ele lê o perfil de STIGLITZ_PROFILE.
+        # Exporta o perfil escolhido para as sub-invocações (subprocess herda o env).
+        if self.cfg.profile:
+            os.environ["STIGLITZ_PROFILE"] = self.cfg.profile
         self.state.data["target"] = self.cfg.target
         self.state.data["started"] = self.state.data.get("started") or int(time.time())
         planned = self.plan()
@@ -192,6 +197,8 @@ def parse_args(argv: list[str]) -> PipelineConfig:
     p.add_argument("--script", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "stiglitz.sh"),
                    help="Caminho do stiglitz.sh")
     p.add_argument("--only", help="Subconjunto de fases (ex: P1,P5,P11)")
+    p.add_argument("--profile", choices=["staging", "lab", "production"],
+                   help="Perfil de execução (exportado como STIGLITZ_PROFILE p/ o stiglitz.sh)")
     p.add_argument("--retries", type=int, default=0, help="Tentativas extras por fase em caso de falha")
     p.add_argument("--no-resume", action="store_true", help="Não pular fases já concluídas")
     p.add_argument("--dry-run", action="store_true", help="Só imprime o plano; não executa")
@@ -215,6 +222,7 @@ def parse_args(argv: list[str]) -> PipelineConfig:
         resume=not a.no_resume,
         dry_run=a.dry_run,
         extra_args=extra,
+        profile=a.profile,
     )
 
 
