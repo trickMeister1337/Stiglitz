@@ -605,6 +605,15 @@ if os.path.exists(tf) and os.path.getsize(tf) > 0:
             tdata.get("scanResult",[{}])[0].get("findings",[])
         SEV_MAP = {"CRITICAL":"critical","HIGH":"high","WARN":"medium","LOW":"low","OK":"info","INFO":"info"}
         _tls_seen_ids = set()  # dedup: testssl escaneia múltiplos IPs → mesmo id duplicado
+        # Cross-check de NULL/anon cipher (lib/tls_confirm.py): refuta FP do testssl
+        # atrás de LB/WAF via enumeração independente (nmap ssl-enum-ciphers).
+        _tls_confirm = {}
+        _tcf = os.path.join(OUTDIR, "raw", "tls_confirm.json")
+        if os.path.exists(_tcf) and os.path.getsize(_tcf) > 0:
+            try:
+                _tls_confirm = json.load(open(_tcf, "r", encoding="utf-8")).get("verdicts", {})
+            except Exception:
+                _tls_confirm = {}
         for item in findings_raw:
             sev_raw = item.get("severity","INFO")
             sev = SEV_MAP.get(sev_raw.upper(),"info")
@@ -623,11 +632,19 @@ if os.path.exists(tf) and os.path.getsize(tf) > 0:
                 _rem      = _info.get("rem") or "Consult the server documentation to disable this insecure TLS feature."
                 _evidence = f"testssl.sh · test: {_tls_id} · result: {_tls_raw}" if _tls_raw else f"testssl.sh · test: {_tls_id}"
                 _tls_seen_ids.add(_tls_id)
+                # Rebaixa para info quando a confirmação ativa refutou o achado.
+                _tls_refuted = _tls_confirm.get(_tls_id) == "refuted"
+                _sev_final = "info" if _tls_refuted else sev
+                if _tls_refuted:
+                    _desc += (" NOTE: testssl reported this as offered, but an independent "
+                              "cipher enumeration (nmap ssl-enum-ciphers) found only strong "
+                              "ciphers — likely a testssl false positive behind a load "
+                              "balancer/WAF. Downgraded to informational.")
                 tls_findings.append({
                     "id":       _tls_id,
                     "name":     _name,
-                    "severity": sev, "severity_orig": sev, "severity_reclassified": False,
-                    "sev":      sev,
+                    "severity": _sev_final, "severity_orig": sev, "severity_reclassified": _tls_refuted,
+                    "sev":      _sev_final,
                     "sev_raw":  sev_raw,
                     "source":   "testssl.sh",
                     "url":      TARGET,
@@ -2394,7 +2411,10 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 out = os.path.join(OUTDIR,"stiglitz_report.html")
 open(out,"w",encoding="utf-8").write(page)
 print(f"[✓] Report: {out}")
-print(f"[✓] {total} vulnerability(ies) | C={stats['critical']} H={stats['high']} M={stats['medium']} L={stats['low']} I={stats['info']}")
+# Sumário do terminal espelha o findings.json canônico (inclui e-mail e info) —
+# antes usava `stats` (base do HTML, sem e-mail), divergindo do que vai ao tracker.
+_canon = finding_quality.severity_counts(all_f)
+print(f"[✓] {len(all_f)} vulnerability(ies) | C={_canon['critical']} H={_canon['high']} M={_canon['medium']} L={_canon['low']} I={_canon['info']}")
 if errors: print(f"[!] {len(errors)} warning(s) — see report")
 
 # ── findings.json ─────────────────────────────────────────────────
@@ -2404,11 +2424,7 @@ try:
     # invariante summary.total == len(findings), exigida pelos consumers (DefectDojo,
     # stiglitz_diff.py, CI). O `stats` global é a contagem do HTML, que tem outra
     # base (inclui Low/Info do ZAP agrupados e trata e-mail em seção dedicada).
-    _js_stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-    for _jf in all_f:
-        _jsv = _jf.get("severity", "")
-        if _jsv in _js_stats:
-            _js_stats[_jsv] += 1
+    _js_stats = finding_quality.severity_counts(all_f)
     _js_total = len(all_f)
     findings_out = {
         "schema_version": "1.0",

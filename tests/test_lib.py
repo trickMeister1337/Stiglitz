@@ -1297,7 +1297,7 @@ class TestStiglitzPhase9Order(unittest.TestCase):
         # A regra AuthToken deve ser adicionada exatamente uma vez com _auth_enc
         # (token-A startup, via helper). O P9.5 usa _tb_enc (token-B) e é precedido
         # por removeRule — não conta como duplicata de startup.
-        self.assertEqual(sh.count("description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}"), 1)
+        self.assertEqual(sh.count("description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&matchRegex=false&replacement=${_auth_enc}"), 1)
 
     def test_ajax_sets_browser_id(self):
         # smoke: garante que o preflight de browser do AJAX existe no source

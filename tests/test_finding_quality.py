@@ -32,6 +32,29 @@ def test_real_vuln_in_static_js_is_not_noise():
         "https://t.example.com/swagger/swagger-ui-bundle.js") is False
 
 
+def test_severity_counts_includes_email_findings():
+    # Bug P3: o sumário do terminal excluía Email Security (contava 10), divergindo
+    # do findings.json (12). severity_counts conta TODOS os findings exportados.
+    findings = [
+        {"severity": "high", "source": "testssl.sh"},
+        {"severity": "medium", "source": "Email Security"},
+        {"severity": "medium", "source": "Email Security"},
+        {"severity": "low", "source": "Security Headers"},
+        {"severity": "info", "source": "secscan"},
+    ]
+    counts = fq.severity_counts(findings)
+    assert counts == {"critical": 0, "high": 1, "medium": 2, "low": 1, "info": 1}
+    assert sum(counts.values()) == len(findings)
+
+
+def test_severity_counts_ignores_unknown_severity_buckets():
+    # Severidade fora dos 5 buckets não quebra nem é contada num bucket inválido.
+    findings = [{"severity": "bogus"}, {"severity": "high"}]
+    counts = fq.severity_counts(findings)
+    assert counts["high"] == 1
+    assert set(counts.keys()) == {"critical", "high", "medium", "low", "info"}
+
+
 def test_identify_js_version_from_evidence():
     lib, ver = fq.identify_js_library(
         "https://t.example.com/swagger/swagger-ui-bundle.js",

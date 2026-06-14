@@ -20,6 +20,23 @@ _NOISE_DISCLOSURE = {
 _STATIC_EXT = (".js", ".css", ".map", ".woff", ".woff2", ".ttf", ".otf",
                ".eot", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico")
 
+_SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "info")
+
+
+def severity_counts(findings):
+    """Conta findings por severidade nos 5 buckets canônicos.
+
+    Conta TODOS os findings (inclusive Email Security), espelhando o array
+    exportado no findings.json — fonte da verdade dos consumers (DefectDojo,
+    stiglitz_diff, CI). Severidades fora dos buckets são ignoradas. Pura.
+    """
+    counts = {b: 0 for b in _SEVERITY_BUCKETS}
+    for f in findings or []:
+        sev = str((f or {}).get("severity", "")).strip().lower()
+        if sev in counts:
+            counts[sev] += 1
+    return counts
+
 
 def is_low_value_zap_alert(name, url):
     """True quando o alerta é um FP previsível: classe de disclosure ruidoso

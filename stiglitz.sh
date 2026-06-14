@@ -199,7 +199,7 @@ zap_inject_auth_headers() {
         esac
         _auth_enc=$(_url_quote "Bearer ${AUTH_TOKEN}")
         zap_api_call "replacer/action/addRule" \
-            "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}" \
+            "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&matchRegex=false&replacement=${_auth_enc}" \
             > /dev/null 2>&1
         echo -e "  ${GREEN}[✓] Authorization Bearer injetado no ZAP (antes do spider)${NC}"
     fi
@@ -208,7 +208,7 @@ zap_inject_auth_headers() {
         _hname="${AUTH_HEADER%%:*}"; _hval="${AUTH_HEADER#*:}"
         _hval_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1].strip(),safe=''))" "$_hval" 2>/dev/null)
         zap_api_call "replacer/action/addRule" \
-            "description=CustomHeader&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
+            "description=CustomHeader&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&matchRegex=false&replacement=${_hval_enc}" \
             > /dev/null 2>&1
         echo -e "  ${GREEN}[✓] Header customizado injetado no ZAP (antes do spider)${NC}"
     fi
@@ -796,12 +796,23 @@ elif command -v nmap &>/dev/null; then
     # banner de versão; nmap -p- aqui são minutos jogados fora (o LB dropa/rate-
     # limita 65k portas). Detecta pelo CNAME e degrada para as portas web típicas.
     _NMAP_SCOPE="-p-"; _NMAP_LABEL="full TCP scan (-p-)"
+    _edge_detected=0
     _cname=$(dig +short CNAME "$DOMAIN" 2>/dev/null | tr 'A-Z' 'a-z')
     if printf '%s' "$_cname" | grep -qE 'elb\.amazonaws\.com|cloudfront\.net|cloudflare|akamai|azureedge|fastly|edgekey|edgesuite|awsglobalaccelerator|googleusercontent'; then
+        _edge_detected=1
+    fi
+    # httpx tech-detect também revela LB/CDN gerenciado quando o alvo resolve via A
+    # record direto (sem CNAME ao edge) — ex.: "Amazon ALB" no -tech-detect. Sem isso
+    # o -p- varre 65k portas que o LB dropa/rate-limita (minutos jogados fora).
+    if [ "$_edge_detected" = "0" ] && [ -f "$OUTDIR/raw/httpx_results.txt" ] \
+       && grep -qiE 'amazon alb|amazon elb|elastic load balanc|cloudfront|cloudflare|akamai|fastly|azure front door|google frontend' "$OUTDIR/raw/httpx_results.txt"; then
+        _edge_detected=1
+    fi
+    if [ "$_edge_detected" = "1" ]; then
         _NMAP_SCOPE="-p 80,443,8080,8443,8000,8888"
         _NMAP_LABEL="edge gerenciado (CDN/LB cloud) — portas web apenas"
     fi
-    unset _cname
+    unset _cname _edge_detected
     echo -e "  ${BLUE}[…] Executando nmap (${_NMAP_LABEL} + vulners)...${NC}"
     # shellcheck disable=SC2086  # _NMAP_SCOPE deve expandir em múltiplos args (-p N,N | -p-)
     timeout "${NMAP_TIMEOUT:-1800}" nmap $_NMAP_SCOPE \
@@ -1303,6 +1314,35 @@ try:
     print(len([f for f in findings if f.get('severity','') in ('WARN','HIGH','CRITICAL','LOW')]))
 except: print(0)" 2>/dev/null)
     echo -e "  ${GREEN}[✓] testssl concluído — $TLS_ISSUES problema(s) TLS detectado(s)${NC}"
+    # Cross-check de NULL/anon cipher: o testssl reporta cipherlist_NULL/aNULL
+    # "offered" de forma FALSA atrás de LB/WAF (AWS ALB) — um único HIGH/CRITICAL
+    # falso destrói a credibilidade do relatório. Confirma via enumeração
+    # independente (nmap ssl-enum-ciphers) e grava o veredito p/ o relatório
+    # rebaixar o FP. nmap é pulado sob proxy (igual à Fase 2) — sem conexão direta.
+    _tls_null_flag=$(python3 -c "
+import json
+try:
+    d=json.load(open('$OUTDIR/raw/testssl.json'))
+    fnd=d if isinstance(d,list) else d.get('scanResult',[{}])[0].get('findings',[])
+    ids={f.get('id') for f in fnd if f.get('id') in ('cipherlist_NULL','cipherlist_aNULL') and str(f.get('finding','')).lower()=='offered'}
+    print('1' if ids else '0')
+except: print('0')" 2>/dev/null)
+    if [ "$_tls_null_flag" = "1" ] && [ -z "$STIGLITZ_PROXY" ] && command -v nmap &>/dev/null; then
+        echo -e "  ${BLUE}[…] testssl reportou NULL/anon cipher — confirmando via nmap ssl-enum-ciphers...${NC}"
+        python3 "$SCRIPT_DIR/lib/tls_confirm.py" confirm "$DOMAIN" 443 \
+            > "$OUTDIR/raw/tls_confirm.json" 2>/dev/null || true
+        _tls_verdict=$(python3 -c "
+import json
+try:
+    v=json.load(open('$OUTDIR/raw/tls_confirm.json')).get('verdicts',{})
+    print(v.get('cipherlist_NULL','?'), v.get('cipherlist_aNULL','?'))
+except: print('? ?')" 2>/dev/null)
+        echo -e "  ${GREEN}[✓] Cross-check NULL/anon: ${_tls_verdict} (refuted ⇒ FP do testssl rebaixado a info no relatório)${NC}"
+        unset _tls_verdict
+    elif [ "$_tls_null_flag" = "1" ] && [ -n "$STIGLITZ_PROXY" ]; then
+        echo -e "  ${YELLOW}[○] NULL/anon cipher reportado, mas cross-check (nmap) pulado sob proxy${NC}"
+    fi
+    unset _tls_null_flag
 fi
 # ── Validação de output nuclei ────────────────────────────────────
 # 0 findings é um RESULTADO VÁLIDO (alvo sem matches de template), não falha de
@@ -1498,6 +1538,22 @@ if command -v zaproxy &>/dev/null; then
     if zap_api_call "core/view/version" "" | grep -q "version"; then
         echo -e "  ${GREEN}[✓] API do ZAP respondendo${NC}"
 
+        # ── Sessão limpa + escopo restrito ao alvo (fronteira de RoE) ─────
+        # Reutilizar um daemon ZAP persistente herda site tree / histórico /
+        # contextos de scans anteriores — inclusive de OUTROS alvos/clientes. Sem
+        # isto, o active scan recursivo dispara rules destrutivas contra hosts fora
+        # de escopo. newSession zera a sessão; includeInContext + setContextInScope
+        # restringem o escopo ao alvo, mantendo AJAX spider (inScope) e active scan
+        # dentro do domínio autorizado.
+        zap_api_call "core/action/newSession" "overwrite=true" > /dev/null 2>&1
+        _scope_re="$(printf '%s' "$TARGET" | sed 's/\./\\./g').*"
+        zap_api_call "context/action/includeInContext" \
+            "contextName=Default Context&regex=$(_url_quote "$_scope_re")" > /dev/null 2>&1
+        zap_api_call "context/action/setContextInScope" \
+            "contextName=Default Context&booleanInScope=true" > /dev/null 2>&1
+        unset _scope_re
+        echo -e "  ${GREEN}[✓] ZAP: sessão limpa + escopo restrito a ${DOMAIN} (active scan/AJAX não saem do alvo)${NC}"
+
         # Configurar evasão no ZAP quando WAF detectado
         if [ "${WAF_DETECTED}" = "1" ]; then
             echo -e "  ${BLUE}[…] Configurando ZAP para evasão passiva de WAF...${NC}"
@@ -1519,7 +1575,7 @@ if command -v zaproxy &>/dev/null; then
                     "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
                     "${_hval}" 2>/dev/null)
                 zap_api_call "replacer/action/addRule" \
-                    "description=WAF-Evasion-${_hname}&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
+                    "description=WAF-Evasion-${_hname}&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&matchRegex=false&replacement=${_hval_enc}" \
                     > /dev/null 2>&1
             done
             # Reduzir thread count do ZAP para imitar tráfego humano
@@ -1675,13 +1731,15 @@ if command -v zaproxy &>/dev/null; then
                 fi
                 echo -e "  ${BLUE}[…] AJAX Spider usará browser: ${_ajax_browser}${NC}"
             fi
-            # inScope=true exige escopo definido (senão internal_error — validado);
-            # com contexto autenticado usamos scanAsUser+inScope, senão inScope=false.
+            # Escopo já restrito ao alvo (includeInContext no início da P9), então
+            # inScope=true mantém o AJAX spider dentro do domínio — sem isto ele
+            # segue redirects de login (ex.: OAuth → accounts.google.com) e leva
+            # terceiros ao contexto, que o active scan recursivo então ataca.
             if [ -n "$_ajax_browser" ]; then
                 if [ -n "$ZAP_CONTEXT_ID" ]; then
                     _ajax_start=$(zap_api_call "ajaxSpider/action/scanAsUser" "contextId=${ZAP_CONTEXT_ID}&userId=${ZAP_USER_ID}&url=${ENCODED_URL}&inScope=true" 2>/dev/null)
                 else
-                    _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=false" 2>/dev/null)
+                    _ajax_start=$(zap_api_call "ajaxSpider/action/scan" "url=${ENCODED_URL}&inScope=true" 2>/dev/null)
                 fi
                 if echo "$_ajax_start" | grep -q "OK"; then
                     _ajax_waited=0
@@ -1774,6 +1832,16 @@ if command -v zaproxy &>/dev/null; then
         # ── Iniciar Active Scan com validação ────────────────────────────
         echo -e "  ${BLUE}[…] Iniciando Active Scan...${NC}"
 
+        # DomXssScanRule (plugin 40026) dirige Firefox via marionette, que falha
+        # ("Failed to read marionette port") em hosts sem Firefox/geckodriver e
+        # PENDURA ~130s por host antes de pular — atrasa o polling do active scan
+        # e pode abortar a fase inteira (zap_alerts.json vazio). Desabilitado por
+        # padrão; STIGLITZ_ZAP_DOMXSS=1 reativa quando há Firefox headless funcional.
+        if [ "${STIGLITZ_ZAP_DOMXSS:-0}" != "1" ]; then
+            zap_api_call "ascan/action/disableScanners" "ids=40026" > /dev/null 2>&1
+            echo -e "  ${BLUE}[…] DomXssScanRule (40026) desabilitado (evita trava de marionette; STIGLITZ_ZAP_DOMXSS=1 reativa)${NC}"
+        fi
+
         # Buscar URL exata do site tree do ZAP (não o target original)
         # "URL Not Found in Scan Tree" ocorre quando se usa a URL do target
         # mas o ZAP registrou uma variação (com/sem trailing slash, redirect, etc.)
@@ -1790,10 +1858,8 @@ try:
         if domain in s:
             print(urllib.parse.quote(s, safe=''))
             break
-    else:
-        # Fallback: primeiro site disponível
-        if sites:
-            print(urllib.parse.quote(sites[0], safe=''))
+    # Sem site batendo o domínio: não imprime nada → _scan_url cai para
+    # ENCODED_URL (o alvo). NUNCA escaneia site arbitrário da árvore (RoE).
 except: pass
 " 2>/dev/null)
 
@@ -1809,13 +1875,16 @@ except: pass
 
         # Se ainda falhar, buscar URL do site tree e tentar novamente
         if [ -z "$SCAN_ID" ] || [ "$SCAN_ID" = "0" ] || ! [[ "$SCAN_ID" =~ ^[0-9]+$ ]]; then
-            echo -e "  ${YELLOW}[!] Tentando active scan com URL do site tree...${NC}"
+            echo -e "  ${YELLOW}[!] Tentando active scan com URL do site tree (só dentro do alvo)...${NC}"
             _first_site=$(zap_api_call "core/view/sites" "" 2>/dev/null \
                 | python3 -c "
 import sys,json,urllib.parse
 try:
     sites=json.load(sys.stdin).get('sites',[])
-    print(urllib.parse.quote(sites[0],safe='')) if sites else print('')
+    domain='$DOMAIN'
+    # Só sites do domínio do alvo — nunca um host arbitrário da árvore (RoE).
+    m=[s for s in sites if domain in s]
+    print(urllib.parse.quote(m[0],safe='')) if m else print('')
 except: print('')" 2>/dev/null)
             if [ -n "$_first_site" ]; then
                 SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${_first_site}&recurse=true" 2>/dev/null)
@@ -1925,7 +1994,7 @@ except Exception:
     _tb_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "Bearer ${TOKEN_B}" 2>/dev/null)
     zap_api_call "replacer/action/removeRule" "description=AuthToken" >/dev/null 2>&1 || true
     zap_api_call "replacer/action/addRule" \
-        "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_tb_enc}" \
+        "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&matchRegex=false&replacement=${_tb_enc}" \
         >/dev/null 2>&1
     _tgt_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$TARGET" 2>/dev/null)
     zap_api_call "spider/action/scan" "url=${_tgt_enc}&maxChildren=10" >/dev/null 2>&1
