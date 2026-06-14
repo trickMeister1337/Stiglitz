@@ -281,6 +281,26 @@ def write_evidence(outdir, domain, records, verdict, send, empirical=None, manua
     return evidence
 
 
+def finalize_evidence(outdir, auth_results, landed):
+    """Aplica a confirmação manual a uma evidência pendente e grava o verdito empírico final."""
+    path = os.path.join(outdir, "spoof_evidence.json")
+    with open(path) as f:
+        evidence = json.load(f)
+    auth = parse_auth_results(auth_results)
+    analytic = evidence.get("verdict", {})
+    stage = (evidence.get("send") or {}).get("smtp_stage", "QUEUED")
+    empirical = compute_empirical_verdict(analytic, stage, landed=landed, auth=auth)
+    evidence["empirical_verdict"] = empirical
+    mc = evidence.get("manual_confirmation") or {}
+    mc["landed"] = landed
+    mc["authentication_results"] = auth_results
+    mc["parsed_auth"] = auth
+    evidence["manual_confirmation"] = mc
+    with open(path, "w") as f:
+        json.dump(evidence, f, ensure_ascii=False, indent=2)
+    return empirical
+
+
 def _default_outdir(domain):
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"spoof_poc_{domain}_{ts}"
@@ -288,7 +308,7 @@ def _default_outdir(domain):
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Evidência de exploração de SPF/DMARC/DKIM (red team autorizado).")
-    p.add_argument("domain", help="Domínio alvo (domínio forjado em From:/MAIL FROM)")
+    p.add_argument("domain", nargs="?", help="Domínio alvo (domínio forjado em From:/MAIL FROM)")
     p.add_argument("--dry-run", action="store_true", help="Mostra o envelope/headers sem enviar")
     p.add_argument("--send", action="store_true", help="Ativa entrega forjada (opt-in, exige RoE)")
     p.add_argument("--to", help="Destinatário (obrigatório com --send)")
@@ -306,6 +326,12 @@ def parse_args(argv=None):
     p.add_argument("--roe-accept", action="store_true",
                    help="AUTORIZA o envio sem prompt (RoE prévio; p/ CI com autorização). Equivale a digitar EU AUTORIZO.")
     p.add_argument("--outdir", default=None)
+    p.add_argument("--finalize", metavar="DIR",
+                   help="Modo finalização: aplica a confirmação manual a uma evidência pendente.")
+    p.add_argument("--auth-results", help="Header Authentication-Results colado da caixa (com --finalize).")
+    p.add_argument("--auth-results-file", help="Lê o Authentication-Results de um arquivo (com --finalize).")
+    p.add_argument("--landed", choices=("inbox", "spam", "not_delivered"),
+                   help="Onde a mensagem chegou (com --finalize).")
     return p.parse_args(argv)
 
 
@@ -314,6 +340,27 @@ def main(argv=None):
     from email_security import analyze, dig
 
     args = parse_args(argv)
+
+    if args.finalize:
+        auth_results = args.auth_results
+        if args.auth_results_file:
+            try:
+                with open(args.auth_results_file) as f:
+                    auth_results = f.read()
+            except OSError as e:
+                print(f"  [!] Não foi possível ler --auth-results-file: {e}")
+                return 2
+        if not auth_results or not args.landed:
+            print("  [!] --finalize requer --auth-results/--auth-results-file e --landed.")
+            return 2
+        empirical = finalize_evidence(args.finalize, auth_results, args.landed)
+        print(f"  [VERDITO EMPÍRICO] {empirical['status']} — {empirical['impact_en']}")
+        return 0
+
+    if not args.domain:
+        print("  [!] Informe o domínio alvo (ou use --finalize DIR).")
+        return 2
+
     domain = args.domain
     forged_from = args.from_addr or f"security-test@{domain}"
     outdir = args.outdir or _default_outdir(domain)

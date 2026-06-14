@@ -522,5 +522,57 @@ class TestEmpiricalVerdict(unittest.TestCase):
         self.assertEqual(v["status"], "NOT_DELIVERED")
 
 
+class TestFinalize(unittest.TestCase):
+    def _pending(self, d):
+        """Grava uma evidência pendente (QUEUED) em d."""
+        import email_spoof_poc as esp
+        records = {"spf": {"status": "MISSING"}, "dmarc": {"status": "MISSING"},
+                   "dkim": {"status": "NOT_FOUND"}}
+        verdict = {"status": "SPOOFABLE_INBOX", "impact_en": "x"}
+        send = {"recipient": "x@test.com", "forged_from": "a@example.com",
+                "mx_used": "relay.test", "delivery_method": "relay",
+                "message_id": "<id-1>", "smtp_stage": "QUEUED", "accepted": True,
+                "transcript": ["DATA -> 250"]}
+        empirical = esp.compute_empirical_verdict(verdict, "QUEUED")
+        manual = {"message_id": "<id-1>", "forged_from": "a@example.com",
+                  "recipient": "x@test.com", "landed": None,
+                  "authentication_results": None}
+        esp.write_evidence(d, "example.com", records, verdict, send,
+                           empirical=empirical, manual=manual)
+
+    def test_finalize_inbox_dmarc_fail_is_proven(self):
+        import json, tempfile
+        import email_spoof_poc as esp
+        with tempfile.TemporaryDirectory() as d:
+            self._pending(d)
+            rc = esp.main(["--finalize", d, "--landed", "inbox",
+                           "--auth-results", "dmarc=fail spf=softfail dkim=none"])
+            self.assertEqual(rc, 0)
+            with open(os.path.join(d, "spoof_evidence.json")) as f:
+                data = json.load(f)
+        self.assertEqual(data["empirical_verdict"]["status"], "SPOOF_PROVEN_INBOX")
+        self.assertEqual(data["manual_confirmation"]["landed"], "inbox")
+        self.assertEqual(data["manual_confirmation"]["parsed_auth"]["dmarc"], "fail")
+
+    def test_finalize_dmarc_pass_is_not_spoofable(self):
+        import json, tempfile
+        import email_spoof_poc as esp
+        with tempfile.TemporaryDirectory() as d:
+            self._pending(d)
+            esp.main(["--finalize", d, "--landed", "inbox",
+                      "--auth-results", "dmarc=pass spf=pass dkim=pass"])
+            with open(os.path.join(d, "spoof_evidence.json")) as f:
+                data = json.load(f)
+        self.assertEqual(data["empirical_verdict"]["status"], "NOT_SPOOFABLE")
+
+    def test_finalize_requires_auth_and_landed(self):
+        import tempfile
+        import email_spoof_poc as esp
+        with tempfile.TemporaryDirectory() as d:
+            self._pending(d)
+            rc = esp.main(["--finalize", d, "--landed", "inbox"])
+            self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
