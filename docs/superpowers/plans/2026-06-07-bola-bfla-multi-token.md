@@ -949,4 +949,4 @@ git commit -m "docs: fase P9.5 Access Control (BOLA/BFLA) + lib/bola.py + --toke
 
 ## Pendência operacional (pré-push)
 
-Trabalho **local** até autorização explícita. Antes de qualquer `git push`, permanece pendente o shred seguro de `scan_pos.bee2pay.com_20260606_144522/` + `scan_pos_full.log` (dados CDE). Nenhum artefato deste plano é versionado — `raw/zap_messages_*.json` e `access_control.json` ficam no `OUTDIR` gitignored; testes usam `target.com` sintético.
+Trabalho **local** até autorização explícita. Antes de qualquer `git push`, permanece pendente o shred seguro de `scan_pos.example.com_20260606_144522/` + `scan_pos_full.log` (dados CDE). Nenhum artefato deste plano é versionado — `raw/zap_messages_*.json` e `access_control.json` ficam no `OUTDIR` gitignored; testes usam `target.com` sintético.

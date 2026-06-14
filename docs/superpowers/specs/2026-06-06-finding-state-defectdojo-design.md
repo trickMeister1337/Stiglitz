@@ -206,6 +206,6 @@ Ordem de implementação:
 
 ## Pendência operacional (pré-push, sob autorização)
 
-Antes de qualquer push: shred seguro de `scan_pos.bee2pay.com_20260606_144522/` +
+Antes de qualquer push: shred seguro de `scan_pos.example.com_20260606_144522/` +
 `scan_pos_full.log` (dados CDE de cliente da validação). Só executar quando o usuário
 autorizar explicitamente.

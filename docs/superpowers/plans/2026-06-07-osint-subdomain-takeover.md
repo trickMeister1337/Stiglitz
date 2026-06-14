@@ -663,6 +663,6 @@ git commit -m "docs: subdomain takeover via nuclei (osint), lib/takeover.py, pre
 ## Pendência operacional (pré-push)
 
 Política mantida: trabalho **local** até autorização explícita. Antes de QUALQUER `git push`,
-permanece pendente o shred seguro de `scan_pos.bee2pay.com_20260606_144522/` + `scan_pos_full.log`
+permanece pendente o shred seguro de `scan_pos.example.com_20260606_144522/` + `scan_pos_full.log`
 (dados CDE de cliente). Nenhum artefato de alvo deste plano é versionado — `cloud/*.json|csv|txt`
 ficam no `OUTDIR` gitignored; testes usam `target.com` sintético.

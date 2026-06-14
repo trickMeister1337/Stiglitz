@@ -144,4 +144,4 @@ Padrão do projeto — sempre avisa no terminal, nunca aborta a fase:
 
 ## Pendência operacional (inalterada)
 
-Política mantida: trabalho **local** até autorização explícita; nenhum artefato de alvo versionado. Continua pendente o shred seguro de `scan_pos.bee2pay.com_20260606_144522/` + `scan_pos_full.log` (dados CDE) quando autorizado.
+Política mantida: trabalho **local** até autorização explícita; nenhum artefato de alvo versionado. Continua pendente o shred seguro de `scan_pos.example.com_20260606_144522/` + `scan_pos_full.log` (dados CDE) quando autorizado.

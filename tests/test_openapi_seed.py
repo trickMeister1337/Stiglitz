@@ -3,7 +3,7 @@ sys.path[:0] = [os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 import openapi_seed as OS
 
 
-BASE = "https://chargebacks.bee2pay.com"
+BASE = "https://chargebacks.example.com"
 
 
 def test_openapi3_substitutes_path_params():
@@ -11,7 +11,7 @@ def test_openapi3_substitutes_path_params():
         "/api/v1/Chargeback/{tenantId}/{chargebackId}": {"get": {}},
     }}
     urls = OS.spec_to_urls(spec, BASE, sample="1")
-    assert urls == ["https://chargebacks.bee2pay.com/api/v1/Chargeback/1/1"]
+    assert urls == ["https://chargebacks.example.com/api/v1/Chargeback/1/1"]
 
 
 def test_swagger2_basepath_is_prefixed():
@@ -19,7 +19,7 @@ def test_swagger2_basepath_is_prefixed():
         "/orders/{id}": {"get": {}},
     }}
     urls = OS.spec_to_urls(spec, BASE, sample="1")
-    assert urls == ["https://chargebacks.bee2pay.com/api/orders/1"]
+    assert urls == ["https://chargebacks.example.com/api/orders/1"]
 
 
 def test_servers_path_prefix_no_double_when_path_has_it():
@@ -28,7 +28,7 @@ def test_servers_path_prefix_no_double_when_path_has_it():
         "/api/v1/users/{id}": {"get": {}},
     }}
     urls = OS.spec_to_urls(spec, BASE, sample="1")
-    assert urls == ["https://chargebacks.bee2pay.com/api/v1/users/1"]
+    assert urls == ["https://chargebacks.example.com/api/v1/users/1"]
 
 
 def test_servers_path_prefix_added_when_path_relative():
@@ -36,7 +36,7 @@ def test_servers_path_prefix_added_when_path_relative():
         "/users/{id}": {"get": {}},
     }}
     urls = OS.spec_to_urls(spec, BASE, sample="1")
-    assert urls == ["https://chargebacks.bee2pay.com/api/v1/users/1"]
+    assert urls == ["https://chargebacks.example.com/api/v1/users/1"]
 
 
 def test_accepts_json_text_and_dedups():
@@ -46,8 +46,8 @@ def test_accepts_json_text_and_dedups():
         "/b": {"get": {}},
     }}
     urls = OS.spec_to_urls(json.dumps(spec), BASE, sample="1")
-    assert urls == ["https://chargebacks.bee2pay.com/a/1",
-                    "https://chargebacks.bee2pay.com/b"]
+    assert urls == ["https://chargebacks.example.com/a/1",
+                    "https://chargebacks.example.com/b"]
 
 
 def test_invalid_or_empty_spec_returns_empty():
@@ -63,4 +63,4 @@ def test_cli_reads_file_and_prints_urls(tmp_path, capsys):
     rc = OS.main([str(p), BASE])
     out = capsys.readouterr().out.strip().splitlines()
     assert rc == 0
-    assert out == ["https://chargebacks.bee2pay.com/api/v1/Chargeback/1/1"]
+    assert out == ["https://chargebacks.example.com/api/v1/Chargeback/1/1"]

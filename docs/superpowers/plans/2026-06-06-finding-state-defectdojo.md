@@ -1086,6 +1086,6 @@ git commit -m "docs: P12 tracker sync, stiglitz_track.py, finding_state/trackers
 
 ## Pendência operacional (pré-push)
 
-Antes de QUALQUER `git push`: shred seguro de `scan_pos.bee2pay.com_20260606_144522/`
+Antes de QUALQUER `git push`: shred seguro de `scan_pos.example.com_20260606_144522/`
 + `scan_pos_full.log` (dados CDE de cliente). Só sob autorização explícita do usuário.
 Os commits deste plano são locais até então.
