@@ -46,3 +46,6 @@ __pycache__/
 # nuclei-custom-templates: keep only the project's own template
 nuclei-custom-templates/*
 !nuclei-custom-templates/grafana-version-outdated.yaml
+
+# Projeto Hector (repo dedicado, aninhado)
+/hector/
