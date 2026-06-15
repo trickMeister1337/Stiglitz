@@ -64,6 +64,15 @@ fi
 # Limitar workers ao número de alvos
 [ "$WORKERS" -gt "$TOTAL" ] && WORKERS=$TOTAL
 
+# ── Teto de lotes Nuclei por scan, proporcional aos workers ──────────────────
+# Cada lote roda 1 processo nuclei (~400MB). O nº real de nuclei concorrentes é
+# (lotes/scan × workers); mantê-lo ~constante evita estouro de RAM no host.
+# stiglitz.sh lê NUCLEI_MAX_BATCHES sob STIGLITZ_BATCH=1. Override do teto global:
+# STIGLITZ_NUCLEI_GLOBAL_CAP (default 6).
+_nuclei_global_cap=${STIGLITZ_NUCLEI_GLOBAL_CAP:-6}
+export NUCLEI_MAX_BATCHES=$(( _nuclei_global_cap / WORKERS ))
+[ "$NUCLEI_MAX_BATCHES" -lt 1 ] && NUCLEI_MAX_BATCHES=1
+
 # ── Diretório de batch ────────────────────────────────────────────────────────
 BATCH_TS=$(date +%Y%m%d_%H%M%S)
 BATCH_DIR="$SCRIPT_DIR/scan_batch_${BATCH_TS}"
@@ -82,6 +91,7 @@ echo -e "${NC}"
 echo -e "${GREEN}[+] Arquivo   : $TARGETS_FILE${NC}"
 echo -e "${GREEN}[+] Alvos     : $TOTAL${NC}"
 echo -e "${GREEN}[+] Workers   : $WORKERS${NC}"
+echo -e "${GREEN}[+] Nuclei/scan: ${NUCLEI_MAX_BATCHES} lote(s) paralelo(s) (teto global ${_nuclei_global_cap})${NC}"
 if [ "$WORKERS" -eq 1 ]; then
     echo -e "${GREEN}[+] Delay     : ${DELAY_BETWEEN}s entre scans (aguarda ZAP encerrar)${NC}"
 else

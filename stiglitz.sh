@@ -1155,7 +1155,13 @@ except: pass
         _batch_dir="$OUTDIR/raw/nuclei_batches"
         mkdir -p "$_batch_dir"
         split -l 50 "$_nuclei_list" "$_batch_dir/batch_"
-        _batch_pids=""
+        # Teto de lotes nuclei concorrentes. Em batch (vários scans juntos),
+        # ⌈N/50⌉ lotes × M workers estoura a RAM (~400MB/nuclei). Ilimitado
+        # standalone; sob STIGLITZ_BATCH=1 usa NUCLEI_MAX_BATCHES (exportado pelo
+        # batch, proporcional aos workers) ou 2 como fallback.
+        _max_par=${NUCLEI_MAX_BATCHES:-0}
+        [ "${STIGLITZ_BATCH:-0}" = "1" ] && _max_par=${NUCLEI_MAX_BATCHES:-2}
+        _batch_pids=""; _running=0
         for _batch in "$_batch_dir"/batch_*; do
             timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_batch" \
                 "${_PROXY_GO[@]}" \
@@ -1167,6 +1173,11 @@ except: pass
                 -jsonl -o "${_batch}.json" \
                 > /dev/null 2>/dev/null &
             _batch_pids="$_batch_pids $!"
+            _running=$((_running+1))
+            if [ "$_max_par" -gt 0 ] && [ "$_running" -ge "$_max_par" ]; then
+                wait -n 2>/dev/null || true   # espera 1 lote terminar antes do próximo
+                _running=$((_running-1))
+            fi
         done
         # Aguardar todos os lotes — com deadline global
         _nuclei_deadline=$(( $(date +%s) + NUCLEI_TIMEOUT ))
