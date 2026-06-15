@@ -106,3 +106,36 @@ def test_swagger_severity_elevated_in_cde():
 
 def test_swagger_severity_info_outside_cde():
     assert fq.swagger_exposure_severity(False) == "info"
+
+
+def test_placeholder_email_by_generic_local_part():
+    # "fulano"/"ciclana" = "John/Jane Doe" em PT-BR; texto de UI, não PII real.
+    assert fq.is_placeholder_email("fulano@globex.io") is True
+    assert fq.is_placeholder_email("ciclana@empresa.com") is True
+    assert fq.is_placeholder_email("seu.email@empresa.com") is True
+
+
+def test_placeholder_email_by_example_domain():
+    assert fq.is_placeholder_email("qualquercoisa@example.com") is True
+    assert fq.is_placeholder_email("contato@empresa.com") is True
+
+
+def test_real_corporate_email_is_not_placeholder():
+    assert fq.is_placeholder_email("joao.silva@globex.io") is False
+    assert fq.is_placeholder_email("maria.santos@initech.net") is False
+
+
+def test_malformed_email_is_not_placeholder():
+    assert fq.is_placeholder_email("") is False
+    assert fq.is_placeholder_email("semarroba") is False
+    assert fq.is_placeholder_email(None) is False
+
+
+def test_filter_placeholder_emails_keeps_only_real():
+    emails = ["fulano@globex.io", "joao.silva@globex.io", "seu.email@empresa.com"]
+    assert fq.filter_placeholder_emails(emails) == ["joao.silva@globex.io"]
+
+
+def test_filter_placeholder_emails_empty_and_none():
+    assert fq.filter_placeholder_emails([]) == []
+    assert fq.filter_placeholder_emails(None) == []

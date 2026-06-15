@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pii_detect import extract_pii, build_pii_findings
+import finding_quality as fq
 
 OUTDIR, TARGET, DOMAIN = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(os.path.join(OUTDIR,"raw","js_files"), exist_ok=True)
@@ -164,8 +165,8 @@ for js_url in js_list:
                 continue
             line_start = content.rfind("\n", 0, m.start())+1
             line_end = content.find("\n", m.end()); line_end = len(content) if line_end==-1 else line_end
-            ctx = content[line_start:line_end].strip()[:200]
-            all_secrets.append({"url":js_url,"file":fname,"type":label,"value":val,"context":ctx})
+            snippet = content[line_start:line_end].strip()[:200]
+            all_secrets.append({"url":js_url,"file":fname,"type":label,"value":val,"context":snippet})
 
     for pat in ENDPOINT_PATTERNS:
         for m in re.finditer(pat, content, re.IGNORECASE):
@@ -217,6 +218,10 @@ for ep in list(all_endpoints)[:30]:
 
 # ── Fase 8d: PII (e-mail corporativo, CPF/CNPJ, telefone BR) ──────
 pii = {k: sorted(v) for k, v in pii_agg.items()}
+# Descarta e-mails placeholder/exemplo de UI (fulano@empresa.com, seu.email@…) —
+# não são PII real e geravam "Employee PII hardcoded" (medium) como FP.
+pii["emails_corporate"] = fq.filter_placeholder_emails(pii.get("emails_corporate", []))
+pii["emails_external"] = fq.filter_placeholder_emails(pii.get("emails_external", []))
 pii_findings = build_pii_findings(pii, TARGET, pii_source or "")
 with open(os.path.join(OUTDIR,"raw","pii_findings.json"),"w",encoding="utf-8") as f:
     json.dump(pii_findings, f, ensure_ascii=False, indent=2)

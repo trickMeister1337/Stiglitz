@@ -150,3 +150,42 @@ def swagger_exposure_severity(in_cde):
     parâmetros) — information disclosure sensível → medium.
     """
     return "medium" if in_cde else "info"
+
+
+# E-mails placeholder/exemplo embutidos em bundles de front (textos de UI,
+# validação, docs) NÃO são PII real de funcionário. Sem este filtro, o
+# extrator de PII reporta "fulano@empresa.com" como "Employee PII hardcoded"
+# (medium) — FP previsível. Conservador: só descarta domínios de exemplo
+# conhecidos OU local-parts genéricos óbvios; e-mail real (joao.silva@…) passa.
+_PLACEHOLDER_EMAIL_DOMAINS = {
+    "example.com", "example.org", "example.net", "exemplo.com", "exemplo.com.br",
+    "empresa.com", "empresa.com.br", "dominio.com", "dominio.com.br", "domain.com",
+    "company.com", "yourcompany.com", "seudominio.com", "email.com", "mail.com",
+    "test.com", "teste.com", "acme.com", "foo.com", "bar.com",
+}
+_PLACEHOLDER_EMAIL_LOCALS = {
+    "fulano", "fulana", "ciclano", "ciclana", "beltrano", "beltrana", "sicrano",
+    "sicrana", "email", "seuemail", "seu.email", "youremail", "your.email",
+    "nome", "name", "nome.sobrenome", "first.last", "firstname.lastname",
+    "johndoe", "john.doe", "janedoe", "jane.doe", "usuario", "username",
+    "exemplo", "example", "teste", "test",
+}
+
+
+def is_placeholder_email(email):
+    """True se o e-mail é claramente placeholder/exemplo de UI (ex.:
+    'fulano@empresa.com', 'seu.email@example.com'), não PII real.
+
+    Conservador por desenho: só dispara por domínio de exemplo conhecido OU
+    local-part genérico conhecido. E-mail real (ex.: joao.silva@globex.io)
+    retorna False. Pura."""
+    e = (email or "").strip().lower()
+    if "@" not in e:
+        return False
+    local, _, domain = e.partition("@")
+    return domain in _PLACEHOLDER_EMAIL_DOMAINS or local in _PLACEHOLDER_EMAIL_LOCALS
+
+
+def filter_placeholder_emails(emails):
+    """Remove e-mails placeholder da lista, preservando ordem e os reais. Pura."""
+    return [e for e in (emails or []) if not is_placeholder_email(e)]
