@@ -149,10 +149,16 @@ run_sequential() {
         [ "$SCAN_DUR" -ge 60 ] && DUR_STR="$(( SCAN_DUR/60 ))m $(( SCAN_DUR%60 ))s"
 
         local _outdir
-        _outdir=$(ls -td "$SCRIPT_DIR/scan_${_domain}_"* 2>/dev/null | head -1)
-        if [ -n "$_outdir" ] && [ -d "$_outdir" ]; then
-            mv "$_outdir" "$BATCH_DIR/" 2>/dev/null || true
-            _outdir="$BATCH_DIR/$(basename "$_outdir")"
+        if [ -n "${STIGLITZ_OUTDIR_BASE:-}" ]; then
+            # stiglitz.sh ancora a saída em STIGLITZ_OUTDIR_BASE/<domínio>/ — buscar lá e
+            # NÃO mover (mantém a convenção de outputs fora do repo, em ~/scans/)
+            _outdir=$(ls -td "${STIGLITZ_OUTDIR_BASE%/}/${_domain}/scan_${_domain}_"* 2>/dev/null | head -1)
+        else
+            _outdir=$(ls -td "$SCRIPT_DIR/scan_${_domain}_"* 2>/dev/null | head -1)
+            if [ -n "$_outdir" ] && [ -d "$_outdir" ]; then
+                mv "$_outdir" "$BATCH_DIR/" 2>/dev/null || true
+                _outdir="$BATCH_DIR/$(basename "$_outdir")"
+            fi
         fi
 
         if [ "$SCAN_EXIT" -eq 0 ] && [ -n "$_outdir" ]; then
@@ -229,10 +235,16 @@ run_parallel() {
             [ "$SCAN_DUR" -ge 60 ] && DUR_STR="$(( SCAN_DUR/60 ))m $(( SCAN_DUR%60 ))s"
 
             local _outdir
-            _outdir=$(ls -td "$SCRIPT_DIR/scan_${_domain}_"* 2>/dev/null | head -1)
-            if [ -n "$_outdir" ] && [ -d "$_outdir" ]; then
-                mv "$_outdir" "$BATCH_DIR/" 2>/dev/null || true
-                _outdir="$BATCH_DIR/$(basename "$_outdir")"
+            if [ -n "${STIGLITZ_OUTDIR_BASE:-}" ]; then
+                # stiglitz.sh ancora a saída em STIGLITZ_OUTDIR_BASE/<domínio>/ — buscar lá e
+                # NÃO mover (mantém a convenção de outputs fora do repo, em ~/scans/)
+                _outdir=$(ls -td "${STIGLITZ_OUTDIR_BASE%/}/${_domain}/scan_${_domain}_"* 2>/dev/null | head -1)
+            else
+                _outdir=$(ls -td "$SCRIPT_DIR/scan_${_domain}_"* 2>/dev/null | head -1)
+                if [ -n "$_outdir" ] && [ -d "$_outdir" ]; then
+                    mv "$_outdir" "$BATCH_DIR/" 2>/dev/null || true
+                    _outdir="$BATCH_DIR/$(basename "$_outdir")"
+                fi
             fi
 
             if [ "$SCAN_EXIT" -eq 0 ] && [ -n "$_outdir" ]; then
