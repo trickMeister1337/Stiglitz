@@ -1122,6 +1122,19 @@ except: pass
     # links/redirects para domínios externos (SSO, refs em JS) que NÃO podem
     # receber probes. Filtro por host (não substring); mesmo critério no feed ZAP.
     _filter_inscope_urls "$OUTDIR/raw/katana_urls.txt" >> "$_nuclei_list"
+    # Hosts vivos descobertos pelo httpx (Fase 2): o Nuclei varre TODOS, não só o
+    # alvo-raiz + o que o Katana crawleou (que, semeado só com $TARGET, cobre quase
+    # só o apex). Sem isto, a maioria dos subdomínios vivos — painéis, observabilidade,
+    # ambientes não-prod — nunca recebe varredura. Extrai a URL (1ª coluna) e filtra
+    # por escopo (mesmo critério do Katana/ZAP).
+    if [ -s "$OUTDIR/raw/httpx_results.txt" ]; then
+        awk '{print $1}' "$OUTDIR/raw/httpx_results.txt" > "$OUTDIR/raw/.httpx_live_urls.tmp"
+        _filter_inscope_urls "$OUTDIR/raw/.httpx_live_urls.tmp" >> "$_nuclei_list"
+        rm -f "$OUTDIR/raw/.httpx_live_urls.tmp"
+        _live_n=$(awk 'NF{print $1}' "$OUTDIR/raw/httpx_results.txt" | grep -c .)
+        echo -e "  ${GREEN}[✓]${NC} Nuclei: ${_live_n} host(s) vivo(s) do httpx incluídos no feed"
+        unset _live_n
+    fi
     # OpenAPI/Swagger: alimenta o Nuclei com os endpoints REAIS da API (não só a
     # raiz). Decisivo p/ APIs que dão 404 na raiz — onde katana/spider não têm seed
     # e o Nuclei varreria apenas a raiz, perdendo toda a superfície documentada.
@@ -1161,6 +1174,15 @@ except: pass
         # batch, proporcional aos workers) ou 2 como fallback.
         _max_par=${NUCLEI_MAX_BATCHES:-0}
         [ "${STIGLITZ_BATCH:-0}" = "1" ] && _max_par=${NUCLEI_MAX_BATCHES:-2}
+        # Standalone sem cap explícito: deriva um teto do nº de CPUs. Ao varrer todos
+        # os hosts vivos o feed cresce (centenas de URLs → dezenas de lotes); ⌈N/50⌉
+        # lotes simultâneos × ~400MB/nuclei estouraria a RAM. NUCLEI_MAX_BATCHES=0
+        # explícito força o legado (ilimitado) para quem quiser.
+        if [ "$_max_par" -eq 0 ] && [ "${NUCLEI_MAX_BATCHES:-x}" != "0" ]; then
+            _cpus=$(nproc 2>/dev/null || echo 4)
+            _max_par=$(( _cpus > 3 ? _cpus - 2 : 2 ))
+            unset _cpus
+        fi
         _batch_pids=""; _running=0
         for _batch in "$_batch_dir"/batch_*; do
             timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_batch" \
