@@ -65,3 +65,25 @@ def test_severity_normalization():
     data = {"data": [{"file": "x", "results": [{"component": "c", "version": "1",
             "vulnerabilities": [{"severity": "CRITICAL", "identifiers": {"CVE": ["CVE-1"]}}]}]}]}
     assert R.parse(data)[0]["severity"] == "critical"
+
+
+# retire.js roda sobre os JS BAIXADOS em raw/js_files/<md5>.js, então o campo
+# "file" é o caminho LOCAL do operador. O finding NUNCA pode expor esse path
+# (vaza ambiente + é inacionável); deve apontar para a URL de origem do JS.
+def test_url_maps_local_file_to_origin_url():
+    data = {"data": [{"file": "/home/op/scan/raw/js_files/4ccd1900.js", "results": [{
+        "component": "swiper", "version": "8.4.5",
+        "vulnerabilities": [{"severity": "high",
+                             "identifiers": {"summary": "Prototype pollution"}}]}]}]}
+    url_map = {"4ccd1900.js": "https://t.example/static/swiper.min.js?ver=8.4.5"}
+    f = R.parse(data, target="https://t.example", url_map=url_map)[0]
+    assert f["url"] == "https://t.example/static/swiper.min.js?ver=8.4.5"
+    assert "/home/" not in f["url"]          # jamais vaza caminho local
+
+def test_url_never_leaks_local_path_without_map():
+    data = {"data": [{"file": "/home/op/scan/raw/js_files/zzz.js", "results": [{
+        "component": "x", "version": "1",
+        "vulnerabilities": [{"severity": "low", "identifiers": {"CVE": ["CVE-1"]}}]}]}]}
+    f = R.parse(data, target="https://t.example")[0]   # sem url_map → fallback
+    assert "/home/" not in f["url"]
+    assert f["url"] in ("https://t.example", "zzz.js")
