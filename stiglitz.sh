@@ -2700,6 +2700,18 @@ except: pass
         head -50 "$OUTDIR/raw/katana_urls.txt" >> "$_info_urls" 2>/dev/null || true
     fi
 
+    # 4. Hosts vivos do httpx (Fase 2): exposições info-severity (swagger/openapi,
+    # .git/.env, config/debug/backup, repos de artefato como Nexus) ficam na RAIZ de
+    # cada host e fora do filtro severity da Fase 4. Sem isto, exposições reais em
+    # subdomínios vivos nunca são reportadas. Filtra por escopo (mesmo critério das
+    # demais fases). Detecção de stack ≠ exposição: o veredito de acesso indevido a
+    # painel (Grafana/Kibana atrás de SSO) é feito a jusante, não aqui.
+    if [ -s "$OUTDIR/raw/httpx_results.txt" ]; then
+        awk '{print $1}' "$OUTDIR/raw/httpx_results.txt" > "$OUTDIR/raw/.httpx_live_urls.tmp"
+        _filter_inscope_urls "$OUTDIR/raw/.httpx_live_urls.tmp" >> "$_info_urls"
+        rm -f "$OUTDIR/raw/.httpx_live_urls.tmp"
+    fi
+
     sort -u "$_info_urls" -o "$_info_urls"
     _info_url_count=$(wc -l < "$_info_urls" | tr -d ' ')
 
@@ -2710,7 +2722,7 @@ except: pass
         # NÃO usar NUCLEI_TEMPLATES_FLAGS aqui: passar -t direciona o nuclei a
         # carregar APENAS aquele diretório (desativa auto-load do default). O
         # diretório custom tem poucos templates que não casam com nossos tags.
-        timeout 300 nuclei -l "$_info_urls" \
+        timeout 600 nuclei -l "$_info_urls" \
             -tags "$_info_tags" \
             -severity info \
             -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
