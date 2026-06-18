@@ -33,10 +33,19 @@ def load_targets(path=None):
             if not line:
                 continue
             parts = line.split()
-            if len(parts) < 2:
+            if not parts:
                 continue
-            typ, target = parts[0].lower(), parts[1]
-            label = parts[2] if len(parts) >= 3 and not parts[2].startswith("checkout=") else target
+            # Formato canônico: "tipo alvo [label] [checkout=true]".
+            # Tolera também linhas com só a URL/host (sem o campo `tipo`) — como o
+            # cde_targets.txt costuma ser preenchido: o tipo é então inferido
+            # ("://" → web, caso contrário infra).
+            if parts[0].lower() in ("web", "infra", "both"):
+                if len(parts) < 2:
+                    continue
+                typ, target, extras = parts[0].lower(), parts[1], parts[2:]
+            else:
+                typ, target, extras = "", parts[0], parts[1:]
+            label = next((e for e in extras if not e.startswith("checkout=")), target)
             out["labels"][target] = label
             if typ == "web":
                 out["web"].append(target)
@@ -47,7 +56,7 @@ def load_targets(path=None):
                 out["infra"].append(target)
             else:
                 (out["web"] if "://" in target else out["infra"]).append(target)
-            if any(p == "checkout=true" for p in parts[2:]):
+            if any(e == "checkout=true" for e in extras):
                 out["checkout"].append(target)
     return out
 

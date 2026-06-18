@@ -13,7 +13,7 @@ KEV_FINDING = [{
 }]
 
 
-def _run(tmp_path):
+def _run(tmp_path, cde=False):
     raw = tmp_path / "raw"
     raw.mkdir()
     (raw / "service_findings.json").write_text(json.dumps(KEV_FINDING))
@@ -21,7 +21,12 @@ def _run(tmp_path):
         "id": "CMS-001", "tool": "wpscan", "type": "cms_vulnerability", "source": "wpscan",
         "name": "WP plugin XSS", "url": "http://t", "severity": "medium",
         "description": "x", "remediation": "y", "cve": "CWE-79"}]))
-    env = dict(os.environ, OUTDIR=str(tmp_path), TARGET="http://t", DOMAIN="t")
+    # Isola o escopo CDE do teste do cde_targets.txt real do repo. A seção de
+    # compliance PCI só deve sair quando o alvo está declarado no CDE (gating).
+    cde_file = tmp_path / "cde_targets.txt"
+    cde_file.write_text("web http://t test-app\n" if cde else "")
+    env = dict(os.environ, OUTDIR=str(tmp_path), TARGET="http://t", DOMAIN="t",
+               STIGLITZ_CDE_TARGETS=str(cde_file))
     subprocess.run([sys.executable, REPORT], cwd=ROOT, env=env, check=True, capture_output=True)
     return json.load(open(tmp_path / "findings.json")).get("findings", [])
 
@@ -41,7 +46,18 @@ def test_findings_carry_compliance_mapping(tmp_path):
 
 
 def test_report_html_has_compliance_section(tmp_path):
-    _run(tmp_path)
+    # Alvo declarado no CDE → a seção de compliance PCI deve ser renderizada.
+    _run(tmp_path, cde=True)
     html = open(tmp_path / "stiglitz_report.html", encoding="utf-8").read()
     assert "Compliance Mapping" in html
     assert "OVERDUE" in html  # seção de SLA atrasado (CISA KEV)
+
+
+def test_compliance_section_gated_by_cde(tmp_path):
+    # Alvo NÃO declarado no CDE → a seção de compliance PCI não deve aparecer,
+    # mas a seção de SLA (independente de CDE) permanece.
+    _run(tmp_path, cde=False)
+    html = open(tmp_path / "stiglitz_report.html", encoding="utf-8").read()
+    assert "Compliance Mapping" not in html
+    assert "PCI DSS CDE Coverage" not in html
+    assert "OVERDUE" in html

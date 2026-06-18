@@ -2244,7 +2244,10 @@ _coverage = {
 }
 _posture = _comp_map.pci_posture(all_f, _coverage)
 compliance_section_html = ""
-if _posture:
+# Seção PCI só no deliverable de ativos declarados no CDE (cde_targets.txt).
+# Fora do CDE, o mapeamento PCI não se aplica e não deve aparecer no relatório.
+_target_in_cde = _cde.in_cde_scope(TARGET, _cde_targets)
+if _posture and _target_in_cde:
     _fail = [p for p in _posture if p["verdict"] == "FAIL"]
     _pass = [p for p in _posture if p["verdict"] == "PASS"]
     _na = [p for p in _posture if p["verdict"] == "N/A"]
