@@ -1135,6 +1135,13 @@ except: pass
         echo -e "  ${GREEN}[✓]${NC} Nuclei: ${_live_n} host(s) vivo(s) do httpx incluídos no feed"
         unset _live_n
     fi
+    # OpenAPI/Swagger multi-host: sonda specs em TODOS os hosts vivos (não só o
+    # alvo) e agrega os endpoints reais em openapi_urls.txt — consumido logo abaixo.
+    # Decisivo p/ as APIs que dão 404 na raiz: sem os endpoints do spec o Nuclei
+    # varre só a raiz e não casa nada ≥ low. Degrada em silêncio (|| true).
+    if [ -s "$OUTDIR/raw/httpx_results.txt" ]; then
+        timeout 180 python3 "$SCRIPT_DIR/lib/openapi_discover.py" "$OUTDIR" "$DOMAIN" 2>/dev/null || true
+    fi
     # OpenAPI/Swagger: alimenta o Nuclei com os endpoints REAIS da API (não só a
     # raiz). Decisivo p/ APIs que dão 404 na raiz — onde katana/spider não têm seed
     # e o Nuclei varreria apenas a raiz, perdendo toda a superfície documentada.
