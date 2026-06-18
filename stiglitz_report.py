@@ -806,9 +806,13 @@ if os.path.exists(_shf):
 
 # Convert missing security headers into pseudo-findings so they are counted
 # in stats/risk_score and rendered as cards in the HTML report.
+# CWE + severidade fallback dos security headers. A fonte de verdade da severidade
+# é lib/security_headers.py (grava no JSON, que tem precedência aqui); estes valores
+# só valem se o JSON não trouxer severity. Mantidos em sincronia p/ não reintroduzir
+# severidades infladas (HSTS/CSP como high/critical destoam do consenso e dos High).
 _HDR_CWE = {
-    "content-security-policy":  ("CWE-693", "critical"),
-    "strict-transport-security":("CWE-319", "high"),
+    "content-security-policy":  ("CWE-693", "medium"),
+    "strict-transport-security":("CWE-319", "medium"),
     "x-frame-options":          ("CWE-1021","medium"),
     "x-content-type-options":   ("CWE-693", "medium"),
     "referrer-policy":          ("CWE-200", "low"),
