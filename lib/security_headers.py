@@ -18,7 +18,7 @@ SECURITY_HEADERS = {
     "content-security-policy":      ("medium","CSP missing — XSS impact amplified"),
     "x-content-type-options":       ("medium","X-Content-Type-Options missing — MIME sniffing possible"),
     "x-frame-options":              ("medium","X-Frame-Options missing — Clickjacking possible"),
-    "strict-transport-security":    ("high","HSTS missing — HTTPS downgrade possible"),
+    "strict-transport-security":    ("medium","HSTS missing — HTTPS downgrade possible"),
     "referrer-policy":              ("low","Referrer-Policy missing — URL leakage in requests"),
     "permissions-policy":           ("low","Permissions-Policy missing — unrestricted access to browser APIs"),
     "x-xss-protection":             ("info","X-XSS-Protection legacy — prefer CSP"),
