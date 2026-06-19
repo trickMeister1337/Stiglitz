@@ -1370,7 +1370,7 @@ def render_finding(f):
         urls_sample = f.get('affected_urls', [])
         url_list = ''.join(f'<li><code>{html.escape(u)}</code></li>' for u in urls_sample)
         rows += (f'\n    <tr><th>Affected URLs</th>'
-            f'<td><strong>{n} occurrence(s)</strong> of the same alert type:<ul style="margin:6px 0 0;padding-left:18px">{url_list}</ul></td></tr>')
+            f'<td><strong>{n} occurrence(s)</strong> of the same alert type:<ul class="affected-urls">{url_list}</ul></td></tr>')
     other_val = f.get('other','')
     if other_val and '[URLs afetadas]' not in other_val:
         rows += f"\n    <tr><th>Detail</th><td>{html.escape(other_val)}</td></tr>"
@@ -2325,7 +2325,8 @@ th{{background:#f5f5f5;font-weight:600}}h2{{color:#1a3a4f;border-bottom:2px soli
 .risk-bar-wrap{{background:#e0e0e0;border-radius:4px;height:12px;margin:8px 0}}
 .risk-bar{{background:{scol};height:12px;border-radius:4px;width:{risk}%}}
 code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
-    .evidence-box{{background:#2d3436;color:#dfe6e9;padding:10px 14px;font-family:monospace;font-size:12px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all}}
+    .evidence-box{{background:#2d3436;color:#dfe6e9;padding:10px 14px;font-family:monospace;font-size:12px;border-radius:4px;overflow:auto;max-height:420px;white-space:pre-wrap;word-break:break-all}}
+    .affected-urls{{max-height:260px;overflow-y:auto;margin:6px 0 0;padding:6px 6px 6px 24px;border:1px solid #e0e0e0;border-radius:4px;background:#fafafa}}
     .tls-ok{{color:#27ae60;font-weight:bold}}.tls-warn{{color:#d4833a;font-weight:bold}}
     .tls-high{{color:#b34e4e;font-weight:bold}}.tls-critical{{color:#7a2e2e;font-weight:bold}}
     .confirm-yes{{background:#27ae60;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
