@@ -1078,6 +1078,14 @@ if os.environ.get("STIGLITZ_DEDUP", "1") != "0":
     except Exception as _dd_e:
         print(f"[!] dedup: falhou ({_dd_e}) — mantendo findings não-deduplicados")
 
+# Agrupa os Security Headers replicados (mesmo header ausente em N hosts) num único
+# card com affected_urls — DEPOIS do dedup (que já uniu o mesmo header no mesmo host
+# cross-source). Roda após o dedup de propósito: feito antes, vários cards herdariam
+# o mesmo host representativo e o fuzzy do dedup os fundiria por título similar,
+# perdendo a contagem. render_finding desenha a seção "Affected URLs"; hosts preservados.
+import finding_group as _fgroup
+_all_f_raw = _fgroup.group_by_name(_all_f_raw, sources=("Security Headers",))
+
 # ── Enriquecimento de criticidade CVSS 3.1 (Environmental + Temporal KEV/EPSS)
 # Chamado AQUI — após injeção de sinais CVE nos findings Nuclei — para que
 # todos os tipos de finding recebam cvss_vector, cvss_environmental, severity_tool,
@@ -2480,6 +2488,10 @@ try:
                 "exploit_intel": f.get("exploit_intel"),
                 "fingerprint": f.get("fingerprint"),
                 "state": f.get("state"),
+                # Agrupamento de findings replicados (Security Headers / alertas ZAP):
+                # nº de hosts afetados e a lista. Omitidos quando ausentes (singleton).
+                "affected_count": f.get("affected_count"),
+                "affected_urls": f.get("affected_urls"),
             }.items() if v is not None or k in ("id","name","severity","source","url",
                                                   "cve_ids","cvss","in_kev","description",
                                                   "remediation","risk_score","epss")}
