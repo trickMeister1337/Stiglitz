@@ -35,6 +35,7 @@ except Exception:
     repro = None
 import scope  # noqa: E402  (fronteira de escopo p/ alertas de scanner)
 import finding_quality  # noqa: E402  (FP de disclosure ruidoso + enriquecimento JS)
+import evidence_render as _evrender  # noqa: E402  (evidência gigante → arquivo lateral linkado)
 REPRO_RAW = os.environ.get("STIGLITZ_REPRO_RAW") == "1"
 
 # Tabelas CWE → CVSS sintético, impacto, remediação + helpers cwe_enrich/
@@ -1257,6 +1258,32 @@ def _decode_cvss_vector(vec):
     if ui: bits.append(f"Interaction: {ui}")
     return " · ".join(bits)
 
+def _evidence_html(label, content):
+    """Renderiza um <tr> de evidência. Conteúdo pequeno segue inline na .evidence-box
+    (já rolável); conteúdo gigante (ex.: spec OpenAPI inteira de um 'Public Swagger
+    API') é gravado em evidence/ev_<hash>.txt e linkado a partir de um trecho — HTML
+    leve, evidência point-in-time preservada no arquivo."""
+    plan = _evrender.plan_evidence(content)
+    if plan["mode"] == "inline":
+        return f'\n    <tr><th>{label}</th><td><div class="evidence-box">{html.escape(content)}</div></td></tr>'
+    rel = ""
+    try:
+        ev_dir = os.path.join(OUTDIR, "evidence")
+        os.makedirs(ev_dir, exist_ok=True)
+        with open(os.path.join(ev_dir, plan["filename"]), "w", encoding="utf-8") as _fh:
+            _fh.write(plan["content"])
+        rel = f"evidence/{plan['filename']}"
+    except OSError:
+        rel = ""
+    link = (f'<a href="{html.escape(rel)}" target="_blank" style="color:#388bfd;font-size:12px;font-weight:600">'
+            f'View full evidence ({plan["kb"]} KB) ↗</a>' if rel
+            else f'<em style="font-size:12px;color:#888">full evidence omitted ({plan["kb"]} KB)</em>')
+    return (f'\n    <tr><th>{label}</th><td>'
+            f'<div class="evidence-box">{html.escape(plan["snippet"])}'
+            f'\n\n… [truncated — showing first {plan["snippet_kb"]} KB of {plan["kb"]} KB]</div>'
+            f'<div style="margin-top:6px">{link}</div></td></tr>')
+
+
 def render_finding(f):
     # Enriquecer CVE com dados NVD/EPSS se disponível
     cve_val = f.get('cve','N/A')
@@ -1360,11 +1387,11 @@ def render_finding(f):
         _res_match  = re.search(r"--- HTTP RESPONSE ---\n(.*?)(?=---|$)", _ev_full, re.DOTALL)
         _ev_other   = re.sub(r"--- HTTP (REQUEST|RESPONSE) ---\n.*?(?=---|$)", "", _ev_full, flags=re.DOTALL).strip()
         if _ev_other:
-            rows += f'\n    <tr><th>Evidence</th><td><div class="evidence-box">{html.escape(_ev_other)}</div></td></tr>'
+            rows += _evidence_html("Evidence", _ev_other)
         if _req_match:
-            rows += f'\n    <tr><th>HTTP Request</th><td><div class="evidence-box">{html.escape(_req_match.group(1).strip())}</div></td></tr>'
+            rows += _evidence_html("HTTP Request", _req_match.group(1).strip())
         if _res_match:
-            rows += f'\n    <tr><th>HTTP Response</th><td><div class="evidence-box">{html.escape(_res_match.group(1).strip())}</div></td></tr>'
+            rows += _evidence_html("HTTP Response", _res_match.group(1).strip())
     if f.get('affected_count', 0) > 1:
         n = f['affected_count']
         urls_sample = f.get('affected_urls', [])
