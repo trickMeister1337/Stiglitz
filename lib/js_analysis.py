@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pii_detect import extract_pii, build_pii_findings
 import finding_quality as fq
+import js_chunks
 
 OUTDIR, TARGET, DOMAIN = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(os.path.join(OUTDIR,"raw","js_files"), exist_ok=True)
@@ -26,9 +27,10 @@ def fetch(url, timeout=15):
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         with netproxy.urlopen(req, timeout=timeout, context=ctx) as r:
-            return r.read().decode("utf-8", errors="replace"), r.status
+            return (r.read().decode("utf-8", errors="replace"), r.status,
+                    r.headers.get("Content-Type", ""))
     except Exception as e:
-        return None, str(e)
+        return None, str(e), ""
 
 def normalize(url, base):
     if not url or url.startswith(("data:","javascript:","mailto:","#")): return None
@@ -54,7 +56,7 @@ while pages and count < MAX_PAGES:
     url = pages.pop()
     if url in crawled: continue
     crawled.add(url); count += 1
-    content, status = fetch(url)
+    content, status, _ct = fetch(url)
     if not content: continue
     # Extract <script src>
     for m in re.finditer(r'<script[^>]+src=["\']([^"\']+)["\']', content, re.IGNORECASE):
@@ -146,14 +148,33 @@ pii_source = None
 _corp_domains = [DOMAIN] + [d.strip() for d in
                  os.environ.get("STIGLITZ_CORP_DOMAINS", "").split(",") if d.strip()]
 
-for js_url in js_list:
+# Worklist (fila) em vez de iterar js_list direto: permite enfileirar os lazy
+# chunks webpack descobertos no entry bundle durante a varredura.
+worklist = list(js_list)
+seen_js = set()
+chunks_added = 0
+wi = 0
+while wi < len(worklist):
+    js_url = worklist[wi]; wi += 1
+    if js_url in seen_js: continue
+    seen_js.add(js_url)
     print(f"  [>] {js_url[:80]}")
-    content, status = fetch(js_url)
+    content, status, ctype = fetch(js_url)
     if not content: continue
+    # Anti-FP: SPA com catch-all devolve index.html (200, text/html) p/ path
+    # inexistente; não tratar HTML como JS (origem de falso "secret em bundle").
+    if not js_chunks.is_js_payload(ctype, content):
+        print(f"  [skip não-JS] {js_url[:70]} (Content-Type={ctype or '?'})")
+        continue
     fname = hashlib.md5(js_url.encode()).hexdigest()[:8] + ".js"
     fpath = os.path.join(OUTDIR,"raw","js_files",fname)
     with open(fpath,"w",encoding="utf-8") as f: f.write(content)
     js_stats.append({"url":js_url,"size_kb":len(content)//1024,"file":fname})
+
+    # Lazy chunks webpack (i.u): não aparecem como <script src>; resolve e enfileira.
+    for cu in js_chunks.webpack_chunk_urls(content, js_url):
+        if DOMAIN in cu and cu not in seen_js and cu not in worklist:
+            worklist.append(cu); chunks_added += 1
 
     for pattern, label in SECRET_PATTERNS:
         for m in re.finditer(pattern, content, re.IGNORECASE|re.MULTILINE):
@@ -233,7 +254,8 @@ results = {"target":TARGET,"domain":DOMAIN,"js_files":js_stats,
 with open(os.path.join(OUTDIR,"raw","js_analysis.json"),"w",encoding="utf-8") as f:
     json.dump(results, f, ensure_ascii=False, indent=2)
 
-print(f"  [✓] {len(all_secrets)} secret(s) | {len(all_endpoints)} endpoint(s) | {len(all_frameworks)} framework(s)")
+print(f"  [✓] {len(js_stats)} JS varrido(s) (+{chunks_added} chunk webpack) | "
+      f"{len(all_secrets)} secret(s) | {len(all_endpoints)} endpoint(s) | {len(all_frameworks)} framework(s)")
 print(f"  [✓] PII: {len(pii['emails_corporate'])} e-mail corp | {len(pii['cpf'])} CPF | "
       f"{len(pii['cnpj'])} CNPJ | {len(pii['phones'])} tel → {len(pii_findings)} finding(s)")
 print(f"  [✓] {len(probed)} endpoint(s) verificado(s)")
