@@ -7,13 +7,22 @@ via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, re, json, os
 
+import httpx_parse
+
 outdir, target = sys.argv[1], sys.argv[2].rstrip("/")
 
 tech_inventory = {}  # { "TechName": {"version": "x.y.z", "source": "...", "confidence": "..."} }
 
-# 1. Parse httpx_results.txt para extrair tech-detect
+# 1. Tech-detect do httpx. Preferimos a saída estruturada -json (raw/httpx_results.jsonl):
+# ela separa `tech`/`webserver` do `title`, evitando que título HTTP ("Not Found") e
+# flags (HSTS) sejam tratados como tecnologia (Bug #1). Fallback ao parse de colchetes
+# do .txt legado quando o JSONL não existe (scan antigo / degradação).
+jsonl_file = os.path.join(outdir, "raw", "httpx_results.jsonl")
 httpx_file = os.path.join(outdir, "raw", "httpx_results.txt")
-if os.path.exists(httpx_file):
+if os.path.exists(jsonl_file):
+    with open(jsonl_file, errors="replace") as f:
+        tech_inventory.update(httpx_parse.tech_inventory(httpx_parse.parse_jsonl(f.read())))
+elif os.path.exists(httpx_file):
     for line in open(httpx_file, errors="replace"):
         line = line.strip()
         brackets = re.findall(r'\[([^\]]+)\]', line)

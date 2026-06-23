@@ -52,6 +52,66 @@ class TestEmailSecurityClassifiers(unittest.TestCase):
         self.assertEqual(classify_dkim([])["status"], "NOT_FOUND")
 
 
+class TestOrganizationalDomain(unittest.TestCase):
+    def test_subdomain_reduces_to_etld_plus_one(self):
+        from email_security import organizational_domain
+        self.assertEqual(
+            organizational_domain("webapp.example.com"), "example.com")
+
+    def test_apex_is_unchanged(self):
+        from email_security import organizational_domain
+        self.assertEqual(organizational_domain("example.com"), "example.com")
+
+    def test_compound_tld_keeps_three_labels(self):
+        from email_security import organizational_domain
+        self.assertEqual(organizational_domain("api.foo.com.br"), "foo.com.br")
+
+
+class TestDmarcOrganizationalInheritance(unittest.TestCase):
+    def test_missing_at_fqdn_but_org_enforces_is_not_high(self):
+        # RFC 7489 §6.6.3: sem DMARC no subdomínio, a política do domínio
+        # organizacional governa — não é "MISSING/HIGH".
+        from email_security import classify_dmarc
+        r = classify_dmarc([], "webapp.example.com",
+                           org_records=["v=DMARC1; p=quarantine"],
+                           org_domain="example.com")
+        self.assertNotEqual(r["severity"], "high")
+        self.assertEqual(r.get("inherited_from"), "example.com")
+        self.assertEqual(r.get("policy"), "quarantine")
+
+    def test_inherited_subdomain_policy_overrides_p(self):
+        # sp= governa subdomínios; p=reject + sp=none => subdomínio é monitor-only.
+        from email_security import classify_dmarc
+        r = classify_dmarc([], "sub.example.com",
+                           org_records=["v=DMARC1; p=reject; sp=none"],
+                           org_domain="example.com")
+        self.assertEqual(r.get("policy"), "none")
+        self.assertNotEqual(r["severity"], "none")
+
+    def test_missing_everywhere_still_high(self):
+        from email_security import classify_dmarc
+        r = classify_dmarc([], "sub.example.com",
+                           org_records=[], org_domain="example.com")
+        self.assertEqual(r["status"], "MISSING")
+        self.assertEqual(r["severity"], "high")
+
+    def test_no_mx_downgrades_missing_dmarc(self):
+        from email_security import classify_dmarc
+        r = classify_dmarc([], "webapp.example.com",
+                           org_records=[], host_has_mx=False)
+        self.assertNotEqual(r["severity"], "high")
+
+    def test_no_mx_downgrades_missing_spf(self):
+        from email_security import classify_spf
+        r = classify_spf([], host_has_mx=False)
+        self.assertNotEqual(r["severity"], "high")
+
+    def test_existing_spf_signature_unchanged_without_mx_arg(self):
+        # Retrocompat: chamada legada (sem host_has_mx) preserva HIGH.
+        from email_security import classify_spf
+        self.assertEqual(classify_spf([])["severity"], "high")
+
+
 class TestVerdict(unittest.TestCase):
     def _records(self, spf_status="MISSING", dmarc_status="MISSING", dmarc_policy=None):
         return {

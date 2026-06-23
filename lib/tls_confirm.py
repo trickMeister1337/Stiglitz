@@ -77,6 +77,33 @@ def verdict(testssl_id, ciphers):
     return "inconclusive"
 
 
+# Severidades do testssl que contam como "problema" (espelha stiglitz_report.py).
+_TLS_ISSUE_SEVERITIES = ("CRITICAL", "HIGH", "WARN", "LOW")
+
+
+def count_terminal_tls_issues(findings):
+    """Conta problemas TLS reais espelhando o filtro do stiglitz_report.py.
+
+    Aceita a lista de findings ou o wrapper `{"scanResult":[{"findings":[...]}]}`.
+    Exclui: severidades fora de CRITICAL/HIGH/WARN/LOW, o metadado `scanTime`, e
+    artefatos do scanner local ("not supported by local OpenSSL"). Deduplica por
+    `id` (o testssl varre múltiplos IPs A-record → mesmo id repetido).
+    """
+    if isinstance(findings, dict):
+        findings = findings.get("scanResult", [{}])[0].get("findings", [])
+    seen = set()
+    for f in findings or []:
+        if f.get("severity", "").upper() not in _TLS_ISSUE_SEVERITIES:
+            continue
+        fid = f.get("id", "")
+        if fid == "scanTime" or fid in seen:
+            continue
+        if "not supported by local openssl" in f.get("finding", "").lower():
+            continue
+        seen.add(fid)
+    return len(seen)
+
+
 def _nmap_runner(host, port):
     """Runner real: nmap ssl-enum-ciphers. Retorna stdout (texto) ou ''."""
     try:
@@ -114,7 +141,14 @@ def _main(argv):
         port = argv[2] if len(argv) > 2 else "443"
         print(json.dumps(confirm(host, port), ensure_ascii=False))
         return 0
-    sys.stderr.write("uso: tls_confirm.py confirm <host> [port]\n")
+    if len(argv) >= 2 and argv[0] == "count":
+        try:
+            with open(argv[1], encoding="utf-8") as fh:
+                print(count_terminal_tls_issues(json.load(fh)))
+        except Exception:
+            print(0)
+        return 0
+    sys.stderr.write("uso: tls_confirm.py confirm <host> [port] | count <testssl.json>\n")
     return 2
 
 

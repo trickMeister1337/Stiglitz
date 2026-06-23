@@ -770,10 +770,18 @@ phase_banner "FASE 2/11: MAPEAMENTO DE SUPERFÍCIE"
 
 ACTIVE_COUNT=0
 if command -v httpx &>/dev/null; then
+    # Saída -json: separa title/tech/webserver (o tech_profile consome o JSONL e
+    # deixa de tratar título HTTP/flag HSTS como "tecnologia" — Bug #1).
     cat "$OUTDIR/raw/subdomains.txt" | \
-        httpx -silent -status-code -title -tech-detect -timeout 5 \
+        httpx -silent -json -status-code -title -tech-detect -timeout 5 \
               "${_PROXY_GO[@]}" \
-              -o "$OUTDIR/raw/httpx_results.txt" 2>"$OUTDIR/raw/httpx_error.log"
+              -o "$OUTDIR/raw/httpx_results.jsonl" 2>"$OUTDIR/raw/httpx_error.log"
+    # Deriva o httpx_results.txt legado (URL na 1ª coluna + tokens CDN/tech p/ o grep
+    # de edge) que security_headers/openapi_discover e o detector de LB ainda esperam.
+    if [ -s "$OUTDIR/raw/httpx_results.jsonl" ]; then
+        python3 "$SCRIPT_DIR/lib/httpx_parse.py" to-txt "$OUTDIR/raw/httpx_results.jsonl" \
+            > "$OUTDIR/raw/httpx_results.txt" 2>/dev/null
+    fi
     [ -f "$OUTDIR/raw/httpx_results.txt" ] && \
         ACTIVE_COUNT=$(grep -c . "$OUTDIR/raw/httpx_results.txt" 2>/dev/null); ACTIVE_COUNT=${ACTIVE_COUNT:-0}
     echo -e "  ${GREEN}[✓] $ACTIVE_COUNT subdomínio(s) ativo(s) detectado(s)${NC}"
@@ -1346,13 +1354,10 @@ if [ -n "$TLS_PID" ] && kill -0 "$TLS_PID" 2>/dev/null; then
 fi
 # Coletar resultado testssl agora que terminou
 if [ -f "$OUTDIR/raw/testssl.json" ] && [ -s "$OUTDIR/raw/testssl.json" ]; then
-    TLS_ISSUES=$(python3 -c "
-import json
-try:
-    data = json.load(open('$OUTDIR/raw/testssl.json'))
-    findings = data if isinstance(data, list) else data.get('scanResult',[{}])[0].get('findings',[])
-    print(len([f for f in findings if f.get('severity','') in ('WARN','HIGH','CRITICAL','LOW')]))
-except: print(0)" 2>/dev/null)
+    # Contagem alinhada ao stiglitz_report.py (lib/tls_confirm.py): dedup por id,
+    # ignora scanTime e artefatos do OpenSSL local — evita divergir do findings.json.
+    TLS_ISSUES=$(python3 "$SCRIPT_DIR/lib/tls_confirm.py" count "$OUTDIR/raw/testssl.json" 2>/dev/null)
+    TLS_ISSUES=${TLS_ISSUES:-0}
     echo -e "  ${GREEN}[✓] testssl concluído — $TLS_ISSUES problema(s) TLS detectado(s)${NC}"
     # Cross-check de NULL/anon cipher: o testssl reporta cipherlist_NULL/aNULL
     # "offered" de forma FALSA atrás de LB/WAF (AWS ALB) — um único HIGH/CRITICAL

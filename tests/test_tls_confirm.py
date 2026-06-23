@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import tls_confirm as tc  # noqa: E402
 
-# Saída real do nmap ssl-enum-ciphers contra um ALB AWS (pos.bee2pay.com): só
+# Saída real do nmap ssl-enum-ciphers contra um ALB AWS (pos.example.com): só
 # ciphers grade A. O testssl reportou NULL/aNULL "offered" (CRITICAL) — FP.
 NMAP_STRONG = """\
 | ssl-enum-ciphers:
@@ -99,3 +99,46 @@ def test_confirm_uses_injected_runner_no_network():
     assert result["verdicts"]["cipherlist_NULL"] == "refuted"
     assert result["verdicts"]["cipherlist_aNULL"] == "refuted"
     assert "TLS_AKE_WITH_AES_128_GCM_SHA256" in result["ciphers"]
+
+
+# ── Bug #3: contagem de problemas TLS do terminal (count_terminal_tls_issues) ──
+# O contador do terminal (stiglitz.sh) divergia do findings.json: contava
+# artefatos do scanner local ("not supported by local OpenSSL"), o metadado
+# scanTime e duplicava o mesmo id por múltiplos IPs A-record. Os critérios devem
+# espelhar o stiglitz_report.py.
+
+def test_count_ignores_local_openssl_artifact():
+    findings = [
+        {"id": "RC4", "severity": "WARN", "finding": "RC4: not supported by local OpenSSL"},
+        {"id": "cipherlist_3DES_IDEA", "severity": "LOW", "finding": "offered"},
+    ]
+    assert tc.count_terminal_tls_issues(findings) == 1
+
+
+def test_count_dedups_same_id_across_ips():
+    findings = [
+        {"id": "CAA", "severity": "LOW", "finding": "missing", "ip": "1.2.3.4"},
+        {"id": "CAA", "severity": "LOW", "finding": "missing", "ip": "5.6.7.8"},
+    ]
+    assert tc.count_terminal_tls_issues(findings) == 1
+
+
+def test_count_ignores_scantime_and_ok():
+    findings = [
+        {"id": "scanTime", "severity": "INFO", "finding": "120"},
+        {"id": "TLS1", "severity": "OK", "finding": "not offered"},
+        {"id": "BREACH", "severity": "WARN", "finding": "potentially vulnerable"},
+    ]
+    assert tc.count_terminal_tls_issues(findings) == 1
+
+
+def test_count_handles_scanresult_wrapper():
+    data = {"scanResult": [{"findings": [
+        {"id": "BREACH", "severity": "WARN", "finding": "vuln"},
+        {"id": "scanTime", "severity": "INFO", "finding": "10"},
+    ]}]}
+    assert tc.count_terminal_tls_issues(data) == 1
+
+
+def test_count_empty_is_zero():
+    assert tc.count_terminal_tls_issues([]) == 0

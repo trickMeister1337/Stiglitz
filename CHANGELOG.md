@@ -4,6 +4,10 @@ All notable changes to Stiglitz are documented here. Dates are approximate.
 
 ## Unreleased
 
+- **Correções de credibilidade do deliverable (3 apontamentos de validação ao vivo)** — três fontes de ruído/FP que chegavam ao relatório:
+  - **Tech inventory poluído (`lib/tech_profile.py`)** — a Fase 2 passou a emitir `httpx -json` (`raw/httpx_results.jsonl`); o novo `lib/httpx_parse.py` deriva o inventário de `tech`/`webserver` (nunca do `title`), então título HTTP (`Not Found`) e flag `HSTS` deixam de virar "tecnologia". Efeito colateral resolvido: o framework real (ex.: Django) volta a ser detectado → dispara nuclei tags + ffuf profile dirigidos. O `httpx_results.txt` legado é regenerado a partir do JSONL (URL na 1ª coluna + tokens CDN/tech para o detector de edge).
+  - **DMARC organizacional (`lib/email_security.py`)** — RFC 7489 §6.6.3: sem DMARC no FQDN, sobe ao domínio organizacional (eTLD+1) e honra a política herdada (`sp=` governa subdomínios) antes de cravar MISSING — elimina o HIGH falso de spoofing em subdomínios cobertos pelo apex. Acrescenta downgrade MX-aware (host sem MX não envia/recebe email → impacto rebaixado) para SPF e DMARC.
+  - **Contagem TLS do terminal (`lib/tls_confirm.py`)** — `count_terminal_tls_issues` espelha o filtro do `stiglitz_report.py` (dedup por `id`, ignora `scanTime` e artefatos "not supported by local OpenSSL"); o `stiglitz.sh` passou a usá-la, eliminando a divergência entre o sumário do terminal e o `findings.json`.
 - **bizlogic no scan (Fase P9.7)** — `lib/bizlogic_scan.py` ativa a engine de lógica de negócio/authz no `stiglitz.sh`. Read-only (idor_read/privesc) auto-derivado do histórico ZAP + tokens; mutantes opt-in via `--bizlogic-mutate` + `bizlogic.yaml` + gating de profile (production→dry-run) + RoE. Findings deduplicados contra a P9.5 (access control) por `(host, path, vuln_class)` — a P9.5 confirmada vence. `lib/bizlogic.py` permanece intacto.
 
 ## v8.1 — Backlog menor: validators completos, PCI ampliado, OAuth no ZAP
