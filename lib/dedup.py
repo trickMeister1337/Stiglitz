@@ -66,11 +66,33 @@ def _cve_str(f):
     return str(v or "")
 
 
+_JS_LIB_RE = re.compile(r"vulnerable js library:\s*(.+?)\s+[\w.\-]+\s*$", re.I)
+
+
+def _component(f):
+    """Identidade do componente p/ findings SCA (lib vulnerável), senão None.
+
+    Diferencia axios/pdf.js/quill (todos CWE-1395, títulos templatizados) p/ que
+    NÃO sejam fundidos. Lê o campo `component` (emitido por retire_parse) com
+    fallback de parse do nome ('Vulnerable JS library: <comp> <versão>')."""
+    c = f.get("component")
+    if c:
+        return str(c).strip().lower()
+    if f.get("type") == "vulnerable_js_library":
+        m = _JS_LIB_RE.match(str(f.get("name") or f.get("title") or ""))
+        if m:
+            return m.group(1).strip().lower()
+    return None
+
+
 def _shim(f):
     """View normalizada p/ fingerprint/vuln_class — tolera scan(url) e RED(target)."""
     return {"url": _url(f), "host": _host(f), "param": f.get("param", ""),
             "cwe": f.get("cwe", ""), "cve": _cve_str(f),
-            "type": f.get("type", ""), "name": f.get("name") or f.get("title", "")}
+            "type": f.get("type", ""), "name": f.get("name") or f.get("title", ""),
+            # component@version entra no fingerprint (estágio-1) p/ não colapsar
+            # libs distintas que caem na MESMA URL (mesmo chunk).
+            "component": _component(f) or "", "version": f.get("version", "")}
 
 
 def _fp_of(f):
@@ -129,6 +151,12 @@ def _missing_header_key(f):
 
 def _score(a, b):
     """Score combinado [0,1]. CVE compartilhado -> 1.0 (merge imediato)."""
+    # Componentes SCA distintos (axios vs pdf.js) NUNCA são o mesmo finding —
+    # mesmo com CWE-1395 + título templatizado + evidência parecida (que de outro
+    # modo passariam do threshold no estágio-2 fuzzy).
+    ca, cb = _component(a), _component(b)
+    if ca and cb and ca != cb:
+        return 0.0
     if _cves(a) & _cves(b):
         return 1.0
     if _host(a) != _host(b):                        # defensivo (já blocado por host)

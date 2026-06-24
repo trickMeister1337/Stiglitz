@@ -12,6 +12,8 @@ import cvss
 import vuln_catalog
 import asset_classifier
 
+_SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
 # Fallback estimado: severidade qualitativa → vetor base conservador.
 _ESTIMATED = {
     "critical": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
@@ -75,13 +77,26 @@ def score_finding(finding, asset_class="default", confirmed=False,
     base_s = cvss.base_score(m)
     temp_s = cvss.temporal_score(m)
     env_s = cvss.environmental_score(m)
+
+    sev_final = cvss.band(env_s)
+    sev_tool = (finding.get("severity") or "info").lower()
+    # Piso p/ score_source == "estimated": o vetor base foi retro-derivado da
+    # própria severity_tool (não há CVSS real do NVD/catálogo), então deixar o
+    # temporal/environmental REBAIXAR a banda abaixo da ferramenta dá precisão
+    # falsa a uma estimativa e descarta avaliação curada (ex.: advisory do
+    # retire.js que marca axios como critical). O environmental ainda pode
+    # ELEVAR (ativo CDE, confirmação) — é piso, nunca teto. Para nvd/catalog o
+    # modelo governa livremente (rebaixa e eleva).
+    if source == "estimated" and _SEV_RANK.get(sev_tool, 0) > _SEV_RANK.get(sev_final, 0):
+        sev_final = sev_tool
+
     return {
         "cvss_vector": cvss.to_vector(m),
         "cvss_base": base_s,
         "cvss_temporal": temp_s,
         "cvss_environmental": env_s,
-        "severity": cvss.band(env_s),
-        "severity_tool": (finding.get("severity") or "info").lower(),
+        "severity": sev_final,
+        "severity_tool": sev_tool,
         "score_source": source,
         "asset_class": asset_class,
         "cwe": cwe,

@@ -20,6 +20,50 @@ def test_exact_cross_tool_merge():
     assert out[0]["merge_score"] == 1.0             # bucket exato
 
 
+def _js_lib(component, version, sev, url, cve=""):
+    return {"source": "retire.js", "tool": "retire.js", "type": "vulnerable_js_library",
+            "cwe": "CWE-1395", "component": component, "version": version,
+            "name": f"Vulnerable JS library: {component} {version}", "severity": sev,
+            "cve": cve, "url": url,
+            "evidence": f"retire.js flagged {component} {version} as vulnerable"}
+
+
+def test_distinct_vulnerable_libraries_not_merged():
+    # axios/pdf.js/quill são componentes DISTINTOS — não podem colapsar num só
+    # (mesmo com CWE-1395 compartilhado + títulos templatizados). Antes do fix,
+    # o dedup os fundia e pdf.js/quill sumiam do relatório.
+    fs = [
+        _js_lib("axios", "0.21.4", "critical", "https://h/static/js/958.a6.js", "CVE-2023-45857"),
+        _js_lib("pdf.js", "2.16.105", "high", "https://h/static/js/311.b0.js", "CVE-2024-4367"),
+        _js_lib("quill", "1.3.7", "medium", "https://h/static/js/55.bd.js", "CVE-2021-3163"),
+    ]
+    out = D.dedupe(fs)
+    names = sorted(f["component"] for f in out)
+    assert names == ["axios", "pdf.js", "quill"], f"esperava 3 libs, veio {names}"
+
+
+def test_distinct_libraries_in_same_chunk_not_merged():
+    # Caso real: retire atribui axios E pdf.js ao MESMO chunk → mesma URL. Sem
+    # componente na identidade, o estágio-1 (fingerprint) os colapsava.
+    url = "https://h/static/js/958.a697a0dc.js"
+    out = D.dedupe([
+        _js_lib("axios", "0.21.4", "critical", url, "CVE-2023-45857"),
+        _js_lib("pdf.js", "2.16.105", "high", url, "CVE-2024-4367"),
+    ])
+    assert len(out) == 2
+
+
+def test_same_library_across_chunks_still_merges():
+    # A MESMA lib/versão em dois arquivos é uma duplicata legítima → colapsa em 1,
+    # agregando as localizações (não regredir o dedup correto).
+    out = D.dedupe([
+        _js_lib("axios", "0.21.4", "high", "https://h/static/js/958.a6.js", "CVE-2023-45857"),
+        _js_lib("axios", "0.21.4", "high", "https://h/static/js/311.b0.js", "CVE-2023-45857"),
+    ])
+    assert len(out) == 1
+    assert len(out[0]["endpoints"]) == 2
+
+
 def test_path_variant_collapse():
     fs = [{"cwe": "CWE-89", "url": f"http://t/user/{i}/orders", "param": "id",
            "name": "SQLi", "severity": "high", "tool": "nuclei"} for i in (1, 2, 3)]

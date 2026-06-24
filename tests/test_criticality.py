@@ -238,7 +238,50 @@ class TestScoreFinding(unittest.TestCase):
         f = {"name": "Algo", "severity": "high"}
         out = cr.score_finding(f, asset_class="default", confirmed=False)
         self.assertEqual(out["score_source"], "estimated")
-        self.assertEqual(out["severity"], "medium")
+        # Piso: o vetor estimado é retro-derivado da própria severity_tool, então
+        # temporal/environmental não devem REBAIXAR abaixo dela (seria precisão
+        # falsa). Antes esta banda caía p/ "medium"; agora é pisada em "high".
+        self.assertEqual(out["severity"], "high")
+
+    def test_estimated_critical_not_downgraded_below_tool(self):
+        import criticality as cr
+        # Caso retire.js (axios): severity 'critical', CWE-1395 (ausente do
+        # catálogo) → score_source 'estimated'. Sem CVSS real, o temporal teórico
+        # (E:P/RC:R) reduzia 9.8→8.9 ("high"). O piso preserva 'critical'.
+        f = {"name": "Vulnerable JS library: axios 0.21.4",
+             "severity": "critical", "cwe": "CWE-1395"}
+        out = cr.score_finding(f, asset_class="cde", confirmed=False,
+                               in_kev=False, epss=0.0)
+        self.assertEqual(out["score_source"], "estimated")
+        self.assertEqual(out["severity"], "critical")
+        self.assertEqual(out["severity_tool"], "critical")
+
+    def test_estimated_floor_does_not_block_elevation(self):
+        import criticality as cr
+        # O piso nunca é um TETO: se o environmental elevar acima da ferramenta,
+        # a banda elevada prevalece (sev_tool 'low' não trava uma elevação).
+        f_lo = {"name": "x", "severity": "low"}
+        f_hi = {"name": "x", "severity": "high"}
+        out_lo = cr.score_finding(f_lo, asset_class="cde", confirmed=True,
+                                  in_kev=False, epss=0.9)
+        out_hi = cr.score_finding(f_hi, asset_class="cde", confirmed=True,
+                                  in_kev=False, epss=0.9)
+        _RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+        # severity 'low' como entrada não pode resultar em banda final menor que 'low'
+        self.assertGreaterEqual(_RANK[out_lo["severity"]], _RANK["low"])
+        # e nunca rebaixa a entrada 'high' abaixo de 'high'
+        self.assertGreaterEqual(_RANK[out_hi["severity"]], _RANK["high"])
+
+    def test_nvd_vector_still_downgrades_when_theoretical(self):
+        import criticality as cr
+        # Regressão: o piso é SÓ p/ estimated. Com CVSS real do NVD, o temporal
+        # teórico ainda pode rebaixar (critical→high) — comportamento preservado.
+        f = {"name": "RCE", "severity": "critical",
+             "cvss_vector_nvd": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}
+        out = cr.score_finding(f, asset_class="default", confirmed=False,
+                               in_kev=False, epss=0.0)
+        self.assertEqual(out["score_source"], "nvd")
+        self.assertEqual(out["severity"], "high")
 
     def test_confirmed_raises_score(self):
         import criticality as cr

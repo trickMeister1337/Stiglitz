@@ -31,6 +31,15 @@ def test_parse_extracts_library_vuln_with_cve():
     assert "jquery.min.js" in f["url"]
 
 
+def test_parse_emits_component_and_version_fields():
+    # component/version explícitos permitem identidade por-componente no
+    # fingerprint/dedup — sem eles, libs distintas (mesmo CWE-1395, mesmo host)
+    # colapsam numa só e findings reais (pdf.js, quill) somem do relatório.
+    f = R.parse(SAMPLE)[0]
+    assert f["component"] == "jquery"
+    assert f["version"] == "1.8.3"
+
+
 def test_parse_vuln_without_cve_maps_to_a06_cwe():
     data = {"data": [{"file": "x.js", "results": [{
         "component": "lodash", "version": "4.0.0",

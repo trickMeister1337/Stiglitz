@@ -46,6 +46,11 @@ def parse(retire_json, target="", url_map=None):
                     "type": "vulnerable_js_library",
                     "source": "retire.js",
                     "name": f"Vulnerable JS library: {component} {version}".strip(),
+                    # Identidade por-componente: o fingerprint/dedup usam isto p/ NÃO
+                    # colapsar libs distintas (mesmo CWE-1395) numa só — senão pdf.js,
+                    # quill etc. somem quando coexistem com uma lib de maior severidade.
+                    "component": component,
+                    "version": version,
                     # URL de origem > alvo do scan > basename. Nunca o caminho local.
                     "url": origin or target or short,
                     "severity": _norm_sev(vuln.get("severity")),

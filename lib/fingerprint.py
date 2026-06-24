@@ -38,12 +38,22 @@ def vuln_class(finding):
 
 
 def fingerprint(finding):
-    """Hash determinístico (16 hex) de (classe, host, path-template, param)."""
+    """Hash determinístico (16 hex) de (classe, host, path-template, param).
+
+    Para findings de componente vulnerável (SCA), a classe (CWE-1395) é a mesma
+    p/ todas as libs, então acrescentamos `component@version` à chave QUANDO
+    presente — sem isso, libs distintas no mesmo host/path colapsam numa só
+    identidade (e o dedup descarta as de menor severidade). O segmento extra só
+    aparece quando há `component`, então findings não-SCA mantêm o fingerprint
+    histórico (corpus geral e state cross-scan inalterados)."""
     host = urllib.parse.urlsplit(finding.get("url", "")).netloc or finding.get("host", "")
-    key = "|".join([
+    parts = [
         vuln_class(finding),
         host,
         normalize_path(finding.get("url", "")),
         str(finding.get("param", "") or ""),
-    ])
-    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    ]
+    comp = str(finding.get("component", "") or "").strip().lower()
+    if comp:
+        parts.append(comp + "@" + str(finding.get("version", "") or "").strip().lower())
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
