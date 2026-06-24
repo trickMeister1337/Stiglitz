@@ -19,7 +19,7 @@ Lógica pura (sem rede) + CLI (`chunks <entry.js> <entry_url>`).
 """
 import re
 import sys
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 # Objeto literal "achatado" (sem aninhamento) — chunk maps do webpack são planos.
 _FLAT_OBJ = re.compile(r"\{[^{}]*\}")
@@ -97,6 +97,93 @@ def is_js_payload(content_type, body):
     if "text/html" in (content_type or "").lower():
         return False
     return True
+
+
+# ── Descoberta de arquivos JS (crawl determinístico) ────────────────────
+# Paths-semente fixos varridos além do próprio alvo (rotas comuns de SPA onde
+# o entry bundle costuma ser referenciado).
+_SEED_PATHS = ("/", "/login", "/app", "/dashboard", "/api/docs/", "/swagger-ui/")
+_SCRIPT_SRC = re.compile(r'<script[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+# Referência a *.js / *.chunk.js embutida no HTML (webpack as injeta como string).
+_JS_REF = re.compile(r'["\']([^"\']*\.(?:js|chunk\.js)(?:\?[^"\']*)?)["\']')
+_HREF = re.compile(r'<a[^>]+href=["\']([^"\']+)["\']', re.IGNORECASE)
+_NON_PAGE_EXT = (".js", ".css", ".png", ".jpg", ".ico")
+
+
+def _normalize(url, base):
+    """Resolve uma URL relativa/protocolo-relativa contra `base` (ou None)."""
+    if not url or url.startswith(("data:", "javascript:", "mailto:", "#")):
+        return None
+    if url.startswith("//"):
+        return base.split("://")[0] + ":" + url
+    if url.startswith("/"):
+        p = urlparse(base)
+        return f"{p.scheme}://{p.netloc}{url}"
+    if not url.startswith("http"):
+        return urljoin(base, url)
+    return url
+
+
+def discovery_seeds(target):
+    """Páginas-semente do crawl em ordem FIXA (target + rotas comuns de SPA).
+
+    Dedup preservando ordem de inserção — base de uma seleção reprodutível.
+    """
+    p = urlparse(target)
+    base = f"{p.scheme}://{p.netloc}"
+    seeds, seen = [], set()
+    for u in [target] + [base + path for path in _SEED_PATHS]:
+        if u not in seen:
+            seen.add(u)
+            seeds.append(u)
+    return seeds
+
+
+def discover_js_urls(target, domain, fetch_fn, max_pages=8):
+    """Crawl de descoberta de arquivos JS — determinístico e sem rede própria.
+
+    `fetch_fn(url) -> (corpo|None, status, content_type)` é injetado (o chamador
+    decide como buscar; testável sem rede). A fronteira é uma LISTA (fila FIFO
+    por ordem de inserção), NUNCA um `set`: `set.pop()` tem ordem dependente do
+    PYTHONHASHSEED (varia por processo) e, sob o teto `max_pages`, fazia cada
+    execução varrer páginas diferentes → entry bundles/lazy-chunks diferentes →
+    findings de SCA (retire.js) divergentes entre scans do mesmo alvo.
+
+    Retorna a lista de URLs de JS no domínio, ordenada (`sorted`) — entrada
+    estável para o worklist a jusante.
+    """
+    queue = discovery_seeds(target)
+    queued = set(queue)
+    crawled, js_urls = set(), set()
+    count = 0
+    qi = 0
+    while qi < len(queue) and count < max_pages:
+        url = queue[qi]
+        qi += 1
+        if url in crawled:
+            continue
+        crawled.add(url)
+        count += 1
+        content, _status, _ct = fetch_fn(url)
+        if not content:
+            continue
+        for m in _SCRIPT_SRC.finditer(content):
+            u = _normalize(m.group(1), url)
+            if u and domain in u:
+                js_urls.add(u)
+        for m in _JS_REF.finditer(content):
+            u = _normalize(m.group(1), url)
+            if u and domain in u:
+                js_urls.add(u)
+        for m in _HREF.finditer(content):
+            u = _normalize(m.group(1), url)
+            if u and domain in u and not u.endswith(_NON_PAGE_EXT):
+                pu = urlparse(u)
+                nxt = f"{pu.scheme}://{pu.netloc}{pu.path}"
+                if nxt not in queued:
+                    queued.add(nxt)
+                    queue.append(nxt)
+    return sorted(js_urls)
 
 
 if __name__ == "__main__":

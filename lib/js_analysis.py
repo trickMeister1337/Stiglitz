@@ -32,48 +32,12 @@ def fetch(url, timeout=15):
     except Exception as e:
         return None, str(e), ""
 
-def normalize(url, base):
-    if not url or url.startswith(("data:","javascript:","mailto:","#")): return None
-    if url.startswith("//"): return base.split("://")[0] + ":" + url
-    if url.startswith("/"):
-        p = urllib.parse.urlparse(base)
-        return f"{p.scheme}://{p.netloc}{url}"
-    if not url.startswith("http"): return urllib.parse.urljoin(base, url)
-    return url
-
 # ── Fase 8a: Descoberta de arquivos JS ───────────────────────────
-pages = {TARGET}
-extra = ["/","/login","/app","/dashboard","/api/docs/","/swagger-ui/"]
-parsed = urllib.parse.urlparse(TARGET)
-for path in extra:
-    pages.add(f"{parsed.scheme}://{parsed.netloc}{path}")
-
-crawled, js_urls = set(), set()
-MAX_PAGES = 8
-count = 0
-
-while pages and count < MAX_PAGES:
-    url = pages.pop()
-    if url in crawled: continue
-    crawled.add(url); count += 1
-    content, status, _ct = fetch(url)
-    if not content: continue
-    # Extract <script src>
-    for m in re.finditer(r'<script[^>]+src=["\']([^"\']+)["\']', content, re.IGNORECASE):
-        u = normalize(m.group(1), url)
-        if u and DOMAIN in u: js_urls.add(u)
-    # Webpack chunks
-    for m in re.finditer(r'["\']([^"\']*\.(?:js|chunk\.js)(?:\?[^"\']*)?)["\']', content):
-        u = normalize(m.group(1), url)
-        if u and DOMAIN in u: js_urls.add(u)
-    # Links for next pages
-    for m in re.finditer(r'<a[^>]+href=["\']([^"\']+)["\']', content, re.IGNORECASE):
-        u = normalize(m.group(1), url)
-        if u and DOMAIN in u and not u.endswith((".js",".css",".png",".jpg",".ico")):
-            pu = urllib.parse.urlparse(u)
-            pages.add(f"{pu.scheme}://{pu.netloc}{pu.path}")
-
-js_list = sorted(js_urls)
+# Crawl determinístico (lib/js_chunks.discover_js_urls): a fronteira é uma LISTA
+# (ordem de inserção), não um set — set.pop() tem ordem dependente do
+# PYTHONHASHSEED (varia por processo) e, sob o teto de páginas, fazia cada scan
+# varrer páginas/chunks diferentes → findings de SCA (retire.js) divergentes.
+js_list = js_chunks.discover_js_urls(TARGET, DOMAIN, fetch)
 with open(os.path.join(OUTDIR,"raw","js_urls.txt"),"w") as f:
     f.write("\n".join(js_list))
 print(f"  [✓] {len(js_list)} arquivo(s) JS descoberto(s)")

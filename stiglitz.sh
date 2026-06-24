@@ -54,6 +54,10 @@ BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 # Diretório do script — usado para localizar lib/ e stiglitz_report.py
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Lock por-host (serializa scans concorrentes do MESMO alvo — ver lib/host_lock.sh)
+# shellcheck source=lib/host_lock.sh
+[ -f "$SCRIPT_DIR/lib/host_lock.sh" ] && source "$SCRIPT_DIR/lib/host_lock.sh"
+
 # OAST (#2): por padrão -no-interactsh (sem callbacks externos — evita vazar para
 # servidores públicos). Se INTERACTSH_SERVER estiver setado (interactsh self-hosted,
 # ver lib/oob.py), liga o OAST do Nuclei para CONFIRMAR SSRF/RCE/SSTI/XXE CEGOS.
@@ -260,8 +264,9 @@ cleanup() {
         pkill -f "zaproxy.*-port ${ZAP_PORT}" 2>/dev/null || true
         echo -e "  ${GREEN}[✓] ZAP encerrado${NC}"
     fi
-    # Remover lockfile
+    # Remover lockfile (por-OUTDIR) e host-lock (PID-file por host)
     [ -n "${LOCKFILE:-}" ] && rm -f "$LOCKFILE" 2>/dev/null
+    [ -n "${STG_HOSTLOCK_FILE:-}" ] && rm -f "$STG_HOSTLOCK_FILE" 2>/dev/null
     [ "$_exit_code" -eq 130 ] && echo -e "\n  ${YELLOW}[!] Scan interrompido pelo usuário${NC}"
     exit "$_exit_code"
 }
@@ -426,6 +431,15 @@ if [ "$DRY_RUN" = true ]; then
     [ -n "$OSINT_DIR" ]   && echo -e "  OSINT:   ${OSINT_DIR}"
     echo -e "${GREEN}[DRY-RUN] Plano impresso — encerrando.${NC}"
     exit 0
+fi
+
+# ── Lock por-host: impede DUAS execuções concorrentes contra o MESMO host ──
+# O lock por-OUTDIR (abaixo) é por timestamp e NÃO cobre dois `stiglitz.sh
+# <mesmo-host>` lançados em paralelo — que disputam o daemon ZAP (porta fixa) e
+# o store de estado, contaminando os resultados. Adquirido ANTES do mkdir p/ não
+# deixar diretório de scan vazio quando recusado. (ver lib/host_lock.sh)
+if type stg_acquire_host_lock &>/dev/null; then
+    stg_acquire_host_lock "$DOMAIN" || exit 1
 fi
 
 # Criação do diretório de output só após passar pelo gate de dry-run

@@ -75,6 +75,9 @@ jobs:
       - name: Run RED shell suite (dry-run, no external tools)
         run: bash tests/test_stiglitz_red.sh
 
+      - name: Run host-lock shell suite
+        run: bash tests/test_host_lock.sh
+
   integration:
     name: Integration scan (Juice Shop)
     runs-on: ubuntu-latest
