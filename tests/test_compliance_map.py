@@ -98,6 +98,8 @@ def test_owasp_posture_returns_all_ten_categories_ordered():
     # cada item tem o shape esperado
     assert all(set(p) == {"category", "title", "verdict", "count",
                           "top_findings", "note"} for p in out)
+    assert all(p["note"] is None for p in out
+               if p["category"] not in ("A04:2021", "A08:2021", "A09:2021"))
 
 
 def test_owasp_posture_found_when_finding_maps_to_category():

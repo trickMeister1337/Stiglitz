@@ -178,7 +178,7 @@ _OWASP_COVERAGE = {
 # nota textual fixa para categorias parcial/manualmente cobertas.
 _OWASP_NOTES = {
     "A04:2021": "Design-level — requires manual review; not exercised by automated DAST.",
-    "A08:2021": "Insecure deserialization (CWE-502) is covered; CI/CD & SRI integrity require manual review.",
+    "A08:2021": "Largely manual — only insecure deserialization (CWE-502) surfaces via automated DAST; CI/CD & SRI integrity require manual review.",
     "A09:2021": "Not exercised by DAST — requires log/monitoring configuration review.",
 }
 
@@ -190,6 +190,7 @@ def _owasp_category(finding):
     antes do '-' para bater com _OWASP_CATEGORIES.
     """
     owasp = frameworks_for_cwe(extract_cwe(finding)).get("owasp", "")
+    # maxsplit=1: keep "A0N:2021"; the suffix after the first "-" is the title.
     return owasp.split("-", 1)[0] if owasp else None
 
 
