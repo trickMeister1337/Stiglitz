@@ -143,3 +143,90 @@ def pci_posture(findings, coverage=None):
         out.append({"req": req, "verdict": verdict, "count": n,
                     "top_findings": tops.get(req, [])})
     return out
+
+
+# ── OWASP Top 10 (2021) coverage — espelha o padrão pci_posture ──────────
+# Lista canônica (ordem oficial A01→A10) + título.
+_OWASP_CATEGORIES = [
+    ("A01:2021", "Broken Access Control"),
+    ("A02:2021", "Cryptographic Failures"),
+    ("A03:2021", "Injection"),
+    ("A04:2021", "Insecure Design"),
+    ("A05:2021", "Security Misconfiguration"),
+    ("A06:2021", "Vulnerable and Outdated Components"),
+    ("A07:2021", "Identification and Authentication Failures"),
+    ("A08:2021", "Software and Data Integrity Failures"),
+    ("A09:2021", "Security Logging and Monitoring Failures"),
+    ("A10:2021", "Server-Side Request Forgery"),
+]
+
+# categoria → capability-keys do _coverage; TESTED se QUALQUER uma rodou.
+# Lista vazia = NOT-COVERED por design (scan automatizado não exercita).
+_OWASP_COVERAGE = {
+    "A01:2021": ["webapp", "authz"],
+    "A02:2021": ["tls"],
+    "A03:2021": ["webapp"],
+    "A04:2021": [],
+    "A05:2021": ["headers", "webapp"],
+    "A06:2021": ["components", "retire"],
+    "A07:2021": ["authn", "webapp"],
+    "A08:2021": [],
+    "A09:2021": [],
+    "A10:2021": ["webapp"],
+}
+
+# nota textual fixa para categorias parcial/manualmente cobertas.
+_OWASP_NOTES = {
+    "A04:2021": "Design-level — requires manual review; not exercised by automated DAST.",
+    "A08:2021": "Insecure deserialization (CWE-502) is covered; CI/CD & SRI integrity require manual review.",
+    "A09:2021": "Not exercised by DAST — requires log/monitoring configuration review.",
+}
+
+
+def _owasp_category(finding):
+    """Prefixo 'A0N:2021' da categoria OWASP do finding, ou None.
+
+    _MAP guarda a string completa ('A03:2021-Injection'); casamos pelo prefixo
+    antes do '-' para bater com _OWASP_CATEGORIES.
+    """
+    owasp = frameworks_for_cwe(extract_cwe(finding)).get("owasp", "")
+    return owasp.split("-", 1)[0] if owasp else None
+
+
+def owasp_posture(findings, coverage=None):
+    """Veredito de cobertura por categoria OWASP Top 10 2021.
+
+    FOUND:       >=1 finding mapeado à categoria (count>0 sempre vence).
+    TESTED:      sem finding e alguma capability da categoria ativa em `coverage`.
+    NOT-COVERED: categoria sem capability automatizada (A04/A08/A09) ou nenhuma
+                 capability ativa neste scan (default conservador — nunca afirma
+                 cobertura falsa).
+
+    Retorna SEMPRE as 10 categorias (ordem A01→A10), cada uma:
+    {category, title, verdict, count, top_findings, note}. Puro — sem rede.
+    """
+    coverage = coverage or {}
+    counts, tops = {}, {}
+    for f in findings:
+        cat = _owasp_category(f)
+        if not cat:
+            continue
+        counts[cat] = counts.get(cat, 0) + 1
+        bucket = tops.setdefault(cat, [])
+        name = f.get("name")
+        if name and len(bucket) < 3:
+            bucket.append(name)
+    out = []
+    for cat, title in _OWASP_CATEGORIES:
+        n = counts.get(cat, 0)
+        if n > 0:
+            verdict = "FOUND"
+        elif any(coverage.get(c) for c in _OWASP_COVERAGE.get(cat, [])):
+            verdict = "TESTED"
+        else:
+            verdict = "NOT-COVERED"
+        out.append({"category": cat, "title": title, "verdict": verdict,
+                    "count": n,
+                    "top_findings": tops.get(cat, []) if n > 0 else [],
+                    "note": _OWASP_NOTES.get(cat)})
+    return out

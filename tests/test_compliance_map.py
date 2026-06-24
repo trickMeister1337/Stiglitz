@@ -88,3 +88,62 @@ def test_pci_posture_sorts_numerically():
     out = C.pci_posture([], coverage={})
     reqs = [p["req"] for p in out]
     assert reqs.index("2.2.1") < reqs.index("10.2.1")
+
+
+def test_owasp_posture_returns_all_ten_categories_ordered():
+    out = C.owasp_posture([], {})
+    assert [p["category"] for p in out] == [
+        "A01:2021", "A02:2021", "A03:2021", "A04:2021", "A05:2021",
+        "A06:2021", "A07:2021", "A08:2021", "A09:2021", "A10:2021"]
+    # cada item tem o shape esperado
+    assert all(set(p) == {"category", "title", "verdict", "count",
+                          "top_findings", "note"} for p in out)
+
+
+def test_owasp_posture_found_when_finding_maps_to_category():
+    f = {"name": "SQL Injection", "cwe": "CWE-89"}  # CWE-89 -> A03
+    out = {p["category"]: p for p in C.owasp_posture([f], {"webapp": True})}
+    assert out["A03:2021"]["verdict"] == "FOUND"
+    assert out["A03:2021"]["count"] == 1
+    assert out["A03:2021"]["top_findings"] == ["SQL Injection"]
+
+
+def test_owasp_posture_tested_when_capability_active_and_no_finding():
+    out = {p["category"]: p for p in C.owasp_posture([], {"webapp": True})}
+    assert out["A03:2021"]["verdict"] == "TESTED"
+    assert out["A03:2021"]["count"] == 0
+    assert out["A03:2021"]["top_findings"] == []
+
+
+def test_owasp_posture_not_covered_when_capability_inactive():
+    out = {p["category"]: p for p in C.owasp_posture([], {})}
+    assert out["A03:2021"]["verdict"] == "NOT-COVERED"
+
+
+def test_owasp_posture_a04_a08_a09_not_covered_by_design_with_note():
+    full = {"webapp": True, "authz": True, "tls": True, "headers": True,
+            "components": True, "retire": True, "authn": True}
+    out = {p["category"]: p for p in C.owasp_posture([], full)}
+    for cat in ("A04:2021", "A08:2021", "A09:2021"):
+        assert out[cat]["verdict"] == "NOT-COVERED", cat
+        assert out[cat]["note"], f"{cat} deveria ter nota textual"
+
+
+def test_owasp_posture_finding_overrides_not_covered_by_design():
+    # CWE-502 (insecure deserialization) -> A08, que é NOT-COVERED por design;
+    # havendo finding, count>0 vence e vira FOUND.
+    f = {"name": "Insecure deserialization", "cwe": "CWE-502"}
+    out = {p["category"]: p for p in C.owasp_posture([f], {})}
+    assert out["A08:2021"]["verdict"] == "FOUND"
+    assert out["A08:2021"]["count"] == 1
+
+
+def test_owasp_posture_a06_tested_via_retire_capability():
+    # A06 é coberto por 'components' OU 'retire'; só retire ativo já dá TESTED.
+    out = {p["category"]: p for p in C.owasp_posture([], {"retire": True})}
+    assert out["A06:2021"]["verdict"] == "TESTED"
+
+
+def test_owasp_posture_ignores_findings_without_cwe():
+    out_empty = C.owasp_posture([{"name": "no cwe here"}], {})
+    assert all(p["count"] == 0 for p in out_empty)
