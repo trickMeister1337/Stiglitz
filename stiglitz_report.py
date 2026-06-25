@@ -2277,6 +2277,7 @@ _coverage = {
     "tls":        _raw_has("testssl.json"),
     "webapp":     _raw_has("nuclei.json") or _raw_has("zap_alerts.json"),
     "components": _raw_has("nuclei.json"),
+    "retire":     _raw_has("retire_findings.json"),
     "authz":      _raw_has("access_control.json"),
     "authn":      _raw_has("access_control.json"),
     "logging":    False,
@@ -2311,6 +2312,41 @@ if _posture and _target_in_cde:
         "PASS = capability exercised, no finding; N/A = capability not exercised in this scan.</p>"
         "<table><tr><th>Requirement</th><th>Verdict</th><th>Findings</th><th>Top findings</th></tr>"
         + _rows + "</table>")
+
+# ── OWASP Top 10 (2021) Coverage — sempre visível (sem gate de CDE) ──
+# Apresentação separada da metodologia de criticidade: reagrupa os findings já
+# pontuados por categoria OWASP; NÃO altera severidade/ordenação/SLA.
+try:
+    _owasp_posture = _comp_map.owasp_posture(all_f, _coverage)
+except Exception as _owasp_e:
+    _owasp_posture = []
+    errors.append(f"owasp_posture: {_owasp_e}")
+owasp_section_html = ""
+if _owasp_posture:
+    _ocolor = {"FOUND": "#c0392b", "TESTED": "#27ae60", "NOT-COVERED": "#888"}
+    _ofound = sum(1 for p in _owasp_posture if p["verdict"] == "FOUND")
+    _otested = sum(1 for p in _owasp_posture if p["verdict"] == "TESTED")
+    _onc = sum(1 for p in _owasp_posture if p["verdict"] == "NOT-COVERED")
+    _osummary = (f"OWASP Top 10 (2021) — 10 categories assessed: "
+                 f"{_ofound} FOUND, {_otested} TESTED, {_onc} NOT-COVERED.")
+    _orows = ""
+    for p in _owasp_posture:
+        _detail = ("; ".join(p["top_findings"]) if p["verdict"] == "FOUND"
+                   else (p.get("note") or ""))
+        _orows += (f"<tr><td>{html.escape(p['category'])} — {html.escape(p['title'])}</td>"
+                   f"<td><span style='color:{_ocolor[p['verdict']]};font-weight:bold'>"
+                   f"{p['verdict']}</span></td>"
+                   f"<td>{p['count'] or ''}</td>"
+                   f"<td style='font-size:12px'>{html.escape(_detail)}</td></tr>")
+    owasp_section_html = (
+        "<h2>OWASP Top 10 (2021) — Coverage</h2>"
+        f"<p>{html.escape(_osummary)}</p>"
+        "<p style='font-size:12px;color:#666'>FOUND = finding mapped to category; "
+        "TESTED = capability exercised, no finding; "
+        "NOT-COVERED = not exercised by automated scan (manual review).</p>"
+        "<table><tr><th>Category</th><th>Verdict</th><th>Findings</th>"
+        "<th>Top findings / Note</th></tr>"
+        + _orows + "</table>")
 
 # ── Remediation SLA — overdue (CISA KEV BOD 22-01) (#9) ──────
 _overdue = [f for f in all_f if (f.get("sla") or {}).get("overdue")]
@@ -2396,6 +2432,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <h2>3. Identified Vulnerabilities</h2>{vhtml}
 {sla_section_html}
 {compliance_section_html}
+{owasp_section_html}
 {pci_section_html}
 
 <!-- Scan Behavior -->
@@ -2533,6 +2570,7 @@ try:
              "curl_reproducible": c.get("curl_reproducible","")}
             for c in confirmations
         ],
+        "owasp_coverage": _owasp_posture,
         "security_headers": security_headers_data,
     }
     fj = os.path.join(OUTDIR,"findings.json")
