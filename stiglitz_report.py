@@ -35,6 +35,7 @@ except Exception:
     repro = None
 import scope  # noqa: E402  (fronteira de escopo p/ alertas de scanner)
 import finding_quality  # noqa: E402  (FP de disclosure ruidoso + enriquecimento JS)
+import zap_authgate as _zap_authgate
 import evidence_render as _evrender  # noqa: E402  (evidência gigante → arquivo lateral linkado)
 REPRO_RAW = os.environ.get("STIGLITZ_REPRO_RAW") == "1"
 
@@ -242,6 +243,7 @@ if os.path.exists(nuclei_file) and os.path.getsize(nuclei_file) > 0:
 
 # ZAP — com deduplicação de alertas repetidos e filtro de confiança
 zap_findings = []
+_deferred_authgated = []  # auth-gated FPs — particionados antes das contagens
 zap_low_groups = {}  # Low/Info: tabela compacta
 zap_dedup      = {}  # Critical/High/Medium: card único por tipo
 # Carregar request/response do XML ZAP para evidência completa
@@ -316,6 +318,19 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                 sev_orig = rmap.get(a.get("risk","info").lower(),"info")
                 conf = a.get("confidence","").lower()
                 if conf in SKIP_CONFIDENCE:
+                    continue
+                # FP "JWT-gate": a requisição de ataque recebeu 401/403 antes da
+                # query (scan deslogado em API auth-gated). Move p/ a seção deferred
+                # — fora das contagens/criticidade. Fail-safe: status ausente não
+                # defere. Ver lib/zap_authgate.py. (NÃO esconde: vira lead de retest.)
+                if _zap_authgate.is_authgated_fp(a):
+                    _deferred_authgated.append({
+                        "name": a.get("name", "Alerta"),
+                        "url": a.get("url", ""),
+                        "param": a.get("param", "") or "",
+                        "attack_status": a.get("attack_status"),
+                        "confidence": a.get("confidence", ""),
+                    })
                     continue
 
                 # ── Filtrar URLs que não representam recursos reais ──────────
@@ -2348,6 +2363,26 @@ if _owasp_posture:
         "<th>Top findings / Note</th></tr>"
         + _orows + "</table>")
 
+# ── Deferred: alertas active-scan barrados por auth (JWT-gate) — retest logado ──
+# Não são findings confirmados nem FPs limpos: a superfície não foi alcançada sem
+# token. Agrupados por endpoint como lead para scan autenticado / code review.
+deferred_section_html = ""
+if _deferred_authgated:
+    _drows = ""
+    for d in _deferred_authgated:
+        _drows += (f"<tr><td>{html.escape(d['name'])}</td>"
+                   f"<td>{html.escape(d.get('param') or '')}</td>"
+                   f"<td>{html.escape(str(d.get('attack_status') or ''))}</td>"
+                   f"<td style='font-size:12px'>{html.escape(d.get('url') or '')}</td></tr>")
+    deferred_section_html = (
+        "<h2>Deferred — Requires Authenticated Retest</h2>"
+        f"<p>{len(_deferred_authgated)} active-scan alert(s) whose attack request was "
+        "rejected by authentication (HTTP 401/403) before the payload could run. "
+        "Not confirmed and not cleared — the parameter must be retested with a valid "
+        "token or reviewed in code.</p>"
+        "<table><tr><th>Alert</th><th>Parameter</th><th>Attack status</th><th>URL</th></tr>"
+        + _drows + "</table>")
+
 # ── Remediation SLA — overdue (CISA KEV BOD 22-01) (#9) ──────
 _overdue = [f for f in all_f if (f.get("sla") or {}).get("overdue")]
 sla_section_html = ""
@@ -2433,6 +2468,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {sla_section_html}
 {compliance_section_html}
 {owasp_section_html}
+{deferred_section_html}
 {pci_section_html}
 
 <!-- Scan Behavior -->
@@ -2570,6 +2606,7 @@ try:
              "curl_reproducible": c.get("curl_reproducible","")}
             for c in confirmations
         ],
+        "deferred_findings": _deferred_authgated,
         "owasp_coverage": _owasp_posture,
         "security_headers": security_headers_data,
     }
