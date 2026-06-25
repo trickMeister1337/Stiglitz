@@ -179,7 +179,7 @@ _OWASP_COVERAGE = {
 _OWASP_NOTES = {
     "A04:2021": "Design-level — requires manual review; not exercised by automated DAST.",
     "A08:2021": "Largely manual — only insecure deserialization (CWE-502) surfaces via automated DAST; CI/CD & SRI integrity require manual review.",
-    "A09:2021": "Not exercised by DAST — requires log/monitoring configuration review.",
+    "A09:2021": "Largely manual — logging/monitoring findings (CWE-117/778) surface via DAST only when present; full coverage requires log/monitoring configuration review.",
 }
 
 
