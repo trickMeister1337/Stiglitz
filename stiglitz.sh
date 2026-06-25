@@ -1994,6 +1994,16 @@ except: print('')" 2>/dev/null)
         curl -s "http://${ZAP_HOST}:${ZAP_PORT}/OTHER/core/other/xmlreport/" \
              -o "$OUTDIR/raw/zap_evidencias.xml" 2>/dev/null
 
+        # Enriquece cada alerta active-scan com o status HTTP que a requisição de
+        # ataque recebeu (resolve messageId via API do ZAP, com o daemon ainda vivo).
+        # Permite a Fase 11 separar FPs de "JWT-gate" (ataque barrado por 401/403
+        # antes da query). Degrada em silêncio se a API falhar. Ver lib/zap_authgate.py.
+        if [ -s "$OUTDIR/raw/zap_alerts.json" ]; then
+            python3 "$SCRIPT_DIR/lib/zap_authgate.py" enrich \
+                "$OUTDIR/raw/zap_alerts.json" "http://${ZAP_HOST}:${ZAP_PORT}" \
+                2>/dev/null || true
+        fi
+
         ALERT_COUNT=$(python3 -c "
 import json
 try:
