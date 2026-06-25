@@ -62,3 +62,40 @@ def test_verdict_severity_fallback_without_cvss():
     # sem cvss_base, cai na banda de severidade
     assert ap.asv_verdict_for(_f(name="Some misconfig", source="Nuclei", severity="medium"))[0] == "FAIL"
     assert ap.asv_verdict_for(_f(name="Some info", source="Nuclei", severity="info"))[0] == "PASS"
+
+
+def test_requirement_via_cwe():
+    assert ap.requirement_for(_f(name="XSS", cwe="CWE-79")) == "6.2.4"
+
+
+def test_requirement_fallback_by_category():
+    # sem CWE, deriva da categoria
+    assert ap.requirement_for(_f(name="SSLv3 supported", source="testssl.sh", severity="high")) == "4.2.1"
+    assert ap.requirement_for(_f(name="SQL Injection")) == "6.2.4"
+
+
+def test_aggregate_would_not_pass():
+    findings = [
+        _f(name="SQL Injection", source="Nuclei", severity="high", url="https://a.com/x?id=1"),
+        _f(name="Missing CSP Header", source="Security Headers", severity="high", url="https://a.com/"),
+    ]
+    out = ap.aggregate(findings, ["a.com"])
+    assert out["would_pass"] is False
+    assert out["counted"] == 1                  # header não conta
+    assert out["fails"][0]["name"] == "SQL Injection"
+    assert out["fails"][0]["host"] == "a.com"
+    assert out["fails"][0]["requirement"] == "6.2.4"
+
+
+def test_aggregate_would_pass():
+    findings = [_f(name="Missing CSP Header", source="Security Headers", severity="high")]
+    out = ap.aggregate(findings, ["a.com"])
+    assert out["would_pass"] is True
+    assert out["fails"] == []
+
+
+def test_aggregate_respects_scope():
+    findings = [_f(name="SQL Injection", source="Nuclei", severity="high", url="https://evil.com/x")]
+    out = ap.aggregate(findings, ["a.com"])     # finding fora de escopo
+    assert out["would_pass"] is True
+    assert out["fails"] == []
