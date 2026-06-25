@@ -75,11 +75,8 @@ def enrich(alerts, fetch_fn):
 def is_authgated_fp(alert):
     """True quando o alerta active-scan foi barrado pelo gate de auth:
     bool(alert.get('attack')) and alert.get('attack_status') in (401, 403).
-    Conservador: status ausente ou != 401/403 -> False (não esconde)."""
-
-def partition(findings):
-    """Separa (kept, deferred) por is_authgated_fp. Determinístico, preserva ordem.
-    Não muta a entrada."""
+    Conservador: status ausente ou != 401/403 -> False (não esconde).
+    Usado inline pelo loop de ingestão ZAP da Fase 11."""
 ```
 
 **CLI/runner real (rede):** `enrich` recebe um `fetch_fn` que, em produção, faz
