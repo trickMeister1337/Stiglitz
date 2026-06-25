@@ -99,3 +99,12 @@ def test_aggregate_respects_scope():
     out = ap.aggregate(findings, ["a.com"])     # finding fora de escopo
     assert out["would_pass"] is True
     assert out["fails"] == []
+
+
+def test_aggregate_no_url_finding_counted_with_scope():
+    # finding without URL cannot be scope-checked => conservatively counted
+    findings = [_f(name="SQL Injection", source="Nuclei", severity="high")]
+    out = ap.aggregate(findings, ["a.com"])
+    assert out["would_pass"] is False
+    assert out["counted"] == 1
+    assert out["fails"][0]["host"] == ""

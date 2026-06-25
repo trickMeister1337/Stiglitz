@@ -151,6 +151,8 @@ def aggregate(findings, scope_domains=None):
     counted = 0
     for f in findings or []:
         url = f.get("url") or ""
+        # No URL => cannot confirm scope; conservatively include the finding
+        # (an ASV preflight prefers over-flagging to a false PASS).
         if scope_domains and url and not _scope.in_scope(url, scope_domains):
             continue
         verdict, reason = asv_verdict_for(f)
