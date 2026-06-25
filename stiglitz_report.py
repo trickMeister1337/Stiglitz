@@ -2372,6 +2372,7 @@ if _deferred_authgated:
     for d in _deferred_authgated:
         _drows += (f"<tr><td>{html.escape(d['name'])}</td>"
                    f"<td>{html.escape(d.get('param') or '')}</td>"
+                   f"<td>{html.escape(str(d.get('confidence') or ''))}</td>"
                    f"<td>{html.escape(str(d.get('attack_status') or ''))}</td>"
                    f"<td style='font-size:12px'>{html.escape(d.get('url') or '')}</td></tr>")
     deferred_section_html = (
@@ -2380,7 +2381,7 @@ if _deferred_authgated:
         "rejected by authentication (HTTP 401/403) before the payload could run. "
         "Not confirmed and not cleared — the parameter must be retested with a valid "
         "token or reviewed in code.</p>"
-        "<table><tr><th>Alert</th><th>Parameter</th><th>Attack status</th><th>URL</th></tr>"
+        "<table><tr><th>Alert</th><th>Parameter</th><th>Confidence</th><th>Attack status</th><th>URL</th></tr>"
         + _drows + "</table>")
 
 # ── Remediation SLA — overdue (CISA KEV BOD 22-01) (#9) ──────

@@ -36,6 +36,7 @@ def test_authgated_sqli_deferred_not_in_counts():
             "SQLi auth-gated não deveria aparecer nos findings principais"
         html = open(os.path.join(tmp, "stiglitz_report.html")).read()
         assert "Requires Authenticated Retest" in html
+        assert "Medium" in html
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
