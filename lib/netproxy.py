@@ -77,12 +77,24 @@ def _proxy_handlers(ssl_context=None):
     raise ProxyUnavailable(f"STIGLITZ_PROXY com esquema não suportado: {url!r}")
 
 
+def _mtls_context():
+    """ssl_context com client-cert do lib/mtls, ou None. Import tardio p/ não criar
+    ciclo e manter o netproxy standalone quando o mtls não está presente."""
+    try:
+        import mtls
+    except ImportError:
+        return None
+    return mtls.client_ssl_context()
+
+
 def make_opener(ssl_context=None):
     """OpenerDirector com proxy (se configurado) + ssl_context p/ HTTPS.
 
     Com proxy SOCKS, o ssl_context é entregue ao SocksiPyHandler (que já trata HTTPS);
     NÃO se adiciona um HTTPSHandler separado, senão ele venceria a cadeia https e o
     tráfego HTTPS sairia DIRETO (vazamento de atribuição)."""
+    if ssl_context is None:
+        ssl_context = _mtls_context()
     proxy_handlers = _proxy_handlers(ssl_context=ssl_context)
     handlers = []
     if ssl_context is not None and not _is_socks():
@@ -94,6 +106,8 @@ def make_opener(ssl_context=None):
 def build_opener(*extra_handlers, ssl_context=None):
     """build_opener incluindo os handlers de proxy. Para módulos com handlers próprios
     (ex.: bizlogic _ScopedRedirectHandler). Mesma regra do make_opener p/ SOCKS+ssl."""
+    if ssl_context is None:
+        ssl_context = _mtls_context()
     proxy_handlers = _proxy_handlers(ssl_context=ssl_context)
     handlers = list(extra_handlers)
     if ssl_context is not None and not _is_socks():
