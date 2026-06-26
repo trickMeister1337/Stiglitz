@@ -806,6 +806,7 @@ ACTIVE_COUNT=0
 if command -v httpx &>/dev/null; then
     # Saída -json: separa title/tech/webserver (o tech_profile consome o JSONL e
     # deixa de tratar título HTTP/flag HSTS como "tecnologia" — Bug #1).
+        [ ${#_MTLS_NUCLEI[@]} -gt 0 ] && echo -e "  ${YELLOW}[○] httpx não suporta client-cert — mapeamento de superfície limitado sob mTLS (ZAP/nuclei cobrem a superfície autenticada)${NC}"
     cat "$OUTDIR/raw/subdomains.txt" | \
         httpx -silent -json -status-code -title -tech-detect -timeout 5 \
               "${_PROXY_GO[@]}" \
@@ -896,6 +897,7 @@ if command -v katana &>/dev/null; then
     done
     [ -z "$KATANA_JS_FLAGS" ] && \
         echo -e "  ${YELLOW}[!] Chromium não encontrado — katana em modo HTTP apenas${NC}"
+    [ ${#_MTLS_NUCLEI[@]} -gt 0 ] && echo -e "  ${YELLOW}[○] katana não suporta client-cert — crawl limitado sob mTLS${NC}"
     katana -u "$TARGET" \
         "${_PROXY_GO[@]}" \
         $KATANA_JS_FLAGS \
@@ -1236,6 +1238,7 @@ except: pass
         for _batch in "$_batch_dir"/batch_*; do
             timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_batch" \
                 "${_PROXY_GO[@]}" \
+                "${_MTLS_NUCLEI[@]}" \
                 -tags "$_nuclei_base_tags" \
                 -severity critical,high,medium,low \
                 -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
@@ -1269,6 +1272,7 @@ except: pass
 
     [ "${_nuclei_skip:-0}" = "1" ] || timeout "$NUCLEI_TIMEOUT" nuclei "${_nuclei_input[@]}" \
         "${_PROXY_GO[@]}" \
+        "${_MTLS_NUCLEI[@]}" \
            -tags "$_nuclei_base_tags" \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
@@ -1295,6 +1299,7 @@ if os.path.exists(mf):
         # fallback varreria apenas a raiz e perderia o token em scans autenticados.
         timeout "$NUCLEI_TIMEOUT" nuclei -l "$_nuclei_list" \
             "${_PROXY_GO[@]}" \
+            "${_MTLS_NUCLEI[@]}" \
                -tags cve,exposure,misconfig,default-login,takeover,xss,sqli \
                -severity critical,high,medium \
                -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
@@ -1312,6 +1317,7 @@ if os.path.exists(mf):
     if [ "${_nuclei_skip:-0}" != "1" ] && [ "${#NUCLEI_TEMPLATES_FLAGS[@]}" -gt 0 ]; then
         timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_nuclei_list" \
             "${_PROXY_GO[@]}" "${NUCLEI_TEMPLATES_FLAGS[@]}" \
+            "${_MTLS_NUCLEI[@]}" \
             -severity critical,high,medium,low,info \
             -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
             -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
@@ -1349,6 +1355,7 @@ if os.path.exists(mf):
             echo -e "  ${BLUE}[…] nuclei -dast: fuzzing ativo em ${_dast_n} endpoint(s) parametrizado(s)...${NC}"
             timeout "$NUCLEI_TIMEOUT" nuclei -l "$OUTDIR/raw/dast_urls.txt" -dast -silent \
                 "${_PROXY_GO[@]}" \
+                "${_MTLS_NUCLEI[@]}" \
                    -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
                    -timeout 10 "${NUCLEI_OAST_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
                    -jsonl -o "$OUTDIR/raw/nuclei_dast.json" \
@@ -2572,6 +2579,7 @@ NODEJS_PATHS
     if [ -n "$_wordlist" ]; then
         echo -e "  ${BLUE}[…]${NC} ffuf: testando $(wc -l < "$_wordlist") endpoints (timeout 90s)..."
         timeout 90 ffuf \
+        "${_MTLS_FFUF[@]}" \
             "${_PROXY_CURL[@]}" \
             -u "${TARGET}/FUZZ" \
             -w "$_wordlist" \
@@ -2779,6 +2787,7 @@ except: pass
         # carregar APENAS aquele diretório (desativa auto-load do default). O
         # diretório custom tem poucos templates que não casam com nossos tags.
         timeout 600 nuclei -l "$_info_urls" \
+            "${_MTLS_NUCLEI[@]}" \
             -tags "$_info_tags" \
             -severity info \
             -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
