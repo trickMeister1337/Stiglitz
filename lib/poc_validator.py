@@ -25,6 +25,7 @@ Uso standalone: python3 lib/poc_validator.py <outdir>
 import json, subprocess, re, sys, os, time, shlex, xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 import netproxy
+import mtls
 
 # OOB/OAST é opcional — degrada sem erro se o módulo não carregar.
 try:
@@ -143,7 +144,7 @@ def run_cmd(cmd, timeout=20, retries=2, backoff=5):
     if not argv:
         return "", "EMPTY"
     if argv[0] == "curl":
-        argv = [argv[0], *netproxy.curl_proxy_args(), *argv[1:]]
+        argv = [argv[0], *netproxy.curl_proxy_args(), *mtls.curl_cert_args(), *argv[1:]]
     elif argv[0] == "openssl" and netproxy.proxy_url():
         return "", "PROXY_SKIP"  # openssl s_client não roteia por proxy aqui — pula p/ não vazar atribuição
     for attempt in range(retries):
