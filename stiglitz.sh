@@ -218,6 +218,26 @@ zap_inject_auth_headers() {
     fi
 }
 
+# Client-cert mTLS no ZAP: ZAP só aceita PKCS#12. Gera um .p12 efêmero (sem senha) a
+# partir do PEM e carrega via network addon. No-op sem mTLS. Não aborta (a validação
+# fail-closed já rodou na entrada); aqui só avisa se o ZAP/openssl falhar.
+ZAP_MTLS_P12=""
+zap_setup_client_cert() {
+    [ -n "$STIGLITZ_MTLS_CERT" ] && [ -n "$STIGLITZ_MTLS_KEY" ] || return 0
+    command -v openssl >/dev/null 2>&1 || { echo -e "  ${YELLOW}[○] openssl ausente — client-cert no ZAP pulado${NC}"; return 0; }
+    ZAP_MTLS_P12="$OUTDIR/raw/.zap_client.p12"
+    if ! openssl pkcs12 -export -inkey "$STIGLITZ_MTLS_KEY" -in "$STIGLITZ_MTLS_CERT" \
+            -out "$ZAP_MTLS_P12" -passout pass: >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}[○] falha ao gerar PKCS#12 p/ o ZAP — client-cert no ZAP pulado${NC}"
+        rm -f "$ZAP_MTLS_P12"; ZAP_MTLS_P12=""; return 0
+    fi
+    chmod 600 "$ZAP_MTLS_P12" 2>/dev/null || true
+    zap_api_call "network/action/addPkcs12ClientCertificate" \
+        "filePath=${ZAP_MTLS_P12}&password=&index=0" >/dev/null 2>&1
+    zap_api_call "network/action/setUseClientCertificate" "use=true" >/dev/null 2>&1
+    echo -e "  ${GREEN}[✓] client-cert mTLS carregado no ZAP${NC}"
+}
+
 wait_for_zap_progress() {
     local status_endpoint=$1 scan_id=$2 timeout_secs=$3 label=$4
     local elapsed=0 interval=10 progress
@@ -267,6 +287,7 @@ cleanup() {
     # Remover lockfile (por-OUTDIR) e host-lock (PID-file por host)
     [ -n "${LOCKFILE:-}" ] && rm -f "$LOCKFILE" 2>/dev/null
     [ -n "${STG_HOSTLOCK_FILE:-}" ] && rm -f "$STG_HOSTLOCK_FILE" 2>/dev/null
+    [ -n "$ZAP_MTLS_P12" ] && rm -f "$ZAP_MTLS_P12" 2>/dev/null
     [ "$_exit_code" -eq 130 ] && echo -e "\n  ${YELLOW}[!] Scan interrompido pelo usuário${NC}"
     exit "$_exit_code"
 }
@@ -1780,6 +1801,8 @@ if command -v zaproxy &>/dev/null; then
 
         # ── Bearer/header no HttpSender ANTES do spider (fronteira do BOLA) ──
         zap_inject_auth_headers
+        # ── Client-cert mTLS no ZAP (antes do spider) ──
+        zap_setup_client_cert
 
         # ── ZAP Spider: complementa o Katana ou age sozinho ────────────
         echo -e "  ${BLUE}[…] Iniciando ZAP Spider (complementa crawl)...${NC}"
