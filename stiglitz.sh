@@ -295,6 +295,8 @@ OAUTH_ACTIVE=0     # Probes ativos OAuth/OIDC (P9.6) — opt-in via --oauth-acti
 BIZLOGIC_MUTATE=0  # opt-in p/ testes mutantes de lógica de negócio (P9.7)
 REPRO_RAW=0        # bloco de repro sem sanitização (uso interno) — opt-in via --repro-raw
 STIGLITZ_PROXY="${STIGLITZ_PROXY:-}"  # proxy HTTP/SOCKS p/ tráfego do alvo — opt-in via --proxy
+STIGLITZ_MTLS_CERT="${STIGLITZ_MTLS_CERT:-}"  # client-cert PEM — opt-in via --mtls-cert
+STIGLITZ_MTLS_KEY="${STIGLITZ_MTLS_KEY:-}"    # client-key  PEM (sem senha) — via --mtls-key
 
 # Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase, --dry-run, --oauth-active
 _args=("$@")
@@ -312,6 +314,8 @@ for _i in "${!_args[@]}"; do
         --bizlogic-mutate)   BIZLOGIC_MUTATE=1 ;;
         --repro-raw)         REPRO_RAW=1 ;;
         --proxy)             STIGLITZ_PROXY="${_args[$((${_i}+1))]}" ;;
+        --mtls-cert)         STIGLITZ_MTLS_CERT="${_args[$((${_i}+1))]}" ;;
+        --mtls-key)          STIGLITZ_MTLS_KEY="${_args[$((${_i}+1))]}" ;;
     esac
 done
 
@@ -333,6 +337,22 @@ export STIGLITZ_PROXY
 _PROXY_GO=();      [ -n "$STIGLITZ_PROXY" ] && _PROXY_GO=(-proxy "$STIGLITZ_PROXY")
 _PROXY_CURL=();    [ -n "$STIGLITZ_PROXY" ] && _PROXY_CURL=(-x "$STIGLITZ_PROXY")
 _PROXY_TESTSSL=(); [ -n "$STIGLITZ_PROXY" ] && _PROXY_TESTSSL=(--proxy "${STIGLITZ_PROXY#*://}")
+
+# ── mTLS client-cert (opt-in via --mtls-cert/--mtls-key) ──────────────────────
+# Fail-closed: configurado mas inválido → aborta (≠ proxy, que pula): sem o cert o
+# handshake TLS falha e o scan ficaria cego, reportando "0 findings" enganoso.
+export STIGLITZ_MTLS_CERT STIGLITZ_MTLS_KEY
+_MTLS_CURL=(); _MTLS_NUCLEI=(); _MTLS_FFUF=()
+if [ -n "$STIGLITZ_MTLS_CERT" ] || [ -n "$STIGLITZ_MTLS_KEY" ]; then
+    if ! _mtls_msg="$(python3 "$SCRIPT_DIR/lib/mtls.py" check 2>&1)"; then
+        echo -e "  ${RED}[✗] ${_mtls_msg}${NC}" >&2
+        exit 1
+    fi
+    echo -e "  ${BLUE}[…] mTLS ativo: cert=${STIGLITZ_MTLS_CERT} key=${STIGLITZ_MTLS_KEY} (só tráfego do alvo)${NC}"
+    _MTLS_CURL=(--cert "$STIGLITZ_MTLS_CERT" --key "$STIGLITZ_MTLS_KEY")
+    _MTLS_NUCLEI=(-client-cert "$STIGLITZ_MTLS_CERT" -client-key "$STIGLITZ_MTLS_KEY")
+    _MTLS_FFUF=(-cc "$STIGLITZ_MTLS_CERT" -ck "$STIGLITZ_MTLS_KEY")
+fi
 [ -n "$TOKEN_A" ] && AUTH_TOKEN="$TOKEN_A"
 
 # Atribuir alvo se não for flag
