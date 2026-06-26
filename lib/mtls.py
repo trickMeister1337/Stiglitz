@@ -68,6 +68,19 @@ def curl_cert_args():
     return ["--cert", cert_path(), "--key", key_path()]
 
 
+def client_ssl_context():
+    """ssl.SSLContext com o client-cert carregado, ou None se não-enabled. Consumido
+    pelo netproxy.make_opener(ssl_context=...). Verificação do servidor desligada
+    (skip-verify, alinhado ao resto do scanner): mTLS cobre só a identidade do cliente."""
+    if not is_enabled():
+        return None
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.load_cert_chain(certfile=cert_path(), keyfile=key_path())
+    return ctx
+
+
 def main(argv):
     if len(argv) < 2:
         print("uso: mtls.py <check|curl-args>", file=sys.stderr)

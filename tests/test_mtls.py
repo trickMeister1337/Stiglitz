@@ -57,3 +57,42 @@ def test_key_is_encrypted_detects_traditional_pem(tmp_path):
     assert M.key_is_encrypted(k) is True
     plain = _write(tmp_path / "p.pem", "-----BEGIN PRIVATE KEY-----\nMIIxxx\n")
     assert M.key_is_encrypted(plain) is False
+
+
+import ssl as _ssl
+
+
+def _gen_pair(tmp_path):
+    """Par cert+key PEM auto-assinado p/ teste (cryptography)."""
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    import datetime
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
+    cert = (x509.CertificateBuilder()
+            .subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime(2020, 1, 1))
+            .not_valid_after(datetime.datetime(2030, 1, 1))
+            .sign(key, hashes.SHA256()))
+    cpath = tmp_path / "cert.pem"; kpath = tmp_path / "key.pem"
+    cpath.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    kpath.write_bytes(key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption()))
+    return str(cpath), str(kpath)
+
+
+def test_client_ssl_context_none_when_disabled():
+    assert M.client_ssl_context() is None
+
+
+def test_client_ssl_context_loads_pair(monkeypatch, tmp_path):
+    c, k = _gen_pair(tmp_path)
+    monkeypatch.setenv("STIGLITZ_MTLS_CERT", c)
+    monkeypatch.setenv("STIGLITZ_MTLS_KEY", k)
+    ctx = M.client_ssl_context()
+    assert isinstance(ctx, _ssl.SSLContext)
+    assert ctx.verify_mode == _ssl.CERT_NONE  # servidor segue skip-verify (scanner)
