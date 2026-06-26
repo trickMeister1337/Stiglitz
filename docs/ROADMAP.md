@@ -127,7 +127,7 @@ Itens de produto reconciliados com o código (detalhe e priorização vivem na m
   via `refresh_token` grant (grant configurável por env), `apply_to_curl`. Integrado em
   `confirm_nuclei` (startup + retry em 401) e no `confirm_zap` (ZAP path) — resolve JWT expirando
   no meio do scan
-- ⏳ **mTLS client-cert**: ausente. Porta de entrada p/ Open Banking BR/PIX — próximo da fila
+- ✅ **mTLS client-cert** (`lib/mtls.py`, opt-in `--mtls-cert`/`--mtls-key`): par PEM (sem senha) apresentado por curl/nuclei/ffuf + módulos urllib (via `netproxy.client_ssl_context`) + ZAP (PKCS#12 efêmero). Fail-closed; coexiste com `--proxy`. httpx/katana sem suporte (limitação documentada)
 - ⏳ **GraphQL além de introspection**: batching/aliasing DoS + field-level authz (reusar
   `bola.py`). `graphql_audit.py` ainda só faz introspection
 - ⏳ **FAPI / Open Banking Brasil**: PAR, mTLS-bound tokens, JARM (estender `oauth_audit.py`)
