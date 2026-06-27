@@ -2,19 +2,28 @@
 """
 oauth_token.py — Refresh e aquisição de access tokens OAuth para scans longos.
 
-Permite manter sessões autenticadas que excedem o lifetime do access_token:
-quando o validator detecta 401, chama refresh_access_token() para obter um
-novo access_token via refresh_token, e retenta uma vez.
+Dois caminhos, escolhidos pelo que estiver no env:
+  - aquisição inicial (client_credentials): obtém um access_token do zero a
+    partir de CLIENT_ID/CLIENT_SECRET — usado no startup do stiglitz.sh para
+    autenticar o pipeline sem JWT manual (acquire_access_token / CLI `acquire`).
+  - refresh (refresh_token): renova um access_token que expira no meio do scan;
+    o validator detecta 401 e retenta uma vez (refresh_access_token).
 
-Configuração via env (todas opcionais; sem TOKEN_URL, a feature é no-op):
-    STIGLITZ_OAUTH_TOKEN_URL      — endpoint do POST de token
-    STIGLITZ_OAUTH_REFRESH_TOKEN  — refresh_token (obrigatório se TOKEN_URL)
-    STIGLITZ_OAUTH_CLIENT_ID      — opcional
-    STIGLITZ_OAUTH_CLIENT_SECRET  — opcional
-    STIGLITZ_OAUTH_GRANT_TYPE     — default 'refresh_token'
+Configuração via env (sem TOKEN_URL, a feature é no-op):
+    STIGLITZ_OAUTH_TOKEN_URL      — endpoint do POST de token (ambos os caminhos)
+    STIGLITZ_OAUTH_CLIENT_ID      — client id (obrigatório p/ client_credentials)
+    STIGLITZ_OAUTH_CLIENT_SECRET  — client secret (obrigatório p/ client_credentials)
+    STIGLITZ_OAUTH_SCOPE          — scopes (opcional, client_credentials)
+    STIGLITZ_OAUTH_AUDIENCE       — audience (opcional, client_credentials)
+    STIGLITZ_OAUTH_AUTH_STYLE     — 'post' (default) | 'basic'
+    STIGLITZ_OAUTH_REFRESH_TOKEN  — refresh_token (obrigatório p/ o caminho de refresh)
+    STIGLITZ_OAUTH_GRANT_TYPE     — grant do refresh (default 'refresh_token')
+    (STIGLITZ_OAUTH_REQUIRED — fail-closed/best-effort — é lido pelo startup do stiglitz.sh)
 
-A função é pura (não toca estado global). O caller decide quando refrescar e
-onde guardar o token (env STIGLITZ_ACCESS_TOKEN é a convenção).
+Credenciais são env-only; o POST passa por netproxy (herda proxy + mTLS).
+Nota: na Fase 5 (poc_validator), quando OAuth está configurado, um token
+recém-adquirido/renovado tem precedência sobre um --token manual nas requisições
+re-tocadas — ver _refresh_oauth_safe.
 """
 import json
 import os
@@ -63,7 +72,10 @@ def is_enabled():
 
 
 def refresh_access_token(timeout=15):
-    """Chama o endpoint de refresh e retorna o novo access_token (str)."""
+    """Chama o endpoint de refresh e retorna o novo access_token (str).
+
+    Raises OAuthError em qualquer falha (rede, parse, sem access_token).
+    """
     token_url = os.environ.get("STIGLITZ_OAUTH_TOKEN_URL", "").strip()
     refresh   = os.environ.get("STIGLITZ_OAUTH_REFRESH_TOKEN", "").strip()
     if not token_url or not refresh:

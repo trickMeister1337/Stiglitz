@@ -55,6 +55,13 @@ def _refresh_oauth_safe():
 
     Escolhe o caminho disponível: refresh_token se configurado, senão
     re-aquisição client_credentials. No-op se nenhum.
+
+    Precedência na Fase 5: quando OAuth está configurado no env, o token aqui
+    obtido tem precedência sobre um --token manual nas requisições re-tocadas
+    (_apply_oauth troca o Authorization). É a extensão consistente do override
+    de refresh que já existia; um operador que passe --token E configure OAuth
+    verá a Fase 5 sondar com a identidade OAuth. Follow-up possível: tornar a
+    aquisição lazy (só on-401) para honrar o --token manual até ele expirar.
     """
     global _OAUTH_TOKEN
     if not _OAUTH_AVAILABLE:
