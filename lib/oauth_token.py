@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-oauth_refresh.py — Refresh nativo de access tokens OAuth para scans longos.
+oauth_token.py — Refresh e aquisição de access tokens OAuth para scans longos.
 
 Permite manter sessões autenticadas que excedem o lifetime do access_token:
 quando o validator detecta 401, chama refresh_access_token() para obter um
 novo access_token via refresh_token, e retenta uma vez.
 
 Configuração via env (todas opcionais; sem TOKEN_URL, a feature é no-op):
-    STIGLITZ_OAUTH_TOKEN_URL      — endpoint do POST de refresh
+    STIGLITZ_OAUTH_TOKEN_URL      — endpoint do POST de token
     STIGLITZ_OAUTH_REFRESH_TOKEN  — refresh_token (obrigatório se TOKEN_URL)
     STIGLITZ_OAUTH_CLIENT_ID      — opcional
     STIGLITZ_OAUTH_CLIENT_SECRET  — opcional
@@ -28,6 +28,33 @@ class OAuthError(Exception):
     """Erro de refresh OAuth (rede, status não-2xx, JSON inválido, etc.)."""
 
 
+def _request_token(data, headers=None, timeout=15):
+    """POST x-www-form-urlencoded ao token endpoint via netproxy (herda proxy+mTLS).
+
+    Devolve o dict da resposta JSON. Levanta OAuthError em rede/HTTP/parse.
+    """
+    token_url = os.environ.get("STIGLITZ_OAUTH_TOKEN_URL", "").strip()
+    if not token_url:
+        raise OAuthError("STIGLITZ_OAUTH_TOKEN_URL não configurado")
+    hdrs = {"Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json"}
+    if headers:
+        hdrs.update(headers)
+    body = urllib.parse.urlencode(data).encode("utf-8")
+    req = urllib.request.Request(token_url, data=body, method="POST", headers=hdrs)
+    try:
+        with netproxy.urlopen(req, timeout=timeout) as resp:
+            payload = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        raise OAuthError(f"HTTP {e.code} do token endpoint: {e.reason}") from None
+    except (urllib.error.URLError, OSError) as e:
+        raise OAuthError(f"falha de rede: {e}") from None
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError as e:
+        raise OAuthError(f"resposta não-JSON do token endpoint: {e}") from None
+
+
 def is_enabled():
     """True se TOKEN_URL e REFRESH_TOKEN estão configurados no env."""
     return bool(os.environ.get("STIGLITZ_OAUTH_TOKEN_URL")
@@ -35,10 +62,7 @@ def is_enabled():
 
 
 def refresh_access_token(timeout=15):
-    """Chama o endpoint de refresh e retorna o novo access_token (str).
-
-    Raises OAuthError em qualquer falha (rede, parse, sem access_token).
-    """
+    """Chama o endpoint de refresh e retorna o novo access_token (str)."""
     token_url = os.environ.get("STIGLITZ_OAUTH_TOKEN_URL", "").strip()
     refresh   = os.environ.get("STIGLITZ_OAUTH_REFRESH_TOKEN", "").strip()
     if not token_url or not refresh:
@@ -52,28 +76,10 @@ def refresh_access_token(timeout=15):
     if client: data["client_id"]     = client
     if secret: data["client_secret"] = secret
 
-    body = urllib.parse.urlencode(data).encode("utf-8")
-    req  = urllib.request.Request(
-        token_url, data=body, method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded",
-                 "Accept": "application/json"},
-    )
-    try:
-        with netproxy.urlopen(req, timeout=timeout) as resp:
-            payload = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        raise OAuthError(f"HTTP {e.code} do token endpoint: {e.reason}") from None
-    except (urllib.error.URLError, OSError) as e:
-        raise OAuthError(f"falha de rede: {e}") from None
-
-    try:
-        parsed = json.loads(payload)
-    except json.JSONDecodeError as e:
-        raise OAuthError(f"resposta não-JSON do token endpoint: {e}") from None
-
+    parsed = _request_token(data, timeout=timeout)
     token = parsed.get("access_token")
     if not token or not isinstance(token, str):
-        raise OAuthError(f"resposta sem access_token: {payload[:200]}")
+        raise OAuthError(f"resposta sem access_token (chaves: {sorted(parsed)})")
     return token
 
 

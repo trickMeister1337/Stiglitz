@@ -44,7 +44,7 @@ except Exception:
 # OAuth refresh é opcional — só ativa quando STIGLITZ_OAUTH_TOKEN_URL estiver
 # configurada. Refresh inicial no startup + retry em 401 dentro do loop.
 try:
-    import oauth_refresh as _oauth
+    import oauth_token as _oauth
     _OAUTH_AVAILABLE = True
 except Exception:
     _OAUTH_AVAILABLE = False

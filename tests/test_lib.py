@@ -758,7 +758,7 @@ class TestPocValidator(unittest.TestCase):
 
 
 class TestOAuthRefresh(unittest.TestCase):
-    """oauth_refresh.py — refresh nativo de access tokens."""
+    """oauth_token.py — refresh + aquisição de access tokens."""
 
     def setUp(self):
         root = os.path.dirname(os.path.abspath(__file__))
@@ -769,11 +769,11 @@ class TestOAuthRefresh(unittest.TestCase):
             os.environ.pop(k, None)
 
     def test_disabled_without_env(self):
-        import oauth_refresh as oa
+        import oauth_token as oa
         self.assertFalse(oa.is_enabled())
 
     def test_enabled_when_env_set(self):
-        import oauth_refresh as oa
+        import oauth_token as oa
         os.environ["STIGLITZ_OAUTH_TOKEN_URL"]     = "https://idp/token"
         os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"] = "rt-123"
         try:
@@ -783,12 +783,12 @@ class TestOAuthRefresh(unittest.TestCase):
             del os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"]
 
     def test_refresh_raises_without_config(self):
-        import oauth_refresh as oa
+        import oauth_token as oa
         with self.assertRaises(oa.OAuthError):
             oa.refresh_access_token()
 
     def test_apply_to_curl_injects_header(self):
-        import oauth_refresh as oa
+        import oauth_token as oa
         original = "curl -sk https://api/foo"
         out = oa.apply_to_curl(original, "tok-XYZ")
         self.assertIn("-H", out)
@@ -796,20 +796,20 @@ class TestOAuthRefresh(unittest.TestCase):
 
     def test_apply_to_curl_replaces_existing_authorization(self):
         # Authorization existente deve ser substituído, não duplicado
-        import oauth_refresh as oa
+        import oauth_token as oa
         original = "curl -sk -H 'Authorization: Bearer old-token' https://api/foo"
         out = oa.apply_to_curl(original, "new-token")
         self.assertIn("Bearer new-token", out)
         self.assertNotIn("old-token", out)
 
     def test_apply_to_curl_noop_without_token(self):
-        import oauth_refresh as oa
+        import oauth_token as oa
         original = "curl -sk https://api/foo"
         self.assertEqual(oa.apply_to_curl(original, ""), original)
 
     def test_refresh_uses_mock_endpoint(self):
         """Smoke test usando um mini-servidor HTTP local."""
-        import oauth_refresh as oa
+        import oauth_token as oa
         from http.server import BaseHTTPRequestHandler, HTTPServer
         import threading
 
