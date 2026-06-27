@@ -384,6 +384,27 @@ if [ -n "$STIGLITZ_MTLS_CERT" ] || [ -n "$STIGLITZ_MTLS_KEY" ]; then
 fi
 [ -n "$TOKEN_A" ] && AUTH_TOKEN="$TOKEN_A"
 
+# ── Auto-aquisição de token OAuth2 (client_credentials) ──────────────────────
+# Só dispara quando NENHUM token manual foi passado e as 3 credenciais de client
+# estão no env. --token manual sempre vence. Falha: fail-closed (default) ou
+# best-effort deslogado sob STIGLITZ_OAUTH_REQUIRED=0.
+if [ -z "$AUTH_TOKEN" ] && [ -n "${STIGLITZ_OAUTH_TOKEN_URL:-}" ] \
+   && [ -n "${STIGLITZ_OAUTH_CLIENT_ID:-}" ] && [ -n "${STIGLITZ_OAUTH_CLIENT_SECRET:-}" ]; then
+    _oauth_err=$(mktemp)
+    if _oauth_tok=$(python3 "$SCRIPT_DIR/lib/oauth_token.py" acquire 2>"$_oauth_err") \
+            && [ -n "$_oauth_tok" ]; then
+        AUTH_TOKEN="$_oauth_tok"; TOKEN_A="$_oauth_tok"
+        echo -e "  ${GREEN}[✓] token OAuth2 adquirido (client_credentials)${NC}"
+    elif [ "${STIGLITZ_OAUTH_REQUIRED:-1}" = "0" ]; then
+        echo -e "  ${YELLOW}[!] aquisição OAuth2 falhou ($(cat "$_oauth_err")) — scan seguirá DESLOGADO${NC}"
+    else
+        echo -e "  ${RED}[✗] aquisição OAuth2 falhou ($(cat "$_oauth_err")) — abortando (STIGLITZ_OAUTH_REQUIRED=0 p/ best-effort)${NC}"
+        rm -f "$_oauth_err"; exit 1
+    fi
+    rm -f "$_oauth_err"
+    unset _oauth_tok _oauth_err
+fi
+
 # Atribuir alvo se não for flag
 if [ -n "$1" ] && ! echo "$1" | grep -q '^-'; then
     TARGET="$1"
