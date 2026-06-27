@@ -83,6 +83,52 @@ def refresh_access_token(timeout=15):
     return token
 
 
+def is_acquire_enabled():
+    """True se TOKEN_URL + CLIENT_ID + CLIENT_SECRET estão no env (grant client_credentials)."""
+    return bool(os.environ.get("STIGLITZ_OAUTH_TOKEN_URL")
+                and os.environ.get("STIGLITZ_OAUTH_CLIENT_ID")
+                and os.environ.get("STIGLITZ_OAUTH_CLIENT_SECRET"))
+
+
+def acquire_access_token(timeout=15):
+    """Adquire um access_token via grant client_credentials. Retorna a str do token.
+
+    Auth style via STIGLITZ_OAUTH_AUTH_STYLE: 'post' (default, id/secret no corpo)
+    ou 'basic' (header Authorization: Basic). scope/audience opcionais.
+    Raises OAuthError em config ausente ou resposta sem access_token.
+    """
+    token_url = os.environ.get("STIGLITZ_OAUTH_TOKEN_URL", "").strip()
+    client    = os.environ.get("STIGLITZ_OAUTH_CLIENT_ID", "").strip()
+    secret    = os.environ.get("STIGLITZ_OAUTH_CLIENT_SECRET", "").strip()
+    if not token_url or not client or not secret:
+        raise OAuthError(
+            "STIGLITZ_OAUTH_TOKEN_URL / STIGLITZ_OAUTH_CLIENT_ID / "
+            "STIGLITZ_OAUTH_CLIENT_SECRET não configurados")
+
+    scope    = os.environ.get("STIGLITZ_OAUTH_SCOPE", "").strip()
+    audience = os.environ.get("STIGLITZ_OAUTH_AUDIENCE", "").strip()
+    style    = os.environ.get("STIGLITZ_OAUTH_AUTH_STYLE", "post").strip().lower()
+
+    data = {"grant_type": "client_credentials"}
+    if scope:    data["scope"]    = scope
+    if audience: data["audience"] = audience
+
+    headers = None
+    if style == "basic":
+        import base64
+        cred = base64.b64encode(f"{client}:{secret}".encode("utf-8")).decode("ascii")
+        headers = {"Authorization": f"Basic {cred}"}
+    else:  # 'post' (default)
+        data["client_id"]     = client
+        data["client_secret"] = secret
+
+    parsed = _request_token(data, headers=headers, timeout=timeout)
+    token = parsed.get("access_token")
+    if not token or not isinstance(token, str):
+        raise OAuthError(f"resposta sem access_token (chaves: {sorted(parsed)})")
+    return token
+
+
 def apply_to_curl(curl_cmd, access_token, header="Authorization"):
     """Substitui (ou injeta) o header Authorization no comando curl.
 
