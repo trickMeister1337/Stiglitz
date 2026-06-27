@@ -51,16 +51,25 @@ except Exception:
 _OAUTH_TOKEN = ""   # access_token corrente (atualizado on-401)
 
 def _refresh_oauth_safe():
-    """Tenta refresh; em falha, retorna "" e loga (não aborta o scan)."""
+    """Renova o token; em falha retorna "" e loga (não aborta o scan).
+
+    Escolhe o caminho disponível: refresh_token se configurado, senão
+    re-aquisição client_credentials. No-op se nenhum.
+    """
     global _OAUTH_TOKEN
-    if not (_OAUTH_AVAILABLE and _oauth.is_enabled()):
+    if not _OAUTH_AVAILABLE:
         return ""
     try:
-        _OAUTH_TOKEN = _oauth.refresh_access_token()
-        print(f"  [OAuth] refresh ok — token atualizado")
+        if _oauth.is_enabled():
+            _OAUTH_TOKEN = _oauth.refresh_access_token()
+        elif _oauth.is_acquire_enabled():
+            _OAUTH_TOKEN = _oauth.acquire_access_token()
+        else:
+            return ""
+        print("  [OAuth] token atualizado")
         return _OAUTH_TOKEN
     except Exception as e:
-        print(f"  [OAuth] refresh falhou: {e}")
+        print(f"  [OAuth] renovação falhou: {e}")
         return ""
 
 def _apply_oauth(curl_cmd):
