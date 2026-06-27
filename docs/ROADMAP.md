@@ -123,10 +123,12 @@ duas runs divergentes do mesmo alvo). Tudo mergeado em `main`:
 
 Itens de produto reconciliados com o código (detalhe e priorização vivem na memória local):
 
-- ✅ **Auto-aquisição de token (refresh flow)** (`lib/oauth_refresh.py`): `refresh_access_token`
-  via `refresh_token` grant (grant configurável por env), `apply_to_curl`. Integrado em
-  `confirm_nuclei` (startup + retry em 401) e no `confirm_zap` (ZAP path) — resolve JWT expirando
-  no meio do scan
+- ✅ **Auto-aquisição de token OAuth2** (`lib/oauth_token.py`, ex-`oauth_refresh.py`):
+  grant `client_credentials` no startup do `stiglitz.sh` (opt-in via env
+  `STIGLITZ_OAUTH_TOKEN_URL`/`_CLIENT_ID`/`_CLIENT_SECRET`; `_SCOPE`/`_AUDIENCE`/
+  `_AUTH_STYLE`/`_REQUIRED` opcionais) → popula `AUTH_TOKEN`/`TOKEN_A` (pipeline
+  inteiro autenticado, sem JWT manual). Fail-closed default. `refresh_token` grant
+  mantém a renovação on-401 na Fase 5. POST herda proxy+mTLS via `netproxy.urlopen`
 - ✅ **mTLS client-cert** (`lib/mtls.py`, opt-in `--mtls-cert`/`--mtls-key`): par PEM (sem senha) apresentado por curl/nuclei/ffuf + módulos urllib (via `netproxy.client_ssl_context`) + ZAP (PKCS#12 efêmero). Fail-closed; coexiste com `--proxy`. httpx/katana sem suporte (limitação documentada)
 - ⏳ **GraphQL além de introspection**: batching/aliasing DoS + field-level authz (reusar
   `bola.py`). `graphql_audit.py` ainda só faz introspection
