@@ -26,6 +26,14 @@ def test_is_acquire_enabled_matrix(monkeypatch):
     assert oa.is_acquire_enabled() is True
     monkeypatch.delenv("STIGLITZ_OAUTH_CLIENT_SECRET")
     assert oa.is_acquire_enabled() is False
+    # re-set all three, then drop TOKEN_URL alone
+    _set_creds(monkeypatch)
+    monkeypatch.delenv("STIGLITZ_OAUTH_TOKEN_URL")
+    assert oa.is_acquire_enabled() is False
+    # re-set all three, then drop CLIENT_ID alone
+    _set_creds(monkeypatch)
+    monkeypatch.delenv("STIGLITZ_OAUTH_CLIENT_ID")
+    assert oa.is_acquire_enabled() is False
 
 
 def test_acquire_post_style_body(monkeypatch):
@@ -42,6 +50,8 @@ def test_acquire_post_style_body(monkeypatch):
     assert captured["data"]["client_id"] == "cid"
     assert captured["data"]["client_secret"] == "csecret"
     assert captured["headers"] is None
+    assert "scope" not in captured["data"]
+    assert "audience" not in captured["data"]
 
 
 def test_acquire_basic_style_header(monkeypatch):
@@ -57,6 +67,7 @@ def test_acquire_basic_style_header(monkeypatch):
     assert tok == "AT-2"
     # credenciais vão no header Basic, não no corpo
     assert "client_secret" not in captured["data"]
+    assert "client_id" not in captured["data"]
     assert captured["headers"]["Authorization"].startswith("Basic ")
     import base64
     assert base64.b64decode(captured["headers"]["Authorization"].split()[1]).decode() == "cid:csecret"
