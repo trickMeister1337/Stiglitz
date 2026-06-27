@@ -226,16 +226,24 @@ zap_setup_client_cert() {
     [ -n "$STIGLITZ_MTLS_CERT" ] && [ -n "$STIGLITZ_MTLS_KEY" ] || return 0
     command -v openssl >/dev/null 2>&1 || { echo -e "  ${YELLOW}[○] openssl ausente — client-cert no ZAP pulado${NC}"; return 0; }
     ZAP_MTLS_P12="$OUTDIR/raw/.zap_client.p12"
-    if ! openssl pkcs12 -export -inkey "$STIGLITZ_MTLS_KEY" -in "$STIGLITZ_MTLS_CERT" \
-            -out "$ZAP_MTLS_P12" -passout pass: >/dev/null 2>&1; then
+    if ! (umask 077; openssl pkcs12 -export -inkey "$STIGLITZ_MTLS_KEY" -in "$STIGLITZ_MTLS_CERT" \
+            -out "$ZAP_MTLS_P12" -passout pass: >/dev/null 2>&1); then
         echo -e "  ${YELLOW}[○] falha ao gerar PKCS#12 p/ o ZAP — client-cert no ZAP pulado${NC}"
         rm -f "$ZAP_MTLS_P12"; ZAP_MTLS_P12=""; return 0
     fi
     chmod 600 "$ZAP_MTLS_P12" 2>/dev/null || true
+    local _zap_cert_ok=0
     zap_api_call "network/action/addPkcs12ClientCertificate" \
-        "filePath=${ZAP_MTLS_P12}&password=&index=0" >/dev/null 2>&1
-    zap_api_call "network/action/setUseClientCertificate" "use=true" >/dev/null 2>&1
-    echo -e "  ${GREEN}[✓] client-cert mTLS carregado no ZAP${NC}"
+        "filePath=${ZAP_MTLS_P12}&password=&index=0" 2>/dev/null \
+        | grep -q '"Result"\|"OK"' && _zap_cert_ok=1
+    [ "$_zap_cert_ok" = "1" ] && \
+        zap_api_call "network/action/setUseClientCertificate" "use=true" 2>/dev/null \
+        | grep -q '"Result"\|"OK"' || _zap_cert_ok=0
+    if [ "$_zap_cert_ok" = "1" ]; then
+        echo -e "  ${GREEN}[✓] client-cert mTLS carregado no ZAP${NC}"
+    else
+        echo -e "  ${YELLOW}[!] falha ao carregar client-cert no ZAP — mTLS ZAP desativado (curl continuará com --cert)${NC}"
+    fi
 }
 
 wait_for_zap_progress() {
@@ -589,7 +597,7 @@ discover_openapi_urls() {
     local _p _url _code
     for _p in "${_paths[@]}"; do
         _url="${_target%/}${_p}"
-        _code=$(curl -s "${_PROXY_CURL[@]}" --max-time 8 -w "%{http_code}" \
+        _code=$(curl -s "${_PROXY_CURL[@]}" "${_MTLS_CURL[@]}" --max-time 8 -w "%{http_code}" \
                 -o "$_outdir/raw/oa_seed.tmp" "$_url" 2>/dev/null)
         if echo "$_code" | grep -q "^2" && \
            python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if isinstance(d,dict) and ('openapi' in d or 'swagger' in d) else 1)" \
@@ -654,7 +662,7 @@ echo -ne "  ${BLUE}[…]${NC} Verificando acesso ao alvo..."
 HTTP_CODE=""
 for _try_url in "$TARGET" "${TARGET/https:\/\//http://}" "${TARGET/http:\/\//https://}"; do
     [ -z "$_try_url" ] && continue
-    _code=$(curl -s "${_PROXY_CURL[@]}" -o /dev/null -w "%{http_code}" \
+    _code=$(curl -s "${_PROXY_CURL[@]}" "${_MTLS_CURL[@]}" -o /dev/null -w "%{http_code}" \
         --max-time 20 --connect-timeout 10 \
         -L --max-redirs 5 \
         -k \
@@ -1703,7 +1711,7 @@ if command -v zaproxy &>/dev/null; then
                        "/swagger-ui/swagger.json" "/docs/swagger.json")
         for _oapath in "${OPENAPI_PATHS[@]}"; do
             _oa_url="${TARGET%/}${_oapath}"
-            _oa_resp=$(curl -s "${_PROXY_CURL[@]}" --max-time 8 -w "%{http_code}" -o "$OUTDIR/raw/oa_check.tmp" "$_oa_url" 2>/dev/null)
+            _oa_resp=$(curl -s "${_PROXY_CURL[@]}" "${_MTLS_CURL[@]}" --max-time 8 -w "%{http_code}" -o "$OUTDIR/raw/oa_check.tmp" "$_oa_url" 2>/dev/null)
             if echo "$_oa_resp" | grep -q "^2"; then
                 # Validar que é um spec OpenAPI/Swagger REAL (JSON com chave de topo
                 # openapi/swagger), não uma página HTML/JS que apenas contém a palavra.
@@ -1762,7 +1770,7 @@ if command -v zaproxy &>/dev/null; then
         # ── GraphQL audit (#7): introspection nos endpoints /graphql conhecidos ──
         _gql_q='{"query":"query IntrospectionQuery { __schema { queryType { name } mutationType { name } types { name fields { name } } } }"}'
         for _gql in "$TARGET/graphql" "$TARGET/api/graphql" "$TARGET/v1/graphql" "$TARGET/query"; do
-            _gql_resp=$(curl -s "${_PROXY_CURL[@]}" -m 10 -X POST -H "Content-Type: application/json" \
+            _gql_resp=$(curl -s "${_PROXY_CURL[@]}" "${_MTLS_CURL[@]}" -m 10 -X POST -H "Content-Type: application/json" \
                 ${AUTH_TOKEN:+-H "Authorization: Bearer $AUTH_TOKEN"} \
                 -d "$_gql_q" "$_gql" 2>/dev/null)
             if echo "$_gql_resp" | grep -q '"__schema"'; then
@@ -1893,7 +1901,7 @@ if command -v zaproxy &>/dev/null; then
             zap_api_call "core/action/accessUrl" "url=${_pw_enc}" > /dev/null 2>&1
         done
         # Importar robots.txt se disponível
-        _robots=$(curl -sk "${_PROXY_CURL[@]}" --max-time 5 "${TARGET%/}/robots.txt" 2>/dev/null)
+        _robots=$(curl -sk "${_PROXY_CURL[@]}" "${_MTLS_CURL[@]}" --max-time 5 "${TARGET%/}/robots.txt" 2>/dev/null)
         if echo "$_robots" | grep -q "Disallow\|Allow"; then
             echo "$_robots" | grep -oE "/(\S+)" | while read -r _rpath; do
                 _renc=$(python3 -c \
@@ -2155,7 +2163,7 @@ _oauth_wk="$OUTDIR/raw/oauth_well_known.json"
 : > "$_oauth_wk"
 # Descoberta passiva do well-known (degrada silenciosamente se ausente)
 for _wkp in "/.well-known/openid-configuration" "/.well-known/oauth-authorization-server"; do
-    if curl -s -S "${_PROXY_CURL[@]}" --max-time 15 "${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
+    if curl -s -S "${_PROXY_CURL[@]}" "${_MTLS_CURL[@]}" --max-time 15 "${TARGET}${_wkp}" -o "$_oauth_wk" 2>/dev/null \
             && [ -s "$_oauth_wk" ] && grep -q "authorization_endpoint" "$_oauth_wk"; then
         break
     fi

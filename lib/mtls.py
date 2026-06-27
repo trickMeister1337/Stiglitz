@@ -52,13 +52,13 @@ def validate():
             "mTLS parcial: defina STIGLITZ_MTLS_CERT E STIGLITZ_MTLS_KEY (ambos os arquivos PEM)")
     for label, p in (("cert", c), ("key", k)):
         if not os.path.isfile(p):
-            raise MtlsConfigError(f"mTLS {label} nao encontrado: {p!r}")
+            raise MtlsConfigError(f"mTLS {label} não encontrado: {p!r}")
         if not os.access(p, os.R_OK):
-            raise MtlsConfigError(f"mTLS {label} sem permissao de leitura: {p!r}")
+            raise MtlsConfigError(f"mTLS {label} sem permissão de leitura: {p!r}")
     if key_is_encrypted(k):
         raise MtlsConfigError(
             f"mTLS key protegida por senha: {k!r}. Decripte antes "
-            "(ex.: openssl rsa -in enc.pem -out plain.pem) — senha nao suportada nesta entrega")
+            "(ex.: openssl rsa -in enc.pem -out plain.pem) — senha não suportada nesta entrega")
 
 
 def curl_cert_args():

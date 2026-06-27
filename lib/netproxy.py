@@ -87,14 +87,31 @@ def _mtls_context():
     return mtls.client_ssl_context()
 
 
+def _apply_mtls(ssl_context):
+    """Resolve/augmenta o ssl_context com o client-cert mTLS.
+
+    None + mTLS ativo → novo contexto mTLS completo.
+    Context fornecido + mTLS ativo → carrega o client-cert NO context do chamador
+    (módulos que passam CERT_NONE próprio ainda apresentam o cert — fix C2).
+    mTLS desativado → retorna inalterado."""
+    if ssl_context is None:
+        return _mtls_context()
+    try:
+        import mtls
+    except ImportError:
+        return ssl_context
+    if mtls.is_enabled():
+        ssl_context.load_cert_chain(mtls.cert_path(), mtls.key_path())
+    return ssl_context
+
+
 def make_opener(ssl_context=None):
     """OpenerDirector com proxy (se configurado) + ssl_context p/ HTTPS.
 
     Com proxy SOCKS, o ssl_context é entregue ao SocksiPyHandler (que já trata HTTPS);
     NÃO se adiciona um HTTPSHandler separado, senão ele venceria a cadeia https e o
     tráfego HTTPS sairia DIRETO (vazamento de atribuição)."""
-    if ssl_context is None:
-        ssl_context = _mtls_context()
+    ssl_context = _apply_mtls(ssl_context)
     proxy_handlers = _proxy_handlers(ssl_context=ssl_context)
     handlers = []
     if ssl_context is not None and not _is_socks():
@@ -106,8 +123,7 @@ def make_opener(ssl_context=None):
 def build_opener(*extra_handlers, ssl_context=None):
     """build_opener incluindo os handlers de proxy. Para módulos com handlers próprios
     (ex.: bizlogic _ScopedRedirectHandler). Mesma regra do make_opener p/ SOCKS+ssl."""
-    if ssl_context is None:
-        ssl_context = _mtls_context()
+    ssl_context = _apply_mtls(ssl_context)
     proxy_handlers = _proxy_handlers(ssl_context=ssl_context)
     handlers = list(extra_handlers)
     if ssl_context is not None and not _is_socks():
