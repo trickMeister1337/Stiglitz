@@ -96,3 +96,28 @@ def test_acquire_raises_without_access_token(monkeypatch):
     _set_creds(monkeypatch)
     with pytest.raises(oa.OAuthError):
         oa.acquire_access_token()
+
+
+def test_cli_acquire_prints_only_token(monkeypatch, capsys):
+    monkeypatch.setattr(oa, "acquire_access_token", lambda timeout=15: "AT-CLI")
+    rc = oa.main(["acquire"])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert out.out.strip() == "AT-CLI"
+    assert out.err == ""
+
+
+def test_cli_acquire_error_to_stderr(monkeypatch, capsys):
+    def boom(timeout=15):
+        raise oa.OAuthError("HTTP 401 do token endpoint: Unauthorized")
+    monkeypatch.setattr(oa, "acquire_access_token", boom)
+    rc = oa.main(["acquire"])
+    out = capsys.readouterr()
+    assert rc == 1
+    assert out.out == ""
+    assert "401" in out.err
+
+
+def test_cli_unknown_subcommand(capsys):
+    rc = oa.main(["bogus"])
+    assert rc == 2

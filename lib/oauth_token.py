@@ -18,6 +18,7 @@ onde guardar o token (env STIGLITZ_ACCESS_TOKEN é a convenção).
 """
 import json
 import os
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -149,3 +150,20 @@ def apply_to_curl(curl_cmd, access_token, header="Authorization"):
     )
     curl_cmd = pattern.sub("", curl_cmd).strip()
     return curl_cmd + " -H " + shlex.quote(new_h)
+
+
+def main(argv):
+    """CLI: `acquire` imprime o access_token em stdout (exit 0); erro → stderr (exit 1)."""
+    if argv and argv[0] == "acquire":
+        try:
+            print(acquire_access_token())
+            return 0
+        except OAuthError as e:
+            print(f"erro: {e}", file=sys.stderr)
+            return 1
+    print("uso: oauth_token.py acquire", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
