@@ -235,10 +235,10 @@ zap_setup_client_cert() {
     local _zap_cert_ok=0
     zap_api_call "network/action/addPkcs12ClientCertificate" \
         "filePath=${ZAP_MTLS_P12}&password=&index=0" 2>/dev/null \
-        | grep -q '"Result"\|"OK"' && _zap_cert_ok=1
+        | grep -q '"Result"' && _zap_cert_ok=1
     [ "$_zap_cert_ok" = "1" ] && \
         zap_api_call "network/action/setUseClientCertificate" "use=true" 2>/dev/null \
-        | grep -q '"Result"\|"OK"' || _zap_cert_ok=0
+        | grep -q '"Result"' || _zap_cert_ok=0
     if [ "$_zap_cert_ok" = "1" ]; then
         echo -e "  ${GREEN}[✓] client-cert mTLS carregado no ZAP${NC}"
     else

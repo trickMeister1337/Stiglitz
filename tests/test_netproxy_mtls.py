@@ -1,6 +1,7 @@
 # tests/test_netproxy_mtls.py
 import os, sys, ssl, datetime
 import urllib.request
+import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import netproxy
 
@@ -21,6 +22,7 @@ class _FakeCtx:
 
 def _gen_pair(tmp_path):
     """Par cert+key PEM auto-assinado (requer cryptography)."""
+    pytest.importorskip("cryptography")
     from cryptography import x509
     from cryptography.x509.oid import NameOID
     from cryptography.hazmat.primitives import hashes, serialization
