@@ -893,7 +893,7 @@ elif command -v nmap &>/dev/null; then
     _NMAP_SCOPE="-p-"; _NMAP_LABEL="full TCP scan (-p-)"
     _edge_detected=0
     _cname=$(dig +short CNAME "$DOMAIN" 2>/dev/null | tr 'A-Z' 'a-z')
-    if printf '%s' "$_cname" | grep -qE 'elb\.amazonaws\.com|cloudfront\.net|cloudflare|akamai|azureedge|fastly|edgekey|edgesuite|awsglobalaccelerator|googleusercontent'; then
+    if printf '%s' "$_cname" | grep -qE 'elb\.amazonaws\.com|execute-api\.[a-z0-9-]+\.amazonaws\.com|cloudfront\.net|cloudflare|akamai|azureedge|fastly|edgekey|edgesuite|awsglobalaccelerator|googleusercontent'; then
         _edge_detected=1
     fi
     # httpx tech-detect também revela LB/CDN gerenciado quando o alvo resolve via A
@@ -901,6 +901,14 @@ elif command -v nmap &>/dev/null; then
     # o -p- varre 65k portas que o LB dropa/rate-limita (minutos jogados fora).
     if [ "$_edge_detected" = "0" ] && [ -f "$OUTDIR/raw/httpx_results.txt" ] \
        && grep -qiE 'amazon alb|amazon elb|elastic load balanc|cloudfront|cloudflare|akamai|fastly|azure front door|google frontend' "$OUTDIR/raw/httpx_results.txt"; then
+        _edge_detected=1
+    fi
+    # Sinal autoritativo: o httpx classifica o edge via cdncheck e grava cdn_type
+    # (cloud/cdn/waf) no JSON cru. Cobre AWS API Gateway (execute-api), CloudFront,
+    # ELB, Cloudflare etc. sem manter lista de nomes — fecha o gap do "nmap -p- em
+    # API Gateway" (CNAME execute-api.* não casava 'elb.amazonaws.com').
+    if [ "$_edge_detected" = "0" ] && [ -f "$OUTDIR/raw/httpx_results.jsonl" ] \
+       && grep -qE '"cdn_type":"(cloud|cdn|waf)"' "$OUTDIR/raw/httpx_results.jsonl"; then
         _edge_detected=1
     fi
     if [ "$_edge_detected" = "1" ]; then
