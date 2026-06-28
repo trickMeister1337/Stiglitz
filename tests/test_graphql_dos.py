@@ -71,3 +71,48 @@ def test_batch_m_bad_env_fallback(monkeypatch):
 def test_is_graphql_response_list_path():
     assert gd._is_graphql_response(200, '[{"data":{}}]') is True
     assert gd._is_graphql_response(200, '[{"nope":1}]') is False
+
+
+def _fake_send_factory(responses):
+    """responses: dict mapeando a 1ª query-substring → {status, body}."""
+    calls = []
+    def send(url, payload):
+        calls.append(payload)
+        q = json.dumps(payload)
+        for key, resp in responses.items():
+            if key in q:
+                return resp
+        return {"status": 200, "body": '{"data":{"__typename":"Query"}}'}
+    send.calls = calls
+    return send
+
+
+def test_run_noop_on_non_graphql(monkeypatch):
+    send = _fake_send_factory({"__typename": {"status": 200, "body": "<html/>"}})
+    out = gd.run("http://t/graphql", "staging", send)
+    assert out == []
+
+def test_run_production_is_dry_run(monkeypatch):
+    # detecção GraphQL ok, mas probes de amplificação NÃO são enviados
+    send = _fake_send_factory({"__typename": {"status": 200, "body": '{"data":{"__typename":"Query"}}'}})
+    out = gd.run("http://t/graphql", "production", send, n=10, m=3)
+    assert len(send.calls) == 1  # só a detecção
+    assert any(f["type"] == "graphql_dos_dryrun" for f in out)
+
+def test_run_staging_sends_and_classifies(monkeypatch):
+    def send(url, payload):
+        # detecção
+        if payload == {"query": "{__typename}"}:
+            return {"status": 200, "body": '{"data":{"__typename":"Query"}}'}
+        # aliasing: devolve os n aliases resolvidos
+        if isinstance(payload, dict) and payload.get("query", "").startswith("{ a0:"):
+            data = {"data": {f"a{i}": "Query" for i in range(10)}}
+            return {"status": 200, "body": json.dumps(data)}
+        # batching
+        if isinstance(payload, list):
+            return {"status": 200, "body": json.dumps([{"data": {}}] * len(payload))}
+        return {"status": 200, "body": "{}"}
+    out = gd.run("http://t/graphql", "staging", send, n=10, m=3)
+    types = {f["type"] for f in out}
+    assert "graphql_no_complexity_limit" in types
+    assert "graphql_batching_enabled" in types
