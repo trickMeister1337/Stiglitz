@@ -222,6 +222,48 @@ def test_replay_parses_status_marker_with_embedded_marker(monkeypatch):
     assert r["body"].startswith("data __HTTP_STATUS__:fake more")
 
 
+def test_replay_auth_header_before_url(monkeypatch):
+    # Regressão: o header Authorization deve vir ANTES do '--'/url. Se vier depois,
+    # o curl trata "Authorization: Bearer ..." como segunda URL e o token nunca é
+    # enviado → o replay "cross" do token B roda DESLOGADO (falso PROTECTED → FN de BOLA).
+    import subprocess
+    captured = {}
+
+    class _P:
+        stdout = "{}\n__HTTP_STATUS__:200"
+
+    def fake_run(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return _P()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    B.replay({"url": "https://t.com/users/1", "method": "GET"}, "TOKB")
+    cmd = captured["cmd"]
+    assert "--" in cmd
+    dd = cmd.index("--")
+    auth_idx = next(i for i, a in enumerate(cmd)
+                    if isinstance(a, str) and a.startswith("Authorization: Bearer"))
+    assert auth_idx < dd, "header Authorization deve preceder o '--'/url"
+    assert "Authorization: Bearer TOKB" in cmd
+
+
+def test_replay_unauth_sends_no_auth_header(monkeypatch):
+    import subprocess
+    captured = {}
+
+    class _P:
+        stdout = "{}\n__HTTP_STATUS__:401"
+
+    def fake_run(cmd, *a, **k):
+        captured["cmd"] = cmd
+        return _P()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    B.replay({"url": "https://t.com/users/1", "method": "GET"}, None)
+    assert not any(isinstance(a, str) and a.startswith("Authorization:")
+                   for a in captured["cmd"])
+
+
 def test_run_writes_access_findings_array_in_raw(tmp_path):
     msgs_a = _json.dumps({"messages": [
         {"requestHeader": "GET /users/123 HTTP/1.1\r\nHost: t.com\r\n\r\n", "requestBody": "",

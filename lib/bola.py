@@ -217,10 +217,10 @@ def replay(req, token):
         return {"status": 0, "body": ""}
     if method not in SAFE_METHODS:
         return {"status": 0, "body": ""}
+    auth_args = ["-H", f"Authorization: Bearer {token}"] if token else []
     cmd = ["curl", *netproxy.curl_proxy_args(), *mtls.curl_cert_args(), "-s", "-S", "--max-time", "15", "-X", method,
+           *auth_args,
            "-o", "-", "-w", "\n__HTTP_STATUS__:%{http_code}", "--", url]
-    if token:
-        cmd += ["-H", f"Authorization: Bearer {token}"]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         raw = p.stdout or ""
