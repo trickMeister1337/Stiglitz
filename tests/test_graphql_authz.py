@@ -83,3 +83,58 @@ def test_replay_unauth_has_no_auth_header(monkeypatch):
     assert not any(isinstance(a, str) and a.startswith("Authorization:")
                    for a in captured["cmd"])
     assert out["status"] == 401
+
+
+def _msgs_with_owner_data():
+    # baseline (token A) devolveu o email do dono no corpo
+    return [_msg("POST", "http://t/graphql", '{"query":"{ me { email } }"}',
+                 status=200, resp='{"data":{"me":{"email":"alice@corp.com"}}}')]
+
+
+def test_run_confirms_bola_when_cross_leaks_owner_data(tmp_path):
+    msgs = _msgs_with_owner_data()
+    def replay_fn(req, token):
+        # token B (cross) recebe o MESMO dado do dono → BOLA confirmado
+        if token == "B":
+            return {"status": 200, "body": '{"data":{"me":{"email":"alice@corp.com"}}}'}
+        return {"status": 401, "body": ""}  # unauth negado
+    out = gz.run(msgs, "A", "B", str(tmp_path), replay_fn=replay_fn)
+    assert len(out) == 1
+    assert out[0]["type"] == "graphql_bola"
+    assert out[0]["confirmed"] is True
+    assert os.path.exists(os.path.join(str(tmp_path), "raw", "graphql_authz.json"))
+
+
+def test_run_skips_mutation_without_optin(tmp_path):
+    msgs = [_msg("POST", "http://t/graphql", '{"query":"mutation { pay(amount:1){ id } }"}',
+                 status=200, resp='{"data":{"pay":{"id":"x"}}}')]
+    calls = []
+    def replay_fn(req, token):
+        calls.append(token)
+        return {"status": 200, "body": '{"data":{"pay":{"id":"x"}}}'}
+    out = gz.run(msgs, "A", "B", str(tmp_path), replay_fn=replay_fn, mutate=False)
+    assert calls == []          # mutation nunca replayada sem opt-in
+    assert out == []
+
+
+def test_run_mutation_optin_blocked_in_production(tmp_path):
+    msgs = [_msg("POST", "http://t/graphql", '{"query":"mutation { pay(amount:1){ id } }"}',
+                 status=200, resp='{}')]
+    calls = []
+    def replay_fn(req, token):
+        calls.append(token)
+        return {"status": 200, "body": "{}"}
+    out = gz.run(msgs, "A", "B", str(tmp_path), replay_fn=replay_fn, mutate=True, profile="production")
+    assert calls == []          # gating duplo: mutate=True mas production → pulado
+
+
+def test_run_dedups_same_host_path_class(tmp_path):
+    op = '{"query":"{ account(id:1){ balance } }"}'
+    msgs = [_msg("POST", "http://t/graphql", op, status=200, resp='{"data":{"account":{"id":"1"}}}'),
+            _msg("POST", "http://t/graphql", op, status=200, resp='{"data":{"account":{"id":"1"}}}')]
+    def replay_fn(req, token):
+        if token == "B":
+            return {"status": 200, "body": '{"data":{"account":{"id":"1"}}}'}
+        return {"status": 401, "body": ""}
+    out = gz.run(msgs, "A", "B", str(tmp_path), replay_fn=replay_fn)
+    assert len(out) == 1        # mesma (host, path, class) → 1 finding

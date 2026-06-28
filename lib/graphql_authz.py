@@ -75,3 +75,74 @@ def _replay(req, token):
         except ValueError:
             status = 0
     return {"status": status, "body": body}
+
+
+def run(messages, token_a, token_b, outdir, replay_fn=_replay, mutate=False, profile="staging"):
+    """Replaya as operações GraphQL com 2 tokens; grava raw/graphql_authz.json.
+
+    Só queries por padrão; mutations só com mutate=True E profile != production.
+    """
+    corpus = select_graphql_messages(messages)
+    seen = set()
+    findings = []
+    prod = (profile or "").lower() == "production"
+    for req in corpus:
+        if graphql_audit.is_mutation(req.get("req_body") or "") and not (mutate and not prod):
+            continue
+        baseline = {"status": req.get("status"), "body": req.get("resp_body")}
+        canary = bola.extract_canary(req.get("resp_body"), "")
+        cross = replay_fn(req, token_b)
+        unauth = replay_fn(req, None)
+        v = bola.verdict(baseline, cross, unauth, canary)
+        if v["state"] not in ("CONFIRMED", "INCONCLUSIVE"):
+            continue
+        klass = _classify(req)
+        sp = urllib.parse.urlsplit(req.get("url") or "")
+        key = (sp.netloc, sp.path, klass)
+        if key in seen:
+            continue
+        seen.add(key)
+        confirmed = v["state"] == "CONFIRMED"
+        finding = {
+            "type": klass,
+            "cwe": "CWE-639" if klass == "graphql_bola" else "CWE-285",
+            "url": req.get("url", ""), "param": "",
+            "severity": "high" if confirmed else "info",
+            "confirmed": confirmed, "confidence": v.get("confidence", 0),
+            "canary_hit": v.get("canary_hit", False), "source": "graphql_authz",
+            "poc_note": f"GraphQL access-control {v['state']} via token-B replay",
+        }
+        finding["fingerprint"] = _fingerprint(finding)
+        findings.append(finding)
+    out = os.path.join(outdir, "raw", "graphql_authz.json")
+    try:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump(findings, fh, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        print(f"aviso: não foi possível gravar graphql_authz.json: {exc}", file=sys.stderr)
+    return findings
+
+
+def main(argv):
+    """uso: graphql_authz.py <zap_messages.json> <outdir> (tokens via env)."""
+    with open(argv[1], encoding="utf-8") as fh:
+        messages = bola.parse_zap_messages(fh.read())
+    outdir = argv[2]
+    tok_a = os.environ.get("BOLA_TOKEN_A", "")
+    tok_b = os.environ.get("BOLA_TOKEN_B", "")
+    if not tok_a or not tok_b:
+        print("  [○] GraphQL authz: 2 tokens necessários — pulado")
+        return 0
+    if tok_a == tok_b:
+        print("  [○] GraphQL authz: TOKEN_A == TOKEN_B — pulado", file=sys.stderr)
+        return 0
+    mutate = os.environ.get("STIGLITZ_GQL_MUTATE", "") == "1"
+    profile = os.environ.get("STIGLITZ_PROFILE", "staging")
+    findings = run(messages, tok_a, tok_b, outdir, mutate=mutate, profile=profile)
+    print(f"  [{'✓' if findings else '○'}] GraphQL authz: {len(findings)} finding(s) → graphql_authz.json")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
