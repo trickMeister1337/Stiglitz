@@ -29,6 +29,29 @@ def introspection_query():
     return _INTROSPECTION
 
 
+def is_mutation(operation_body):
+    """True se a operação GraphQL é uma mutation.
+
+    Aceita o corpo JSON do POST ({"query": "..."}), a string da operação, ou um
+    array de batch (mutation se QUALQUER op for mutation). Heurística: o keyword
+    de operação top-level é 'mutation'. Queries anônimas ('{ ... }'), 'query' e
+    'subscription' → False. Não faz parse completo de AST.
+    """
+    text = operation_body or ""
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict) and "query" in obj:
+            text = obj.get("query") or ""
+        elif isinstance(obj, list):
+            return any(
+                is_mutation(o.get("query", "")) if isinstance(o, dict) else False
+                for o in obj)
+    except (ValueError, TypeError):
+        pass
+    text = re.sub(r"#[^\n]*", "", text).lstrip()
+    return bool(re.match(r"mutation\b", text, re.I))
+
+
 def is_introspection_enabled(resp):
     return bool(((resp or {}).get("data") or {}).get("__schema"))
 
