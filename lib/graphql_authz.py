@@ -81,6 +81,12 @@ def run(messages, token_a, token_b, outdir, replay_fn=_replay, mutate=False, pro
     """Replaya as operações GraphQL com 2 tokens; grava raw/graphql_authz.json.
 
     Só queries por padrão; mutations só com mutate=True E profile != production.
+
+    Nota de contrato: o baseline (o "dado do dono") vem do próprio histórico do
+    ZAP (`req["resp_body"]`, já capturado pelo spider autenticado com token_a) —
+    não há replay ao vivo com token_a aqui. `token_a` permanece na assinatura por
+    simetria com a guarda da CLI (`main` exige os 2 tokens) e como ponto de
+    extensão futuro para um baseline ao vivo; hoje só `token_b`/unauth são enviados.
     """
     corpus = select_graphql_messages(messages)
     seen = set()
@@ -126,6 +132,9 @@ def run(messages, token_a, token_b, outdir, replay_fn=_replay, mutate=False, pro
 
 def main(argv):
     """uso: graphql_authz.py <zap_messages.json> <outdir> (tokens via env)."""
+    if len(argv) < 3:
+        print("uso: graphql_authz.py <zap_messages.json> <outdir>", file=sys.stderr)
+        return 2
     with open(argv[1], encoding="utf-8") as fh:
         messages = bola.parse_zap_messages(fh.read())
     outdir = argv[2]

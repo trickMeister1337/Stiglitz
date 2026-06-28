@@ -126,6 +126,7 @@ def test_run_mutation_optin_blocked_in_production(tmp_path):
         return {"status": 200, "body": "{}"}
     out = gz.run(msgs, "A", "B", str(tmp_path), replay_fn=replay_fn, mutate=True, profile="production")
     assert calls == []          # gating duplo: mutate=True mas production → pulado
+    assert out == []
 
 
 def test_run_dedups_same_host_path_class(tmp_path):
@@ -138,3 +139,33 @@ def test_run_dedups_same_host_path_class(tmp_path):
         return {"status": 401, "body": ""}
     out = gz.run(msgs, "A", "B", str(tmp_path), replay_fn=replay_fn)
     assert len(out) == 1        # mesma (host, path, class) → 1 finding
+
+
+def test_run_bfla_confirmed_for_sensitive_query(tmp_path):
+    # query com nome sensível ('admin') → graphql_bfla; não é mutation → não pulada
+    msgs = [_msg("POST", "http://t/graphql", '{"query":"{ adminUser { email } }"}',
+                 status=200, resp='{"data":{"adminUser":{"email":"root@corp.com"}}}')]
+    def replay_fn(req, token):
+        if token == "B":                                          # cross lê o dado privilegiado
+            return {"status": 200, "body": '{"data":{"adminUser":{"email":"root@corp.com"}}}'}
+        return {"status": 401, "body": ""}                        # unauth negado
+    out = gz.run(msgs, "A", "B", str(tmp_path), replay_fn=replay_fn)
+    assert len(out) == 1
+    assert out[0]["type"] == "graphql_bfla"
+    assert out[0]["cwe"] == "CWE-285"
+    assert out[0]["confirmed"] is True
+    assert out[0]["severity"] == "high"
+
+
+def test_run_inconclusive_is_info_severity(tmp_path):
+    # cross 2xx mas SEM o canário do baseline → INCONCLUSIVE → confirmed False, severity info
+    msgs = [_msg("POST", "http://t/graphql", '{"query":"{ me { email } }"}',
+                 status=200, resp='{"data":{"me":{"email":"alice@corp.com"}}}')]
+    def replay_fn(req, token):
+        if token == "B":                                          # dado de OUTRO usuário (sem canário)
+            return {"status": 200, "body": '{"data":{"me":{"email":"bob@corp.com"}}}'}
+        return {"status": 401, "body": ""}
+    out = gz.run(msgs, "A", "B", str(tmp_path), replay_fn=replay_fn)
+    assert len(out) == 1
+    assert out[0]["confirmed"] is False
+    assert out[0]["severity"] == "info"
