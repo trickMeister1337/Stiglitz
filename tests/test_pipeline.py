@@ -50,7 +50,7 @@ def test_plan_filtra_only(outdir):
 
 
 def test_p9_inclui_subfases_authz_na_mesma_invocacao(outdir):
-    # P9.5/9.6/9.7 consomem o ZAP vivo iniciado pela P9 (o daemon morre no trap EXIT
+    # P9.5/9.6/9.7/9.8 consomem o ZAP vivo iniciado pela P9 (o daemon morre no trap EXIT
     # de cada invocação do stiglitz.sh). Logo precisam rodar na MESMA invocação que a
     # P9, como unidade combinada (padrão P3_P4) — não como passos isolados do pipeline.
     p = Pipeline(_cfg(outdir), runner=RecordingRunner())

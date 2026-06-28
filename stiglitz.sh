@@ -2263,9 +2263,13 @@ _zap_msgs_gql="$OUTDIR/raw/zap_messages_a.json"
 # Reusa o dump do P9.5; se ausente (P9.5 desligada), dumpa agora
 [ -s "$_zap_msgs_gql" ] || zap_api_call "core/view/messages" "" > "$_zap_msgs_gql" 2>/dev/null || true
 if [ -s "$_zap_msgs_gql" ]; then
-    BOLA_TOKEN_A="$TOKEN_A" BOLA_TOKEN_B="$TOKEN_B" \
-        STIGLITZ_GQL_MUTATE="$GRAPHQL_MUTATE" STIGLITZ_PROFILE="${STIGLITZ_PROFILE:-staging}" \
-        python3 "$SCRIPT_DIR/lib/graphql_authz.py" "$_zap_msgs_gql" "$OUTDIR" || true
+    if BOLA_TOKEN_A="$TOKEN_A" BOLA_TOKEN_B="$TOKEN_B" \
+            STIGLITZ_GQL_MUTATE="$GRAPHQL_MUTATE" STIGLITZ_PROFILE="${STIGLITZ_PROFILE:-staging}" \
+            python3 "$SCRIPT_DIR/lib/graphql_authz.py" "$_zap_msgs_gql" "$OUTDIR"; then
+        echo -e "  ${GREEN}[✓] GraphQL authz concluído → raw/graphql_authz.json${NC}"
+    else
+        echo -e "  ${YELLOW}[!] graphql-authz: módulo retornou erro${NC}"
+    fi
 else
     echo -e "  ${YELLOW}[○] sem histórico ZAP — GraphQL authz pulado${NC}"
 fi
