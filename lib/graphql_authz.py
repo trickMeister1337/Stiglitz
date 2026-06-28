@@ -29,7 +29,7 @@ def select_graphql_messages(messages, endpoint_substr="graphql"):
     for m in messages:
         if (m.get("method") or "").upper() != "POST":
             continue
-        if endpoint_substr not in (m.get("url") or "").lower():
+        if endpoint_substr.lower() not in (m.get("url") or "").lower():
             continue
         body = m.get("req_body") or ""
         if '"query"' in body or '"mutation"' in body or "operationName" in body:
@@ -55,12 +55,12 @@ def _replay(req, token):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return {"status": 0, "body": ""}
+    auth_args = ["-H", f"Authorization: Bearer {token}"] if token else []
     cmd = ["curl", *netproxy.curl_proxy_args(), *mtls.curl_cert_args(), "-s", "-S",
            "--max-time", "15", "-X", "POST", "-H", "Content-Type: application/json",
+           *auth_args,
            "-o", "-", "-w", "\n__HTTP_STATUS__:%{http_code}",
            "-d", req.get("req_body") or "", "--", url]
-    if token:
-        cmd += ["-H", f"Authorization: Bearer {token}"]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         raw = p.stdout or ""
