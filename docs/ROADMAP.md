@@ -13,6 +13,9 @@ scan↔RED (melhores features gated no RED); (2) catálogo promete o que o colet
 limpos, validação ao vivo dos caminhos críticos (Juice Shop+ZAP via docker; searchsploit).
 Módulos novos = lógica pura + CLI primeiro (padrão `bola.py`/`takeover.py`), integração depois.
 
+**Roadmaps temáticos:** [`ROADMAP-blackbox-cde.md`](ROADMAP-blackbox-cde.md) — melhoria dos
+achados em scan black-box de CDE zero-credencial (OpenAPI como motor, OOB self-host, CDE-driver).
+
 ---
 
 ## P0 — COMPLETO e validado
