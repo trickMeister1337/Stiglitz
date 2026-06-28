@@ -39,3 +39,35 @@ def test_classify_batch_finds_array():
 
 def test_classify_batch_none_single_object():
     assert gd.classify_batch_response(200, '{"data":{}}', 3) is None
+
+def test_alias_n_default(monkeypatch):
+    monkeypatch.delenv("STIGLITZ_GQL_ALIAS_N", raising=False)
+    assert gd._alias_n() == 100
+
+def test_alias_n_clamp_minimum(monkeypatch):
+    monkeypatch.setenv("STIGLITZ_GQL_ALIAS_N", "1")
+    assert gd._alias_n() == 2
+
+def test_alias_n_bad_env_fallback(monkeypatch):
+    monkeypatch.setenv("STIGLITZ_GQL_ALIAS_N", "notanint")
+    assert gd._alias_n() == 100
+
+def test_alias_n_env_override(monkeypatch):
+    monkeypatch.setenv("STIGLITZ_GQL_ALIAS_N", "50")
+    assert gd._alias_n() == 50
+
+def test_batch_m_default(monkeypatch):
+    monkeypatch.delenv("STIGLITZ_GQL_BATCH_M", raising=False)
+    assert gd._batch_m() == 15
+
+def test_batch_m_clamp_minimum(monkeypatch):
+    monkeypatch.setenv("STIGLITZ_GQL_BATCH_M", "1")
+    assert gd._batch_m() == 2
+
+def test_batch_m_bad_env_fallback(monkeypatch):
+    monkeypatch.setenv("STIGLITZ_GQL_BATCH_M", "x")
+    assert gd._batch_m() == 15
+
+def test_is_graphql_response_list_path():
+    assert gd._is_graphql_response(200, '[{"data":{}}]') is True
+    assert gd._is_graphql_response(200, '[{"nope":1}]') is False
