@@ -56,7 +56,7 @@ def test_p9_inclui_subfases_authz_na_mesma_invocacao(outdir):
     p = Pipeline(_cfg(outdir), runner=RecordingRunner())
     p9 = [ph for ph in p.phases if ph.key == "P9"]
     assert len(p9) == 1
-    assert p9[0].only == "P9 P9_5 P9_6 P9_7"
+    assert p9[0].only == "P9 P9_5 P9_6 P9_7 P9_8"
 
 
 def test_p3_p4_sao_unidade_combinada(outdir):

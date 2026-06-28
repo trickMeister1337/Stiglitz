@@ -322,6 +322,7 @@ ONLY_PHASES=""     # Lista de fases a executar (ex: "P4"); vazio = todas
 DRY_RUN=false      # Simular: imprime o plano e sai sem executar ferramentas
 OAUTH_ACTIVE=0     # Probes ativos OAuth/OIDC (P9.6) — opt-in via --oauth-active
 BIZLOGIC_MUTATE=0  # opt-in p/ testes mutantes de lógica de negócio (P9.7)
+GRAPHQL_MUTATE=""  # replay de mutations no P9.8 (opt-in, gated por profile)
 REPRO_RAW=0        # bloco de repro sem sanitização (uso interno) — opt-in via --repro-raw
 STIGLITZ_PROXY="${STIGLITZ_PROXY:-}"  # proxy HTTP/SOCKS p/ tráfego do alvo — opt-in via --proxy
 STIGLITZ_MTLS_CERT="${STIGLITZ_MTLS_CERT:-}"  # client-cert PEM — opt-in via --mtls-cert
@@ -341,6 +342,7 @@ for _i in "${!_args[@]}"; do
         --dry-run)           DRY_RUN=true ;;
         --oauth-active)      OAUTH_ACTIVE=1 ;;
         --bizlogic-mutate)   BIZLOGIC_MUTATE=1 ;;
+        --graphql-mutate)    GRAPHQL_MUTATE=1 ;;
         --repro-raw)         REPRO_RAW=1 ;;
         --proxy)             STIGLITZ_PROXY="${_args[$((${_i}+1))]}" ;;
         --mtls-cert)         STIGLITZ_MTLS_CERT="${_args[$((${_i}+1))]}" ;;
@@ -646,7 +648,7 @@ _phase_enabled() {
 _needs_network() {
     # Retorna 0 se alguma fase habilitada precisa de acesso de rede ao alvo.
     # Fases offline (P11 = geração de relatório) não requerem conectividade.
-    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P9_5 P9_6 P9_7 P10 P10_5; do
+    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P9_5 P9_6 P9_7 P9_8 P10 P10_5; do
         _phase_enabled "$_np" && return 0
     done
     return 1
@@ -1794,10 +1796,16 @@ if command -v zaproxy &>/dev/null; then
             _gql_resp=$(curl -s "${_PROXY_CURL[@]}" "${_MTLS_CURL[@]}" -m 10 -X POST -H "Content-Type: application/json" \
                 ${AUTH_TOKEN:+-H "Authorization: Bearer $AUTH_TOKEN"} \
                 -d "$_gql_q" "$_gql" 2>/dev/null)
-            if echo "$_gql_resp" | grep -q '"__schema"'; then
-                echo -e "  ${GREEN}[✓]${NC} GraphQL introspection respondeu em ${_gql}"
-                echo "$_gql_resp" > "$OUTDIR/raw/graphql_resp.json"
-                python3 "$SCRIPT_DIR/lib/graphql_audit.py" "$OUTDIR" "$_gql" || true
+            if echo "$_gql_resp" | grep -qE '"__schema"|"errors"|"data"'; then
+                # endpoint GraphQL detectado (mesmo com introspection desabilitada → "errors")
+                if echo "$_gql_resp" | grep -q '"__schema"'; then
+                    echo -e "  ${GREEN}[✓]${NC} GraphQL introspection respondeu em ${_gql}"
+                    echo "$_gql_resp" > "$OUTDIR/raw/graphql_resp.json"
+                    python3 "$SCRIPT_DIR/lib/graphql_audit.py" "$OUTDIR" "$_gql" || true
+                fi
+                # DoS (batching/aliasing) — independe de introspection; dry-run em production
+                STIGLITZ_PROFILE="${STIGLITZ_PROFILE:-staging}" \
+                    python3 "$SCRIPT_DIR/lib/graphql_dos.py" "$OUTDIR" "$_gql" || true
                 break
             fi
         done
@@ -2246,6 +2254,24 @@ fi
 phase_end "P9_7"
 phase_done "FASE_9_7"
 fi  # fim P9.7
+
+# ====================== FASE 9.8: GRAPHQL FIELD-LEVEL AUTHZ ======================
+if _phase_enabled "P9_8" && [ -n "$TOKEN_A" ] && [ -n "$TOKEN_B" ]; then
+phase_start "P9_8"
+phase_banner "FASE 9.8: GRAPHQL FIELD-LEVEL AUTHZ (BOLA/BFLA)"
+_zap_msgs_gql="$OUTDIR/raw/zap_messages_a.json"
+# Reusa o dump do P9.5; se ausente (P9.5 desligada), dumpa agora
+[ -s "$_zap_msgs_gql" ] || zap_api_call "core/view/messages" "" > "$_zap_msgs_gql" 2>/dev/null || true
+if [ -s "$_zap_msgs_gql" ]; then
+    BOLA_TOKEN_A="$TOKEN_A" BOLA_TOKEN_B="$TOKEN_B" \
+        STIGLITZ_GQL_MUTATE="$GRAPHQL_MUTATE" STIGLITZ_PROFILE="${STIGLITZ_PROFILE:-staging}" \
+        python3 "$SCRIPT_DIR/lib/graphql_authz.py" "$_zap_msgs_gql" "$OUTDIR" || true
+else
+    echo -e "  ${YELLOW}[○] sem histórico ZAP — GraphQL authz pulado${NC}"
+fi
+phase_end "P9_8"
+phase_done "FASE_9_8"
+fi  # fim P9.8
 
 if _phase_enabled "P10"; then
 phase_start "P10"

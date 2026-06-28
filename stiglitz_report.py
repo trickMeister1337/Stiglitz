@@ -944,6 +944,8 @@ for _vf_file, _vf_label in [
     ('cms_findings.json',        'cms_findings'),
     ('jwt_findings.json',        'jwt_findings'),
     ('graphql_findings.json',    'graphql_findings'),
+    ('graphql_dos.json',         'graphql_dos'),
+    ('graphql_authz.json',       'graphql_authz'),
     ('retire_findings.json',     'retire_findings'),
     ('access_findings.json',     'access_findings'),
     ('oauth_findings.json',      'oauth_findings'),

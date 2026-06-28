@@ -51,7 +51,7 @@ PHASES: list[Phase] = [
     # P9.5/9.6/9.7 (Access Control/OAuth/BizLogic) consomem o ZAP vivo da P9 — o daemon
     # é encerrado no trap EXIT a cada invocação do stiglitz.sh, então rodam na MESMA
     # invocação que a P9 (unidade combinada, padrão P3_P4). Gating por token degrada sozinho.
-    Phase("P9",    "P9 P9_5 P9_6 P9_7", "Coleta ZAP + Access Control/OAuth/BizLogic"),
+    Phase("P9",    "P9 P9_5 P9_6 P9_7 P9_8", "Coleta ZAP + Access Control/OAuth/BizLogic/GraphQL"),
     Phase("P10",   "P10",   "Análise de JavaScript & secrets"),
     Phase("P10_5", "P10_5", "Testes complementares"),
     Phase("P11",   "P11",   "Geração de relatório"),
