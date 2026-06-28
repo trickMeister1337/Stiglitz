@@ -130,8 +130,11 @@ Itens de produto reconciliados com o código (detalhe e priorização vivem na m
   inteiro autenticado, sem JWT manual). Fail-closed default. `refresh_token` grant
   mantém a renovação on-401 na Fase 5. POST herda proxy+mTLS via `netproxy.urlopen`
 - ✅ **mTLS client-cert** (`lib/mtls.py`, opt-in `--mtls-cert`/`--mtls-key`): par PEM (sem senha) apresentado por curl/nuclei/ffuf + módulos urllib (via `netproxy.client_ssl_context`) + ZAP (PKCS#12 efêmero). Fail-closed; coexiste com `--proxy`. httpx/katana sem suporte (limitação documentada)
-- ⏳ **GraphQL além de introspection**: batching/aliasing DoS + field-level authz (reusar
-  `bola.py`). `graphql_audit.py` ainda só faz introspection
+- ✅ **GraphQL além de introspection** (`lib/graphql_dos.py` + `lib/graphql_authz.py`):
+  DoS batching/aliasing (probes `__typename`, detecção independente de introspection,
+  dry-run em `production`) na Fase 9; field-level authz (BOLA/BFLA) na **P9.8** —
+  replay das operações reais do histórico ZAP com 2 tokens reusando `bola.verdict`,
+  queries-only por padrão (mutations via `--graphql-mutate` + gating de profile)
 - ⏳ **FAPI / Open Banking Brasil**: PAR, mTLS-bound tokens, JARM (estender `oauth_audit.py`)
 - ⏳ **OAST always-on**: hoje opt-in via `INTERACTSH_SERVER` (`lib/oob.py`); reframe p/ sempre-ligado
 

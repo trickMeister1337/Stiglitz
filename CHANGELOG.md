@@ -4,6 +4,10 @@ All notable changes to Stiglitz are documented here. Dates are approximate.
 
 ## Unreleased
 
+- **GraphQL além de introspection**: `lib/graphql_dos.py` (DoS batching/aliasing
+  via probes `__typename`, dry-run em `production`) na Fase 9 e `lib/graphql_authz.py`
+  (field-level authz BOLA/BFLA na P9.8, replay 2-token do histórico ZAP reusando
+  `bola.py`, queries-only com mutations opt-in via `--graphql-mutate`).
 - **Auto-aquisição de token OAuth2 (client_credentials)**: `lib/oauth_token.py`
   (renomeado de `oauth_refresh.py`) adquire o `access_token` no startup do
   `stiglitz.sh` a partir de credenciais de client no env (`STIGLITZ_OAUTH_*`),
