@@ -16,6 +16,22 @@ class TestEmailSecurityClassifiers(unittest.TestCase):
         self.assertEqual(r["status"], "MISSING")
         self.assertEqual(r["severity"], "high")
 
+    def test_has_real_mx_distinguishes_cname_from_mx(self):
+        from email_security import _has_real_mx
+        # MX real tem prefixo de prioridade numérico
+        self.assertTrue(_has_real_mx("10 mxi.eu.mpssec.net.\n10 mxh.eu.mpssec.net."))
+        # `dig +short MX` num host CNAME'd devolve a linha do CNAME — NÃO é um MX
+        self.assertFalse(_has_real_mx("d-4bm696lytf.execute-api.sa-east-1.amazonaws.com."))
+        self.assertFalse(_has_real_mx(""))
+        self.assertFalse(_has_real_mx(None))
+
+    def test_classify_spf_missing_downgraded_without_mx(self):
+        from email_security import classify_spf
+        # host sem MX (ex.: CNAME → API Gateway/CDN): SPF ausente é low, não high
+        r = classify_spf([], host_has_mx=False)
+        self.assertEqual(r["status"], "MISSING")
+        self.assertEqual(r["severity"], "low")
+
     def test_classify_spf_permissive(self):
         from email_security import classify_spf
         r = classify_spf(["v=spf1 +all"])

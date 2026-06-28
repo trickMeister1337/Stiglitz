@@ -49,6 +49,21 @@ def dig(record_type, name, short=True):
         return ""
 
 
+def _has_real_mx(mx_output):
+    """True se a saída de `dig +short MX` contém ao menos um registro MX real.
+
+    Num host CNAME'd (ex.: api.example.com → AWS API Gateway/CloudFront/ALB),
+    `dig +short MX` devolve a linha do CNAME (sem prioridade) em vez de um MX.
+    Tratá-la como MX fazia o downgrade MX-aware NÃO disparar → SPF/DMARC ausentes
+    saíam como HIGH falso (afeta quase toda infra moderna atrás de CNAME). Um MX
+    real tem prefixo de prioridade numérico: `<pref> <host>`.
+    """
+    for line in (mx_output or "").splitlines():
+        if re.match(r"^\s*\d+\s+\S", line):
+            return True
+    return False
+
+
 def classify_spf(spf_records, host_has_mx=True):
     if not spf_records:
         sev = "high"
@@ -154,7 +169,7 @@ def analyze(domain):
 
     # MX-awareness: um host sem MX (ex.: CNAME → LB) não recebe email e tipicamente
     # não o envia — o impacto prático de SPF/DMARC ausentes é menor.
-    host_has_mx = bool(dig("MX", domain).strip())
+    host_has_mx = _has_real_mx(dig("MX", domain))
 
     dkim_found = []
     for sel in DKIM_SELECTORS:
