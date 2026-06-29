@@ -1262,6 +1262,21 @@ except: pass
         fi
         unset _oa_n
     fi
+    # ── P0.1: OpenAPI como motor — broken-auth ZERO-credencial ──────────────
+    # O spec documenta quais endpoints exigem auth (security:). Sondamos cada um
+    # SEM credencial: 2xx com dados reais = autenticação não aplicada (CWE-306),
+    # achado High confirmável que independe de token. Complementa o aviso de
+    # coverage-gap acima (em vez de só avisar "não testado", testamos o que dá).
+    if [ -s "$OUTDIR/raw/openapi_spec.json" ]; then
+        _ba_n=$(timeout 180 python3 "$SCRIPT_DIR/lib/openapi_probe.py" \
+                  "$OUTDIR/raw/openapi_spec.json" "$TARGET" "$OUTDIR" 2>/dev/null || echo 0)
+        if [ "${_ba_n:-0}" -gt 0 ]; then
+            echo -e "  ${RED}[!] OpenAPI broken-auth: ${_ba_n} endpoint(s) documentado(s) como protegido(s) respondem SEM credencial (CWE-306)${NC}"
+        else
+            echo -e "  ${GREEN}[✓]${NC} OpenAPI broken-auth: nenhum endpoint protegido respondeu sem credencial"
+        fi
+        unset _ba_n
+    fi
     # Endpoints históricos do OSINT (wayback/gau) alimentam a varredura
     if [ -n "$OSINT_DIR" ] && [ -s "$OSINT_DIR/endpoints_historical.txt" ]; then
         cat "$OSINT_DIR/endpoints_historical.txt" >> "$_nuclei_list"
