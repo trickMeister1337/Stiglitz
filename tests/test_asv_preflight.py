@@ -208,8 +208,8 @@ def test_cli_verdict(tmp_path):
         {"name": "SQL Injection", "source": "Nuclei", "severity": "high",
          "url": "https://a.com/x?id=1"}]}}
     fj = tmp_path / "findings.json"
-    with open(fj, "w") as f:
-        f.write(json.dumps(findings))
+    with open(fj, "w") as fh:
+        fh.write(json.dumps(findings))
     res = subprocess.run(
         ["python3", os.path.join(os.path.dirname(__file__), "..", "lib", "asv_preflight.py"),
          "verdict", str(fj)],
@@ -217,3 +217,48 @@ def test_cli_verdict(tmp_path):
     assert res.returncode == 0
     payload = json.loads(res.stdout)
     assert payload["verdict"]["would_pass"] is False
+
+
+def test_cli_verdict_scope_excludes_out_of_scope(tmp_path):
+    # Without --scope: out-of-scope FAIL finding is counted (fail-open) -> would_pass False.
+    # With --scope a.com: finding on evil.com is excluded -> would_pass True.
+    findings = {"summary": {"findings": [
+        {"name": "SQL Injection", "source": "Nuclei", "severity": "high",
+         "url": "https://evil.com/x?id=1"}]}}
+    fj = tmp_path / "findings.json"
+    with open(fj, "w") as fh:
+        fh.write(json.dumps(findings))
+    lib_path = os.path.join(os.path.dirname(__file__), "..", "lib", "asv_preflight.py")
+    # Without --scope: fail-open -> FAIL finding counted -> would_pass False
+    res_no_scope = subprocess.run(
+        ["python3", lib_path, "verdict", str(fj)],
+        capture_output=True, text=True)
+    assert res_no_scope.returncode == 0
+    payload_no_scope = json.loads(res_no_scope.stdout)
+    assert payload_no_scope["verdict"]["would_pass"] is False
+
+    # With --scope a.com: evil.com finding excluded -> would_pass True
+    res_scoped = subprocess.run(
+        ["python3", lib_path, "verdict", str(fj), "--scope", "a.com"],
+        capture_output=True, text=True)
+    assert res_scoped.returncode == 0
+    payload_scoped = json.loads(res_scoped.stdout)
+    assert payload_scoped["verdict"]["would_pass"] is True
+
+
+def test_cli_verdict_criteria_notes_present(tmp_path):
+    findings = {"summary": {"findings": [
+        {"name": "SQL Injection", "source": "Nuclei", "severity": "high",
+         "url": "https://a.com/x?id=1"}]}}
+    fj = tmp_path / "findings.json"
+    with open(fj, "w") as fh:
+        fh.write(json.dumps(findings))
+    res = subprocess.run(
+        ["python3", os.path.join(os.path.dirname(__file__), "..", "lib", "asv_preflight.py"),
+         "verdict", str(fj)],
+        capture_output=True, text=True)
+    assert res.returncode == 0
+    payload = json.loads(res.stdout)
+    assert "criteria_notes" in payload
+    assert "v3.1" in payload["criteria_notes"]
+    assert "v2" in payload["criteria_notes"]

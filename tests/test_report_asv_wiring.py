@@ -29,3 +29,16 @@ def test_emit_artifacts_pass_case():
         with open(os.path.join(d, "asv_verdict.json")) as fh:
             data = json.load(fh)
         assert data["verdict"]["would_pass"] is True
+
+
+def test_emit_artifacts_criteria_notes_in_json():
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "raw"))
+        findings = [{"name": "SQL Injection", "source": "Nuclei",
+                     "severity": "high", "url": "https://a.com/x?id=1"}]
+        ap.emit_artifacts(d, findings, ["a.com"])
+        with open(os.path.join(d, "asv_verdict.json")) as fh:
+            data = json.load(fh)
+        assert "criteria_notes" in data
+        assert "v3.1" in data["criteria_notes"]
+        assert "v2" in data["criteria_notes"]

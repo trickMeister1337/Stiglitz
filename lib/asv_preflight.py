@@ -269,6 +269,12 @@ _DISCLAIMER = ("This ASV Preflight is a prediction to remediate before the offic
                "and is not an Attestation of Scan Compliance. Criterion: CVSS v3.1 base "
                ">= 4.0 plus automatic-failure categories.")
 
+_CRITERIA_NOTES = ("CVSS criterion uses v3.1 base score (>= 4.0 = FAIL). The ASV Program "
+                   "Guide historically references CVSS v2 base; divergence may occur for "
+                   "vulnerabilities whose v2 and v3.1 scores fall on opposite sides of the "
+                   "4.0 threshold. Automatic-failure categories (SQLi, XSS, RCE, TLS weak, "
+                   "default creds, etc.) apply regardless of CVSS version.")
+
 
 def render_section_html(verdict, inventory):
     """Seção HTML 'ASV Preflight Verdict' (EN, deliverable)."""
@@ -323,7 +329,8 @@ def emit_artifacts(outdir, findings, scope_domains=None):
     verdict = aggregate(findings, scope_domains)
     inventory = build_inventory(os.path.join(outdir, "raw"))
     with open(os.path.join(outdir, "asv_verdict.json"), "w", encoding="utf-8") as fh:
-        _json.dump({"verdict": verdict, "inventory": inventory}, fh,
+        _json.dump({"verdict": verdict, "inventory": inventory,
+                    "criteria_notes": _CRITERIA_NOTES}, fh,
                    ensure_ascii=False, indent=2, default=str)
     return render_section_html(verdict, inventory)
 
@@ -338,17 +345,44 @@ def _load_findings(path):
 
 
 def main(argv):
-    """CLI: verdict <findings.json> [raw_dir] | inventory <raw_dir>."""
+    """CLI: verdict <findings.json> [raw_dir] [--scope <domain>] | inventory <raw_dir>.
+
+    verdict: avalia findings.json contra critérios ASV e exibe o veredito JSON.
+      --scope <domain>  filtra findings pelo domínio (mesmo critério do relatório).
+                        SEM --scope o veredito NÃO é filtrado por escopo (fail-open).
+    inventory: lista host/ip/porta/serviço/tls a partir dos arquivos de raw_dir.
+    """
     if len(argv) < 2:
-        sys.stderr.write("uso: asv_preflight.py {verdict <findings.json> [raw_dir]"
-                         " | inventory <raw_dir>}\n")
+        sys.stderr.write(
+            "uso: asv_preflight.py {verdict <findings.json> [raw_dir] [--scope <domínio>]"
+            " | inventory <raw_dir>}\n"
+            "     sem --scope o veredito NÃO é filtrado por escopo (fail-open)\n")
         return 2
     cmd = argv[0]
     if cmd == "verdict":
-        findings = _load_findings(argv[1])
-        raw_dir = argv[2] if len(argv) > 2 else ""
+        # Parse --scope anywhere after "verdict"; remaining positional args are
+        # findings_path and optional raw_dir.
+        rest = argv[1:]
+        scope_domain = None
+        positional = []
+        i = 0
+        while i < len(rest):
+            if rest[i] == "--scope" and i + 1 < len(rest):
+                scope_domain = rest[i + 1]
+                i += 2
+            else:
+                positional.append(rest[i])
+                i += 1
+        if not positional:
+            sys.stderr.write("uso: asv_preflight.py verdict <findings.json> [raw_dir]"
+                             " [--scope <domínio>]\n")
+            return 2
+        findings = _load_findings(positional[0])
+        raw_dir = positional[1] if len(positional) > 1 else ""
         inv = build_inventory(raw_dir) if raw_dir else []
-        print(_json.dumps({"verdict": aggregate(findings), "inventory": inv},
+        scope_domains = [scope_domain] if scope_domain else []
+        print(_json.dumps({"verdict": aggregate(findings, scope_domains),
+                           "inventory": inv, "criteria_notes": _CRITERIA_NOTES},
                           ensure_ascii=False, indent=2))
         return 0
     if cmd == "inventory":
