@@ -14,9 +14,16 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openapi_seed import _prefix as _spec_prefix
+from bola import extract_canary, is_safe_method
 
 _PARAM = re.compile(r"\{[^}]+\}")
 _HTTP_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
+_AUTH_ERR = re.compile(
+    r"unauthor|forbidden|access\s+denied|not\s+authenticated|"
+    r"missing\s+(?:token|auth)|invalid\s+token|token\s+(?:expired|missing)|"
+    r"please\s+log\s*in|login\s+required",
+    re.I,
+)
 
 
 def _as_dict(spec):
@@ -66,3 +73,29 @@ def op_url(spec, base_url, path, sample="1"):
     root = base_url.rstrip("/")
     full = path if (not prefix or path.startswith(prefix)) else prefix + path
     return _PARAM.sub(sample, root + full)
+
+
+def unauth_verdict(status, body, content_type=""):
+    """Veredito da resposta SEM credencial a um endpoint documentado como protegido.
+      PROTECTED    — 401/403/3xx, ou 2xx cujo corpo é envelope de erro de auth.
+      BROKEN_AUTH  — 2xx com dados reais (estruturado, canário, ou corpo substancial) → High.
+      INCONCLUSIVE — 2xx vazio/curto, 404/405, 5xx.
+    """
+    s = int(status or 0)
+    if s in (401, 403) or 300 <= s < 400:
+        return {"state": "PROTECTED", "severity": "info", "confidence": 0}
+    if not (200 <= s < 300):
+        return {"state": "INCONCLUSIVE", "severity": "info", "confidence": 20}
+    text = body or ""
+    if not text.strip():
+        return {"state": "INCONCLUSIVE", "severity": "info", "confidence": 25}
+    if _AUTH_ERR.search(text[:512]):
+        return {"state": "PROTECTED", "severity": "info", "confidence": 0}
+    canary = extract_canary(text, content_type)
+    ct = (content_type or "").lower()
+    structured = ("json" in ct or "xml" in ct or text.lstrip()[:1] in ("{", "["))
+    if canary:
+        return {"state": "BROKEN_AUTH", "severity": "high", "confidence": 90}
+    if structured or len(text) >= 64:
+        return {"state": "BROKEN_AUTH", "severity": "high", "confidence": 70}
+    return {"state": "INCONCLUSIVE", "severity": "info", "confidence": 40}
