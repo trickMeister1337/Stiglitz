@@ -219,7 +219,7 @@ def _inventory_from_nmap(xml_path):
             version = svc.get("version", "") if svc is not None else ""
             tunnel = svc.get("tunnel", "") if svc is not None else ""
             ver_str = (product + " " + version).strip()
-            tls = (tunnel == "ssl") or name in ("https", "ssl") or portid == 443
+            tls = (tunnel == "ssl") or name in ("https", "ssl")
             rows.append({"host": host, "ip": ip, "port": portid,
                          "service": name, "version": ver_str, "tls": tls})
     return rows

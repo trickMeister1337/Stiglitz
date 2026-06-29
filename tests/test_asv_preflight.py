@@ -171,6 +171,42 @@ def test_build_inventory_missing_files_degrades():
         assert ap.build_inventory(raw) == []   # nada para inventariar, sem erro
 
 
+# Regression: port 443 with a cleartext service must NOT be marked as TLS.
+_NMAP_XML_PLAIN_443 = """<?xml version="1.0"?>
+<nmaprun>
+  <host>
+    <address addr="198.51.100.5" addrtype="ipv4"/>
+    <hostnames><hostname name="b.com"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="443">
+        <state state="open"/>
+        <service name="http" product="SomeApp"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>
+"""
+
+
+def test_inventory_plain_http_on_443_not_tls():
+    """Port 443 with service name='http' and no tunnel attr must yield tls=False.
+
+    This regresses the bare `or portid == 443` heuristic: a cleartext service
+    deliberately bound to 443 was previously misclassified as TLS in the inventory.
+    nmap reliably sets tunnel='ssl' (or service name https/ssl) for real TLS services,
+    so TLS evidence must come from those fields only.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        raw = os.path.join(d, "raw")
+        os.makedirs(raw)
+        with open(os.path.join(raw, "nmap.xml"), "w") as fh:
+            fh.write(_NMAP_XML_PLAIN_443)
+        inv = ap.build_inventory(raw)
+    keyed = {(r["host"], r["port"]): r for r in inv}
+    assert ("b.com", 443) in keyed
+    assert keyed[("b.com", 443)]["tls"] is False
+
+
 # Task 4: render + CLI tests
 
 def test_render_section_fail_banner():
