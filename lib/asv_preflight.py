@@ -329,7 +329,7 @@ def _load_findings(path):
 def main(argv):
     """CLI: verdict <findings.json> [raw_dir] | inventory <raw_dir>."""
     if len(argv) < 2:
-        sys.stderr.write("usage: asv_preflight.py {verdict <findings.json> [raw_dir]"
+        sys.stderr.write("uso: asv_preflight.py {verdict <findings.json> [raw_dir]"
                          " | inventory <raw_dir>}\n")
         return 2
     cmd = argv[0]
@@ -343,7 +343,7 @@ def main(argv):
     if cmd == "inventory":
         print(_json.dumps(build_inventory(argv[1]), ensure_ascii=False, indent=2))
         return 0
-    sys.stderr.write("unknown command: %s\n" % cmd)
+    sys.stderr.write("comando desconhecido: %s\n" % cmd)
     return 2
 
 

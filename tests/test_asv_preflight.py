@@ -1,5 +1,9 @@
 # tests/test_asv_preflight.py
-import os, sys, tempfile
+import json
+import os
+import subprocess
+import sys
+import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib import asv_preflight as ap
 
@@ -168,9 +172,6 @@ def test_build_inventory_missing_files_degrades():
 
 
 # Task 4: render + CLI tests
-import json
-import subprocess
-
 
 def test_render_section_fail_banner():
     verdict = {"would_pass": False, "counted": 1, "fails": [
@@ -190,6 +191,16 @@ def test_render_section_fail_banner():
 def test_render_section_pass_banner():
     out = ap.render_section_html({"would_pass": True, "counted": 0, "fails": []}, [])
     assert "WOULD PASS" in out
+
+
+def test_render_section_escapes_html():
+    verdict = {"would_pass": False, "counted": 1, "fails": [
+        {"name": "<script>alert(1)</script>", "host": "a.com", "port": 443,
+         "cvss_base": 9.8, "reason": "x", "requirement": "6.2.4",
+         "remediation": "y", "severity": "high"}]}
+    out = ap.render_section_html(verdict, [])
+    assert "<script>alert(1)</script>" not in out      # not a live tag
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in out  # escaped form present
 
 
 def test_cli_verdict(tmp_path):
