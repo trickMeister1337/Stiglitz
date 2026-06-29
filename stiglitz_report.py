@@ -35,9 +35,11 @@ except Exception:
     repro = None
 import scope  # noqa: E402  (fronteira de escopo p/ alertas de scanner)
 import finding_quality  # noqa: E402  (FP de disclosure ruidoso + enriquecimento JS)
+import asv_preflight as _asv  # noqa: E402  (ASV Preflight hook, opt-in)
 import zap_authgate as _zap_authgate
 import evidence_render as _evrender  # noqa: E402  (evidência gigante → arquivo lateral linkado)
 REPRO_RAW = os.environ.get("STIGLITZ_REPRO_RAW") == "1"
+ASV_PREFLIGHT = os.environ.get("STIGLITZ_ASV_PREFLIGHT") == "1"
 
 # Tabelas CWE → CVSS sintético, impacto, remediação + helpers cwe_enrich/
 # cvss_to_sev estão em lib/report/cwe_data.py (importado acima).
@@ -2366,6 +2368,12 @@ if _owasp_posture:
         "<th>Top findings / Note</th></tr>"
         + _orows + "</table>")
 
+# ── ASV Preflight: seção opt-in (STIGLITZ_ASV_PREFLIGHT=1) ───────────────────
+if ASV_PREFLIGHT:
+    asv_section_html = _asv.emit_artifacts(OUTDIR, all_f, [DOMAIN] if DOMAIN else [])
+else:
+    asv_section_html = ""
+
 # ── Deferred: alertas active-scan barrados por auth (JWT-gate) — retest logado ──
 # Não são findings confirmados nem FPs limpos: a superfície não foi alcançada sem
 # token. Agrupados por endpoint como lead para scan autenticado / code review.
@@ -2471,7 +2479,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <h2>3. Identified Vulnerabilities</h2>{vhtml}
 {sla_section_html}
 {compliance_section_html}
-{owasp_section_html}
+{owasp_section_html}{asv_section_html}
 {deferred_section_html}
 {pci_section_html}
 

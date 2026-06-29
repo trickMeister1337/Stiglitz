@@ -317,6 +317,17 @@ def render_section_html(verdict, inventory):
     return "".join(out)
 
 
+def emit_artifacts(outdir, findings, scope_domains=None):
+    """Calcula veredito + inventário, grava asv_verdict.json em outdir e
+    retorna a seção HTML. Toda a lógica do hook vive aqui (testável)."""
+    verdict = aggregate(findings, scope_domains)
+    inventory = build_inventory(os.path.join(outdir, "raw"))
+    with open(os.path.join(outdir, "asv_verdict.json"), "w", encoding="utf-8") as fh:
+        _json.dump({"verdict": verdict, "inventory": inventory}, fh,
+                   ensure_ascii=False, indent=2, default=str)
+    return render_section_html(verdict, inventory)
+
+
 def _load_findings(path):
     """Carrega findings de um findings.json."""
     with open(path, encoding="utf-8") as fh:
