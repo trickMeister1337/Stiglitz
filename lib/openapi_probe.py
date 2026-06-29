@@ -99,3 +99,28 @@ def unauth_verdict(status, body, content_type=""):
     if structured or len(text) >= 64:
         return {"state": "BROKEN_AUTH", "severity": "high", "confidence": 70}
     return {"state": "INCONCLUSIVE", "severity": "info", "confidence": 40}
+
+
+def build_finding(op, url, verdict_res, status):
+    """Finding normalizado (texto EN — deliverable) para o broken-auth documentado."""
+    return {
+        "type": "broken_auth_documented",
+        "name": "Missing Authentication on Documented-Protected Endpoint",
+        "severity": verdict_res["severity"],
+        "cwe": "CWE-306",
+        "url": url,
+        "method": op["method"],
+        "confirmed": verdict_res["confidence"] >= 80,
+        "confidence": verdict_res["confidence"],
+        "source": "openapi_probe",
+        "tool": "openapi_probe",
+        "description": (
+            "An endpoint documented in the OpenAPI/Swagger specification as requiring "
+            "authentication (a security requirement is declared) returned HTTP %s with a "
+            "data-bearing body in response to an UNAUTHENTICATED request. Authentication "
+            "is not enforced at runtime, exposing the documented resource without credentials."
+            % status
+        ),
+        "evidence": "Unauthenticated %s %s -> HTTP %s (verdict=%s, confidence=%s%%)" % (
+            op["method"], url, status, verdict_res["state"], verdict_res["confidence"]),
+    }

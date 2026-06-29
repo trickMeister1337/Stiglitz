@@ -1,6 +1,7 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import openapi_probe as P
+import vuln_catalog
 
 
 def test_documented_operations_marks_global_security():
@@ -74,3 +75,25 @@ def test_verdict_2xx_empty_or_tiny_is_inconclusive():
 def test_verdict_404_405_5xx_inconclusive():
     for s in (404, 405, 500):
         assert P.unauth_verdict(s, "x", "")["state"] == "INCONCLUSIVE"
+
+
+def test_catalog_has_broken_auth_documented():
+    e = vuln_catalog.CATALOG["broken_auth_documented"]
+    assert e["cwe"] == "CWE-306"
+    assert "AV:N" in e["vector"]
+    assert e["title"]
+
+
+def test_build_finding_shape():
+    op = {"path": "/accounts/{id}", "method": "GET", "requires_auth": True}
+    v = {"state": "BROKEN_AUTH", "severity": "high", "confidence": 90}
+    f = P.build_finding(op, "https://t.example/accounts/1", v, 200)
+    assert f["type"] == "broken_auth_documented"
+    assert f["severity"] == "high"
+    assert f["cwe"] == "CWE-306"
+    assert f["url"] == "https://t.example/accounts/1"
+    assert f["method"] == "GET"
+    assert f["confirmed"] is True
+    assert f["source"] == "openapi_probe"
+    # texto do deliverable em inglês
+    assert "OpenAPI" in f["description"] or "Swagger" in f["description"]

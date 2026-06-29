@@ -18,6 +18,8 @@ CATALOG = {
                            "vector": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"},
     "broken_auth":        {"cwe": "CWE-287", "title": "Autenticação quebrada",
                            "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"},
+    "broken_auth_documented": {"cwe": "CWE-306", "title": "Missing authentication on documented-protected endpoint",
+                           "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"},
     "priv_escalation":    {"cwe": "CWE-269", "title": "Escalação de privilégio",
                            "vector": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"},
     "amount_tampering":   {"cwe": "CWE-840", "title": "Manipulação de valor/transação",
