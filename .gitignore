@@ -23,6 +23,7 @@
 !/lib
 !/profiles
 !/nuclei-custom-templates
+!/asv_preflight.sh
 !/osint.sh
 !/setup.sh
 !/stiglitz.sh
