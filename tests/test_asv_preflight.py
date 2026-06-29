@@ -1,5 +1,5 @@
 # tests/test_asv_preflight.py
-import os, sys
+import os, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib import asv_preflight as ap
 
@@ -108,3 +108,56 @@ def test_aggregate_no_url_finding_counted_with_scope():
     assert out["would_pass"] is False
     assert out["counted"] == 1
     assert out["fails"][0]["host"] == ""
+
+
+_NMAP_XML = """<?xml version="1.0"?>
+<nmaprun>
+  <host>
+    <address addr="203.0.113.10" addrtype="ipv4"/>
+    <hostnames><hostname name="a.com"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="443">
+        <state state="open"/>
+        <service name="https" product="nginx" version="1.18.0" tunnel="ssl"/>
+      </port>
+      <port protocol="tcp" portid="6379">
+        <state state="open"/>
+        <service name="redis" product="Redis key-value store" version="6.0.5"/>
+      </port>
+      <port protocol="tcp" portid="9">
+        <state state="closed"/>
+        <service name="discard"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>
+"""
+
+_HTTPX_TXT = "https://a.com [200] [nginx] [Django]\nhttps://api.a.com:8443 [200] [nginx]\n"
+
+
+def test_build_inventory_from_nmap_and_httpx():
+    with tempfile.TemporaryDirectory() as d:
+        raw = os.path.join(d, "raw")
+        os.makedirs(raw)
+        open(os.path.join(raw, "nmap.xml"), "w").write(_NMAP_XML)
+        open(os.path.join(raw, "httpx_results.txt"), "w").write(_HTTPX_TXT)
+        inv = ap.build_inventory(raw)
+
+    keyed = {(r["host"], r["port"]): r for r in inv}
+    # porta fechada não entra
+    assert ("a.com", 9) not in keyed
+    # serviço nmap estruturado
+    assert keyed[("a.com", 443)]["service"] == "https"
+    assert keyed[("a.com", 443)]["version"] == "nginx 1.18.0"
+    assert keyed[("a.com", 443)]["tls"] is True
+    assert keyed[("a.com", 6379)]["service"] == "redis"
+    # host só do httpx (não estava no nmap)
+    assert ("api.a.com", 8443) in keyed
+
+
+def test_build_inventory_missing_files_degrades():
+    with tempfile.TemporaryDirectory() as d:
+        raw = os.path.join(d, "raw")
+        os.makedirs(raw)
+        assert ap.build_inventory(raw) == []   # nada para inventariar, sem erro

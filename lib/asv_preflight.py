@@ -5,8 +5,14 @@ Guide: CVSS base >= 4.0 = FAIL, além de gatilhos de falha automática (SQLi/XSS
 fraco/default creds/etc.) independentes de score. Sem rede própria.
 """
 import os
+import re as _re
 import sys
 from urllib.parse import urlparse
+
+try:
+    from defusedxml import ElementTree as _ET
+except Exception:  # defusedxml ausente: inventário degrada (sem nmap)
+    _ET = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -172,3 +178,84 @@ def aggregate(findings, scope_domains=None):
                 "severity": (f.get("severity") or "info").lower(),
             })
     return {"would_pass": len(fails) == 0, "counted": counted, "fails": fails}
+
+
+def _inventory_from_nmap(xml_path):
+    rows = []
+    if _ET is None or not os.path.exists(xml_path):
+        return rows
+    try:
+        tree = _ET.parse(xml_path)
+    except Exception:
+        return rows
+    root = tree.getroot()
+    for host_el in root.findall("host"):
+        ip = ""
+        for addr in host_el.findall("address"):
+            if addr.get("addrtype") in ("ipv4", "ipv6"):
+                ip = addr.get("addr", "")
+                break
+        hostname = ""
+        hn = host_el.find("hostnames/hostname")
+        if hn is not None:
+            hostname = hn.get("name", "")
+        host = hostname or ip
+        ports_el = host_el.find("ports")
+        if ports_el is None:
+            continue
+        for port_el in ports_el.findall("port"):
+            state = port_el.find("state")
+            if state is None or state.get("state") != "open":
+                continue
+            try:
+                portid = int(port_el.get("portid"))
+            except (TypeError, ValueError):
+                continue
+            svc = port_el.find("service")
+            name = svc.get("name", "") if svc is not None else ""
+            product = svc.get("product", "") if svc is not None else ""
+            version = svc.get("version", "") if svc is not None else ""
+            tunnel = svc.get("tunnel", "") if svc is not None else ""
+            ver_str = (product + " " + version).strip()
+            tls = (tunnel == "ssl") or name in ("https", "ssl") or portid == 443
+            rows.append({"host": host, "ip": ip, "port": portid,
+                         "service": name, "version": ver_str, "tls": tls})
+    return rows
+
+
+def _inventory_from_httpx(txt_path):
+    rows = []
+    if not os.path.exists(txt_path):
+        return rows
+    try:
+        text = open(txt_path, encoding="utf-8", errors="replace").read()
+    except Exception:
+        return rows
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        url = line.split()[0]
+        host, port = _host_port(url)
+        if not host:
+            continue
+        techs = _re.findall(r"\[([^\]]+)\]", line)
+        # primeiro token entre colchetes costuma ser status code numérico; ignora
+        tech_tokens = [t for t in techs if not t.isdigit()]
+        rows.append({"host": host, "ip": "", "port": port,
+                     "service": "https" if url.startswith("https") else "http",
+                     "version": ", ".join(tech_tokens), "tls": url.startswith("https")})
+    return rows
+
+
+def build_inventory(raw_dir):
+    """Inventário agregado host/ip/port/service/version/tls (nmap + httpx), dedup
+    por (host, port). nmap (estruturado) tem precedência sobre httpx."""
+    nmap_rows = _inventory_from_nmap(os.path.join(raw_dir, "nmap.xml"))
+    httpx_rows = _inventory_from_httpx(os.path.join(raw_dir, "httpx_results.txt"))
+    keyed = {}
+    for r in nmap_rows + httpx_rows:          # nmap primeiro = precedência
+        key = (r["host"], r["port"])
+        if key not in keyed:
+            keyed[key] = r
+    return list(keyed.values())
