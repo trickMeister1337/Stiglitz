@@ -11,10 +11,13 @@ import json
 import os
 import re
 import sys
+import urllib.request
+import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openapi_seed import _prefix as _spec_prefix
 from bola import extract_canary, is_safe_method
+import netproxy
 
 _PARAM = re.compile(r"\{[^}]+\}")
 _HTTP_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
@@ -124,3 +127,72 @@ def build_finding(op, url, verdict_res, status):
         "evidence": "Unauthenticated %s %s -> HTTP %s (verdict=%s, confidence=%s%%)" % (
             op["method"], url, status, verdict_res["state"], verdict_res["confidence"]),
     }
+
+
+def probe(spec, base_url, fetch_fn, safe_only=True, sample="1"):
+    """Sonda cada operação documentada-protegida SEM credencial. Retorna findings BROKEN_AUTH."""
+    findings = []
+    for op in documented_operations(spec):
+        if not op["requires_auth"]:
+            continue
+        if safe_only and not is_safe_method(op["method"]):
+            continue
+        url = op_url(spec, base_url, op["path"], sample=sample)
+        try:
+            status, body, content_type = fetch_fn(url, op["method"])
+        except Exception:
+            continue
+        v = unauth_verdict(status, body, content_type)
+        if v["state"] == "BROKEN_AUTH":
+            findings.append(build_finding(op, url, v, status))
+    return findings
+
+
+def _default_fetch(url, method, timeout=10):
+    """Fetch real via netproxy (herda --proxy + mTLS). Retorna (status, body, content_type)."""
+    req = urllib.request.Request(url, method=method,
+                                 headers={"Accept": "application/json, */*"})
+    try:
+        with netproxy.urlopen(req, timeout=timeout) as resp:
+            body = resp.read(65536).decode("utf-8", "replace")
+            return resp.status, body, resp.headers.get("content-type", "")
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read(65536).decode("utf-8", "replace")
+        except Exception:
+            pass
+        ct = e.headers.get("content-type", "") if getattr(e, "headers", None) else ""
+        return e.code, body, ct
+
+
+def run(spec_path, base_url, outdir, fetch_fn=_default_fetch):
+    """Lê o spec, sonda, grava <outdir>/raw/openapi_authz.json. Retorna a contagem."""
+    try:
+        with open(spec_path, encoding="utf-8") as f:
+            spec = json.load(f)
+    except (OSError, ValueError):
+        return 0
+    findings = probe(spec, base_url, fetch_fn)
+    raw = os.path.join(outdir, "raw")
+    try:
+        os.makedirs(raw, exist_ok=True)
+        with open(os.path.join(raw, "openapi_authz.json"), "w", encoding="utf-8") as f:
+            json.dump(findings, f, indent=2)
+    except OSError:
+        pass
+    return len(findings)
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) < 2:
+        print("uso: openapi_probe.py <spec.json> <base_url> [outdir]", file=sys.stderr)
+        return 2
+    outdir = argv[2] if len(argv) > 2 else "."
+    print(run(argv[0], argv[1], outdir))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

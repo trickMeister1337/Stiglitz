@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, json, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import openapi_probe as P
 import vuln_catalog
@@ -97,3 +97,46 @@ def test_build_finding_shape():
     assert f["source"] == "openapi_probe"
     # texto do deliverable em inglês
     assert "OpenAPI" in f["description"] or "Swagger" in f["description"]
+
+
+def test_probe_only_emits_broken_auth_for_protected_safe_ops():
+    spec = {
+        "security": [{"oauth2": []}],
+        "paths": {
+            "/accounts/{id}": {"get": {}},          # protegido + GET -> sondado
+            "/accounts/{id}/close": {"post": {}},   # protegido mas POST -> pulado (safe_only)
+            "/public": {"get": {"security": []}},   # público -> pulado
+        },
+    }
+    calls = []
+    def fake_fetch(url, method):
+        calls.append((method, url))
+        return (200, '{"id":1,"email":"x@y.example"}', "application/json")
+    findings = P.probe(spec, "https://t.example", fake_fetch)
+    # só o GET protegido foi para a rede
+    assert calls == [("GET", "https://t.example/accounts/1")]
+    assert len(findings) == 1
+    assert findings[0]["type"] == "broken_auth_documented"
+
+
+def test_probe_skips_when_protected_endpoint_denies():
+    spec = {"security": [{"x": []}], "paths": {"/a": {"get": {}}}}
+    findings = P.probe(spec, "https://t.example", lambda u, m: (401, "", ""))
+    assert findings == []
+
+
+def test_run_writes_openapi_authz_json():
+    spec = {"security": [{"x": []}], "paths": {"/a": {"get": {}}}}
+    with tempfile.TemporaryDirectory() as d:
+        sp = os.path.join(d, "spec.json")
+        json.dump(spec, open(sp, "w"))
+        n = P.run(sp, "https://t.example", d,
+                  fetch_fn=lambda u, m: (200, '{"k":"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"}', "application/json"))
+        assert n == 1
+        out = json.load(open(os.path.join(d, "raw", "openapi_authz.json")))
+        assert out[0]["cwe"] == "CWE-306"
+
+
+def test_run_missing_spec_returns_zero():
+    with tempfile.TemporaryDirectory() as d:
+        assert P.run(os.path.join(d, "nope.json"), "https://t.example", d) == 0
