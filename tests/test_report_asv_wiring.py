@@ -13,7 +13,8 @@ def test_emit_artifacts_writes_json_and_returns_html():
         html_out = ap.emit_artifacts(d, findings, ["a.com"])
         assert "ASV Preflight" in html_out
         assert os.path.exists(os.path.join(d, "asv_verdict.json"))
-        data = json.load(open(os.path.join(d, "asv_verdict.json")))
+        with open(os.path.join(d, "asv_verdict.json")) as fh:
+            data = json.load(fh)
         assert data["verdict"]["would_pass"] is False
         assert "inventory" in data
 
@@ -25,5 +26,6 @@ def test_emit_artifacts_pass_case():
                      "severity": "high", "url": "https://a.com/"}]
         html_out = ap.emit_artifacts(d, findings, ["a.com"])
         assert "WOULD PASS" in html_out
-        data = json.load(open(os.path.join(d, "asv_verdict.json")))
+        with open(os.path.join(d, "asv_verdict.json")) as fh:
+            data = json.load(fh)
         assert data["verdict"]["would_pass"] is True
