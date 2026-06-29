@@ -140,8 +140,10 @@ def test_build_inventory_from_nmap_and_httpx():
     with tempfile.TemporaryDirectory() as d:
         raw = os.path.join(d, "raw")
         os.makedirs(raw)
-        open(os.path.join(raw, "nmap.xml"), "w").write(_NMAP_XML)
-        open(os.path.join(raw, "httpx_results.txt"), "w").write(_HTTPX_TXT)
+        with open(os.path.join(raw, "nmap.xml"), "w") as fh:
+            fh.write(_NMAP_XML)
+        with open(os.path.join(raw, "httpx_results.txt"), "w") as fh:
+            fh.write(_HTTPX_TXT)
         inv = ap.build_inventory(raw)
 
     keyed = {(r["host"], r["port"]): r for r in inv}
@@ -154,6 +156,8 @@ def test_build_inventory_from_nmap_and_httpx():
     assert keyed[("a.com", 6379)]["service"] == "redis"
     # host só do httpx (não estava no nmap)
     assert ("api.a.com", 8443) in keyed
+    # nmap precedence: IP vem só do nmap
+    assert keyed[("a.com", 443)]["ip"] == "203.0.113.10"
 
 
 def test_build_inventory_missing_files_degrades():

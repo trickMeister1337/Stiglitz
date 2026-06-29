@@ -228,7 +228,8 @@ def _inventory_from_httpx(txt_path):
     if not os.path.exists(txt_path):
         return rows
     try:
-        text = open(txt_path, encoding="utf-8", errors="replace").read()
+        with open(txt_path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
     except Exception:
         return rows
     for line in text.splitlines():
