@@ -4,6 +4,8 @@ Camada pura e paralela ao scoring KEV>EPSS>CVSS. Aplica o critério do ASV Progr
 Guide: CVSS base >= 4.0 = FAIL, além de gatilhos de falha automática (SQLi/XSS/TLS
 fraco/default creds/etc.) independentes de score. Sem rede própria.
 """
+import html as _html
+import json as _json
 import os
 import re as _re
 import sys
@@ -260,3 +262,90 @@ def build_inventory(raw_dir):
         if key not in keyed:
             keyed[key] = r
     return list(keyed.values())
+
+
+_DISCLAIMER = ("This ASV Preflight is a prediction to remediate before the official "
+               "scan; it does not replace an ASV-certified scan (PCI DSS Req. 11.3.2) "
+               "and is not an Attestation of Scan Compliance. Criterion: CVSS v3.1 base "
+               ">= 4.0 plus automatic-failure categories.")
+
+
+def render_section_html(verdict, inventory):
+    """Seção HTML 'ASV Preflight Verdict' (EN, deliverable)."""
+    would_pass = verdict.get("would_pass", True)
+    banner = "WOULD PASS" if would_pass else "WOULD NOT PASS"
+    color = "#4a7c8c" if would_pass else "#b34e4e"
+    out = ["<h2>ASV Preflight Verdict</h2>"]
+    out.append("<p><strong>Predicted result:</strong> "
+               "<span style='color:%s;font-weight:bold'>%s</span> "
+               "(%d finding(s) assessed against ASV criteria)</p>"
+               % (color, banner, verdict.get("counted", 0)))
+
+    fails = verdict.get("fails", [])
+    if fails:
+        out.append("<table><tr><th>Finding</th><th>Host:Port</th><th>CVSS</th>"
+                   "<th>Reason</th><th>PCI Req</th><th>Remediation</th></tr>")
+        for f in fails:
+            out.append("<tr><td>%s</td><td><code>%s:%s</code></td><td>%s</td>"
+                       "<td style='font-size:12px'>%s</td><td>%s</td>"
+                       "<td style='font-size:11px'>%s</td></tr>" % (
+                           _html.escape(str(f.get("name", ""))),
+                           _html.escape(str(f.get("host", ""))),
+                           _html.escape(str(f.get("port", ""))),
+                           _html.escape("%.1f" % f.get("cvss_base", 0.0)),
+                           _html.escape(str(f.get("reason", ""))),
+                           _html.escape(str(f.get("requirement", ""))),
+                           _html.escape(str(f.get("remediation", "")))))
+        out.append("</table>")
+
+    if inventory:
+        out.append("<h3>Scanned components</h3>")
+        out.append("<table><tr><th>Host</th><th>IP</th><th>Port</th>"
+                   "<th>Service</th><th>Version</th><th>TLS</th></tr>")
+        for r in inventory:
+            out.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+                       "<td>%s</td><td>%s</td></tr>" % (
+                           _html.escape(str(r.get("host", ""))),
+                           _html.escape(str(r.get("ip", ""))),
+                           _html.escape(str(r.get("port", ""))),
+                           _html.escape(str(r.get("service", ""))),
+                           _html.escape(str(r.get("version", ""))),
+                           "yes" if r.get("tls") else "no"))
+        out.append("</table>")
+
+    out.append("<p style='font-size:11px;color:#888'>%s</p>" % _html.escape(_DISCLAIMER))
+    return "".join(out)
+
+
+def _load_findings(path):
+    """Carrega findings de um findings.json."""
+    with open(path, encoding="utf-8") as fh:
+        data = _json.load(fh)
+    if isinstance(data, dict):
+        return data.get("summary", {}).get("findings", []) or data.get("findings", [])
+    return data or []
+
+
+def main(argv):
+    """CLI: verdict <findings.json> [raw_dir] | inventory <raw_dir>."""
+    if len(argv) < 2:
+        sys.stderr.write("usage: asv_preflight.py {verdict <findings.json> [raw_dir]"
+                         " | inventory <raw_dir>}\n")
+        return 2
+    cmd = argv[0]
+    if cmd == "verdict":
+        findings = _load_findings(argv[1])
+        raw_dir = argv[2] if len(argv) > 2 else ""
+        inv = build_inventory(raw_dir) if raw_dir else []
+        print(_json.dumps({"verdict": aggregate(findings), "inventory": inv},
+                          ensure_ascii=False, indent=2))
+        return 0
+    if cmd == "inventory":
+        print(_json.dumps(build_inventory(argv[1]), ensure_ascii=False, indent=2))
+        return 0
+    sys.stderr.write("unknown command: %s\n" % cmd)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

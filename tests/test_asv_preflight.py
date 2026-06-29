@@ -165,3 +165,44 @@ def test_build_inventory_missing_files_degrades():
         raw = os.path.join(d, "raw")
         os.makedirs(raw)
         assert ap.build_inventory(raw) == []   # nada para inventariar, sem erro
+
+
+# Task 4: render + CLI tests
+import json
+import subprocess
+
+
+def test_render_section_fail_banner():
+    verdict = {"would_pass": False, "counted": 1, "fails": [
+        {"name": "SQL Injection", "host": "a.com", "port": 443, "cvss_base": 9.8,
+         "reason": "ASV automatic-failure category: sqli", "requirement": "6.2.4",
+         "remediation": "Use parameterized queries", "severity": "high"}]}
+    inv = [{"host": "a.com", "ip": "203.0.113.10", "port": 443,
+            "service": "https", "version": "nginx 1.18.0", "tls": True}]
+    html_out = ap.render_section_html(verdict, inv)
+    assert "ASV Preflight" in html_out
+    assert "WOULD NOT PASS" in html_out
+    assert "SQL Injection" in html_out
+    assert "203.0.113.10" in html_out
+    assert "does not replace" in html_out.lower()   # disclaimer
+
+
+def test_render_section_pass_banner():
+    out = ap.render_section_html({"would_pass": True, "counted": 0, "fails": []}, [])
+    assert "WOULD PASS" in out
+
+
+def test_cli_verdict(tmp_path):
+    findings = {"summary": {"findings": [
+        {"name": "SQL Injection", "source": "Nuclei", "severity": "high",
+         "url": "https://a.com/x?id=1"}]}}
+    fj = tmp_path / "findings.json"
+    with open(fj, "w") as f:
+        f.write(json.dumps(findings))
+    res = subprocess.run(
+        ["python3", os.path.join(os.path.dirname(__file__), "..", "lib", "asv_preflight.py"),
+         "verdict", str(fj)],
+        capture_output=True, text=True)
+    assert res.returncode == 0
+    payload = json.loads(res.stdout)
+    assert payload["verdict"]["would_pass"] is False
