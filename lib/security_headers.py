@@ -2,18 +2,26 @@
 """
 security_headers.py — Verifica security headers HTTP → security_headers.json
 
-Extraído de stiglitz.sh (heredoc PYSECHEADERS). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do stiglitz.sh.
-
 Além da presença/ausência dos headers, valida subdiretivas críticas:
   - HSTS: preload, includeSubDomains, max-age suficiente
   - CSP:  unsafe-inline, unsafe-eval, default-src ausente, wildcards
+
+Resiliência a FP transitório (multi-sampling): um alvo atrás de load balancer pode
+responder com headers divergentes entre backends, ou logo após um deploy. Uma única
+amostra não-determinística levava a falso "header ausente" (HSTS reportado ausente
+estando presente segundos depois). Agora coletamos N amostras (STIGLITZ_HEADER_SAMPLES,
+default 3) e classificamos cada header como present / missing / inconsistent:
+  - missing      — ausente em TODAS as amostras (achado confiável);
+  - present      — presente em todas;
+  - inconsistent — presente em algumas e ausente em outras (config drift) → NÃO é
+                   contado como ausente; vira um sinal de baixa severidade.
+
+Núcleo puro (classify_header/header_present/validate_*) testável sem rede +
+orquestração fina (curl via netproxy/mtls). CLI: python3 lib/security_headers.py <outdir>
 """
 import subprocess, json, sys, os, re
 import netproxy
 import mtls
-outdir = sys.argv[1]
-httpx_file = os.path.join(outdir,"raw","httpx_results.txt")
 
 SECURITY_HEADERS = {
     "content-security-policy":      ("medium","CSP missing — XSS impact amplified"),
@@ -24,6 +32,10 @@ SECURITY_HEADERS = {
     "permissions-policy":           ("low","Permissions-Policy missing — unrestricted access to browser APIs"),
     "x-xss-protection":             ("info","X-XSS-Protection legacy — prefer CSP"),
 }
+
+# Nº de amostras por URL (resiliência a config drift / FP transitório).
+DEFAULT_SAMPLES = max(1, int(os.environ.get("STIGLITZ_HEADER_SAMPLES", "3")))
+
 
 # ── Validações de subdiretivas ────────────────────────────────────────────
 def validate_hsts(value):
@@ -96,68 +108,133 @@ def validate_csp(value):
 
     return issues
 
-# ── Coletar URLs ───────────────────────────────────────────────────────────
-results = []
-urls = []
-if os.path.exists(httpx_file):
-    with open(httpx_file) as f:
-        for line in f:
-            url = line.strip().split()[0] if line.strip() else ""
-            if url.startswith("http"): urls.append(url)
 
-for url in urls[:20]:  # testar as 20 primeiras URLs ativas
+# ── Núcleo puro: presença e classificação multi-amostra ──────────────────────
+def header_present(headers_raw_lower, header):
+    """True se o header aparece na resposta crua (já normalizada p/ lowercase)."""
+    return header in (headers_raw_lower or "")
+
+
+def classify_header(presence_flags):
+    """Classifica um header a partir da presença em cada amostra.
+
+    present      — em TODAS as amostras;
+    missing      — em NENHUMA;
+    inconsistent — em algumas sim, outras não (config drift / LB divergente).
+    Sem amostras → missing (conservador).
+    """
+    flags = list(presence_flags)
+    if not flags:
+        return "missing"
+    if all(flags):
+        return "present"
+    if not any(flags):
+        return "missing"
+    return "inconsistent"
+
+
+def _extract_value(stdout, header):
+    """Extrai o valor do header da resposta crua (heurística do scanner original)."""
+    for line in (stdout or "").split("\n"):
+        ll = line.lower()
+        if ll.startswith(header + ":") or ll.startswith(header + " :"):
+            return line.split(":", 1)[1].strip() if ":" in line else "present"
+        elif header in ll and ":" in line:
+            return line.split(":", 1)[1].strip()
+    return "present"
+
+
+def _append_subdir(subdirective_issues, header, value):
+    """Anexa as issues de subdiretiva (HSTS/CSP) do valor observado."""
+    if header == "strict-transport-security":
+        for sev_sub, desc_sub in validate_hsts(value):
+            subdirective_issues.append({"header": header, "severity": sev_sub,
+                                        "description": desc_sub, "value": value})
+    elif header == "content-security-policy":
+        for sev_sub, desc_sub in validate_csp(value):
+            subdirective_issues.append({"header": header, "severity": sev_sub,
+                                        "description": desc_sub, "value": value})
+
+
+def analyze_url(url, samples_raw):
+    """Classifica cada header a partir de N respostas cruas (lista de stdout do curl).
+
+    Retorna o dict por-URL no schema consumido pelo stiglitz_report.py
+    (missing / present / subdirective_issues)."""
+    lowered = [s.lower() for s in samples_raw]
+    missing, present, subdirective_issues = {}, {}, []
+    for h, (sev, desc) in SECURITY_HEADERS.items():
+        flags = [header_present(s, h) for s in lowered]
+        state = classify_header(flags)
+        if state == "missing":
+            missing[h] = {"severity": sev, "description": desc}
+            continue
+        # present ou inconsistent → registra valor observado + valida subdiretivas
+        value = next((_extract_value(raw, h)
+                      for raw, fl in zip(samples_raw, flags) if fl), "present")
+        present[h] = value
+        if state == "inconsistent":
+            subdirective_issues.append({
+                "header": h, "severity": "low",
+                "description": (f"{h} inconsistently present — returned by some responses but "
+                                "not others (load-balanced backends with divergent configuration "
+                                "/ config drift). Not counted as missing."),
+                "value": f"present in {sum(flags)}/{len(flags)} samples",
+            })
+        _append_subdir(subdirective_issues, h, value)
+    return {"url": url, "missing": missing, "present": present,
+            "subdirective_issues": subdirective_issues}
+
+
+# ── Rede (uma amostra) ────────────────────────────────────────────────────────
+def fetch_headers(url, timeout=15):
+    """Uma amostra: stdout cru do curl -I -L, ou '' em erro."""
     try:
         r = subprocess.run(
-            ["curl", *netproxy.curl_proxy_args(), *mtls.curl_cert_args(), "-sk","-I","--max-time","10","-L",url],
-            capture_output=True, text=True, timeout=15
-        )
-        headers_raw = r.stdout.lower()
-        missing = {}
-        present = {}
-        subdirective_issues = []  # lista de {header, severity, description, value}
+            ["curl", *netproxy.curl_proxy_args(), *mtls.curl_cert_args(),
+             "-sk", "-I", "--max-time", "10", "-L", url],
+            capture_output=True, text=True, timeout=timeout)
+        return r.stdout or ""
+    except Exception:
+        return ""  # rede/parse podem falhar de muitas formas; não mascara KeyboardInterrupt
 
-        for h,(sev,desc) in SECURITY_HEADERS.items():
-            if h not in headers_raw:
-                missing[h] = {"severity":sev,"description":desc}
-            else:
-                # Extrair valor do header (último Set/redirect chain)
-                value = "present"
-                for line in r.stdout.split("\n"):
-                    if line.lower().startswith(h + ":") or line.lower().startswith(h + " :"):
-                        value = line.split(":",1)[1].strip() if ":" in line else "present"
-                        break
-                    elif h in line.lower() and ":" in line:
-                        value = line.split(":",1)[1].strip()
-                        break
-                present[h] = value
 
-                # Validar subdiretivas
-                if h == "strict-transport-security":
-                    for sev_sub, desc_sub in validate_hsts(value):
-                        subdirective_issues.append({
-                            "header": h, "severity": sev_sub,
-                            "description": desc_sub, "value": value
-                        })
-                elif h == "content-security-policy":
-                    for sev_sub, desc_sub in validate_csp(value):
-                        subdirective_issues.append({
-                            "header": h, "severity": sev_sub,
-                            "description": desc_sub, "value": value
-                        })
+def collect_urls(httpx_file):
+    urls = []
+    if os.path.exists(httpx_file):
+        with open(httpx_file) as f:
+            for line in f:
+                url = line.strip().split()[0] if line.strip() else ""
+                if url.startswith("http"):
+                    urls.append(url)
+    return urls
 
-        results.append({
-            "url": url,
-            "missing": missing,
-            "present": present,
-            "subdirective_issues": subdirective_issues,
-        })
-    except Exception: pass  # handler amplo por-URL: rede/parse podem falhar de muitas formas; não mascara KeyboardInterrupt
 
-out_file = os.path.join(outdir,"raw","security_headers.json")
-json.dump(results, open(out_file,"w"), indent=2, ensure_ascii=False)
+# ── Orquestração / CLI ────────────────────────────────────────────────────────
+def main(outdir, samples=None):
+    samples = DEFAULT_SAMPLES if samples is None else max(1, samples)
+    httpx_file = os.path.join(outdir, "raw", "httpx_results.txt")
+    results = []
+    for url in collect_urls(httpx_file)[:20]:  # testar as 20 primeiras URLs ativas
+        samples_raw = [fetch_headers(url) for _ in range(samples)]
+        if not any(samples_raw):
+            continue  # todas as amostras falharam (rede) — pula, como o scanner original
+        results.append(analyze_url(url, samples_raw))
 
-# Sumário
-total_issues = sum(len(r["missing"]) for r in results)
-total_subdir = sum(len(r.get("subdirective_issues",[])) for r in results)
-critical_issues = sum(1 for r in results for s in r["missing"].values() if s["severity"]=="critical")
-print(f"  Verificados: {len(results)} URL(s) | {total_issues} header(s) ausente(s) | {total_subdir} subdiretiva(s) fracas | {critical_issues} crítico(s)")
+    out_file = os.path.join(outdir, "raw", "security_headers.json")
+    json.dump(results, open(out_file, "w"), indent=2, ensure_ascii=False)
+
+    total_issues = sum(len(r["missing"]) for r in results)
+    total_subdir = sum(len(r.get("subdirective_issues", [])) for r in results)
+    critical_issues = sum(1 for r in results for s in r["missing"].values()
+                          if s["severity"] == "critical")
+    print(f"  Verificados: {len(results)} URL(s) | {total_issues} header(s) ausente(s) | "
+          f"{total_subdir} subdiretiva(s) fracas | {critical_issues} crítico(s)")
+    return results
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("uso: python3 lib/security_headers.py <outdir>", file=sys.stderr)
+        sys.exit(2)
+    main(sys.argv[1])
