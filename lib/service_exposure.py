@@ -172,3 +172,25 @@ def markers_match(body, markers):
 def is_service(status, body, markers):
     """O serviço está fingerprintado: HTTP 200 + markers presentes em corpo não-HTML."""
     return status == 200 and markers_match(body, markers)
+
+
+# ── Classificador (puro) ───────────────────────────────────────────────────────
+def classify_exposure(probe_status, probe_body, auth_status=None):
+    """Veredito sobre o endpoint sensível acessado sem credencial.
+
+    REJECTED   — 401/403 (protegido);
+    CONFIRMED  — 200 sem auth (reforçado quando a 2ª sonda com token inválido dá 401/403);
+    INCONCLUSIVE — qualquer outro status (404, host fora do ar, etc.).
+    """
+    if probe_status in (401, 403):
+        return {"state": "REJECTED",
+                "evidence": f"endpoint without auth -> HTTP {probe_status} (authentication required)"}
+    if probe_status == 200:
+        if auth_status in (401, 403):
+            return {"state": "CONFIRMED",
+                    "evidence": (f"without auth -> HTTP 200 (processed); "
+                                 f"with invalid token -> HTTP {auth_status}")}
+        return {"state": "CONFIRMED",
+                "evidence": "endpoint without auth -> HTTP 200 (no authentication enforced)"}
+    return {"state": "INCONCLUSIVE",
+            "evidence": f"endpoint without auth -> HTTP {probe_status}"}

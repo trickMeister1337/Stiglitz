@@ -32,3 +32,26 @@ def test_catalog_has_expected_services():
         assert spec["fingerprint"] and spec["probes"]
         for pr in spec["probes"]:
             assert {"path", "finding_class", "severity", "cwe", "name", "exposes", "remediation"} <= set(pr)
+
+
+def test_classify_rejected_when_auth_required():
+    v = se.classify_exposure(401, "")
+    assert v["state"] == "REJECTED"
+    v = se.classify_exposure(403, "")
+    assert v["state"] == "REJECTED"
+
+
+def test_classify_confirmed_on_200():
+    v = se.classify_exposure(200, '{"ok":true}')
+    assert v["state"] == "CONFIRMED"
+
+
+def test_classify_confirmed_reinforced_by_auth_contrast():
+    v = se.classify_exposure(200, "{}", auth_status=401)
+    assert v["state"] == "CONFIRMED"
+    assert "invalid token" in v["evidence"]
+
+
+def test_classify_inconclusive_on_other_status():
+    assert se.classify_exposure(404, "")["state"] == "INCONCLUSIVE"
+    assert se.classify_exposure(0, "")["state"] == "INCONCLUSIVE"
