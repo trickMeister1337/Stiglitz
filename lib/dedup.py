@@ -166,6 +166,14 @@ def _score(a, b):
     ka = _missing_header_key(a)
     if ka and ka == _missing_header_key(b):
         return 1.0
+    # Tipos semânticos explícitos e distintos = vulnerabilidades diferentes, mesmo
+    # com CWE/host iguais e título parecido (ex.: apm_unauth_ingestion vs
+    # apm_central_config_exposed — ambos CWE-306, endpoints e impactos distintos).
+    # Análogo à guarda de componente SCA. Findings sem `type` (headers, etc.) não
+    # são afetados; CVE compartilhada já retornou 1.0 acima.
+    ta, tb = str(a.get("type") or "").strip().lower(), str(b.get("type") or "").strip().lower()
+    if ta and tb and ta != tb:
+        return 0.0
     s = W_CLASS if _class(a) == _class(b) else 0.0
     s += W_TITLE * _ratio(_norm_title(a), _norm_title(b))
     s += W_EVIDENCE * _ratio(_evidence_txt(a), _evidence_txt(b))

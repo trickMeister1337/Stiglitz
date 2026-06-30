@@ -178,3 +178,36 @@ def test_legacy_dedup_tolerates_none_target():
     out = ev._legacy_dedup([{"tool": "zap", "type": "xss", "target": None},
                             {"tool": "nuclei", "type": "sqli"}])   # target ausente/None
     assert isinstance(out, list) and len(out) == 2
+
+
+def test_distinct_explicit_types_same_cwe_not_merged():
+    # apm_unauth_ingestion vs apm_central_config_exposed: mesmo CWE-306, mesmo host,
+    # títulos similares e evidência parecida — mas são vulnerabilidades distintas em
+    # endpoints distintos. Não devem ser fundidas (perder o config exposed é pior).
+    fs = [
+        {"type": "apm_unauth_ingestion", "cwe": "CWE-306", "severity": "high",
+         "tool": "apm_probe", "url": "https://apm.t/intake/v2/events",
+         "name": "APM Server accepts telemetry ingestion without authentication",
+         "evidence": "noauth=400 badtoken=401"},
+        {"type": "apm_central_config_exposed", "cwe": "CWE-306", "severity": "medium",
+         "tool": "apm_probe", "url": "https://apm.t/config/v1/agents",
+         "name": "APM agent central configuration readable without authentication",
+         "evidence": "noauth=200 badtoken=401"},
+    ]
+    out = D.dedupe(fs)
+    types = {f.get("type") for f in out}
+    assert len(out) == 2, f"types distintos não deveriam fundir, veio {len(out)}"
+    assert types == {"apm_unauth_ingestion", "apm_central_config_exposed"}
+
+
+def test_shared_cve_still_merges_across_distinct_types():
+    # guarda de type NÃO deve impedir merge legítimo quando há CVE compartilhada
+    # (ex.: nuclei e zap classificam a mesma CVE com 'type' diferente).
+    fs = [
+        {"type": "nuclei-cve", "cve": "CVE-2021-44228", "url": "http://t/x",
+         "severity": "critical", "tool": "nuclei", "name": "Log4Shell"},
+        {"type": "rce", "cve": "CVE-2021-44228", "url": "http://t/x",
+         "severity": "high", "tool": "zap", "name": "Remote Code Execution"},
+    ]
+    out = D.dedupe(fs)
+    assert len(out) == 1, "CVE compartilhada deveria fundir mesmo com types distintos"
