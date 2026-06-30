@@ -11,10 +11,14 @@ import re as _re
 import sys
 from urllib.parse import urlparse
 
+# defusedxml protege contra XXE / billion-laughs ao parsear o nmap.xml (que
+# carrega banners de serviço). Quando ausente (ex.: CI sem a dependência),
+# cai no ElementTree da stdlib — mesmo tradeoff de lib/service_versions.py:
+# o nmap.xml é saída da nossa própria varredura, não entrada de atacante.
 try:
-    from defusedxml import ElementTree as _ET
-except Exception:  # defusedxml ausente: inventário degrada (sem nmap)
-    _ET = None
+    import defusedxml.ElementTree as _ET
+except ImportError:
+    import xml.etree.ElementTree as _ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
