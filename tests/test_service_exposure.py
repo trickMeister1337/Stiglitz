@@ -55,3 +55,28 @@ def test_classify_confirmed_reinforced_by_auth_contrast():
 def test_classify_inconclusive_on_other_status():
     assert se.classify_exposure(404, "")["state"] == "INCONCLUSIVE"
     assert se.classify_exposure(0, "")["state"] == "INCONCLUSIVE"
+
+
+def test_build_findings_schema_and_cwe():
+    spec = se.SERVICE_CATALOG["elasticsearch"]
+    probe = spec["probes"][0]
+    verdict = {"state": "CONFIRMED", "evidence": "without auth -> HTTP 200"}
+    out = se.build_findings("elasticsearch", [(probe, verdict)], "https://host")
+    assert len(out) == 1
+    f = out[0]
+    assert f["tool"] == "service_exposure"
+    assert f["type"] == "elasticsearch_unauth_data"
+    assert f["source"] == "Service Exposure"
+    assert f["severity"] == "high"
+    assert f["cwe"] == "CWE-306"
+    assert f["url"] == "https://host/_cat/indices"   # query string removida
+    assert "Elasticsearch" in f["name"]
+    assert f["fingerprint"] and f["fingerprint"] != "0" * 16
+    assert "all index names" in f["description"]
+
+
+def test_build_findings_distinct_endpoints_distinct_fingerprints():
+    spec = se.SERVICE_CATALOG["actuator"]
+    v = {"state": "CONFIRMED", "evidence": "x"}
+    out = se.build_findings("actuator", [(spec["probes"][0], v), (spec["probes"][1], v)], "https://h")
+    assert len({f["fingerprint"] for f in out}) == 2

@@ -194,3 +194,34 @@ def classify_exposure(probe_status, probe_body, auth_status=None):
                 "evidence": "endpoint without auth -> HTTP 200 (no authentication enforced)"}
     return {"state": "INCONCLUSIVE",
             "evidence": f"endpoint without auth -> HTTP {probe_status}"}
+
+
+# ── Findings ────────────────────────────────────────────────────────────────────
+def _finding(probe, base, spec, verdict):
+    """Schema do finding (igual apm_probe._finding). Texto em EN. description gerada
+    por template a partir de name/path/exposes; remediation específica do catálogo."""
+    url = base + probe["path"].split("?", 1)[0]
+    description = (
+        f"The {spec['name']} endpoint {probe['path']} responded to an unauthenticated "
+        f"request with HTTP 200, exposing {probe['exposes']} without requiring credentials. "
+        "An attacker on the network can reach this endpoint directly; the scan did not send "
+        "any state-changing request (GET only).")
+    f = {
+        "tool": "service_exposure", "type": probe["finding_class"], "source": "Service Exposure",
+        "name": probe["name"], "url": url, "severity": probe["severity"],
+        "description": description, "remediation": probe["remediation"],
+        "evidence": verdict.get("evidence", ""), "cwe": probe.get("cwe", ""),
+    }
+    f["fingerprint"] = _fingerprint(f)
+    return f
+
+
+def build_findings(service_key, confirmed, target):
+    """Converte (probe, verdict) CONFIRMED em findings (EN). Não-CONFIRMED é ignorado."""
+    spec = SERVICE_CATALOG.get(service_key) or {}
+    base = (target or "").rstrip("/")
+    out = []
+    for probe, verdict in confirmed:
+        if (verdict or {}).get("state") == "CONFIRMED":
+            out.append(_finding(probe, base, spec, verdict))
+    return out
