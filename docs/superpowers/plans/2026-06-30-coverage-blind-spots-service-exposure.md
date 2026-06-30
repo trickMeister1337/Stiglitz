@@ -4,7 +4,7 @@
 
 **Goal:** Fechar a cegueira de descoberta (Modo A) com um probe de exposição de serviços dirigido por catálogo, e declarar lacunas de cobertura (Modo B) numa seção dedicada do relatório.
 
-**Architecture:** Dois módulos puros novos seguindo o padrão `apm_probe.py` (lógica pura + `send_fn` injetável + CLI + fail-safe). `lib/service_exposure.py` sonda um catálogo de serviços HTTP contra `$TARGET` na Fase 3 → `raw/service_exposure.json`, ingerido pelo report como findings `estimated`. `lib/coverage.py` deriva dimensões de lacuna a partir de sinais já computados e renderiza uma seção HTML que **não** entra em `severity_counts`.
+**Architecture:** Dois módulos puros novos seguindo o padrão `apm_probe.py` (lógica pura + `send_fn` injetável + CLI + fail-safe). `lib/service_exposure.py` sonda um catálogo de serviços HTTP contra `$TARGET` na Fase 3 → `raw/service_exposure.json`, ingerido pelo report como findings `estimated`. `lib/coverage_report.py` deriva dimensões de lacuna a partir de sinais já computados e renderiza uma seção HTML que **não** entra em `severity_counts`.
 
 **Tech Stack:** Python 3 stdlib (urllib/subprocess/json), pytest. Reusa `netproxy`/`mtls`/`fingerprint`. Sem dependências novas.
 
@@ -21,9 +21,9 @@
 ## File Structure
 
 - `lib/service_exposure.py` (criar) — catálogo + fingerprint + classificadores + orquestração + CLI.
-- `lib/coverage.py` (criar) — `blind_spots(signals)` + `render_section_html(dimensions)`.
+- `lib/coverage_report.py` (criar) — `blind_spots(signals)` + `render_section_html(dimensions)`.
 - `tests/test_service_exposure.py` (criar) — núcleo puro + orquestração com `send_fn` fake.
-- `tests/test_coverage.py` (criar) — dimensões + render.
+- `tests/test_coverage_report.py` (criar) — dimensões + render.
 - `stiglitz.sh` (modificar `:1099`) — invocação na Fase 3.
 - `stiglitz_report.py` (modificar `:925-950`, `:1106-1119`, `:2510-2514`) — ingest + seção + migração do coverage finding.
 
@@ -463,21 +463,15 @@ import json as _json
 
 
 class _Recorder:
-    """send_fn fake: roteia por (method, path) e registra todas as chamadas."""
+    """send_fn fake: roteia por (method, path-sem-querystring) e registra as chamadas."""
     def __init__(self, routes):
         self.routes = routes          # {(method, path): (status, body)}
         self.calls = []
 
     def __call__(self, method, url, headers, data, timeout=15):
         from urllib.parse import urlsplit
-        path = urlsplit(url).path
-        if "?" in url:
-            path = url.split(url.split("//", 1)[1].split("/", 1)[0], 1)[-1]  # mantém querystring
         self.calls.append((method, url, dict(headers or {})))
-        # casa por path (sem querystring) para simplificar
-        from urllib.parse import urlsplit as _u
-        key = (method, _u(url).path)
-        return self.routes.get(key, (404, ""))
+        return self.routes.get((method, urlsplit(url).path), (404, ""))
 
 
 def test_run_detects_elasticsearch_and_emits_finding(tmp_path):
@@ -795,11 +789,11 @@ git commit -m "feat(report): ingest service_exposure.json como findings estimate
 
 ---
 
-### Task 7: `lib/coverage.py` — `blind_spots(signals)`
+### Task 7: `lib/coverage_report.py` — `blind_spots(signals)`
 
 **Files:**
-- Create: `lib/coverage.py`
-- Test: `tests/test_coverage.py`
+- Create: `lib/coverage_report.py`
+- Test: `tests/test_coverage_report.py`
 
 **Interfaces:**
 - Produces: `blind_spots(signals: dict) -> list[dict]` onde cada dimensão = `{area, status, not_exercised, how_to_close}`; `_STATUS_LABEL` dict.
@@ -807,10 +801,10 @@ git commit -m "feat(report): ingest service_exposure.json como findings estimate
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/test_coverage.py
+# tests/test_coverage_report.py
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
-import coverage as cov
+import coverage_report as cov
 
 
 def test_empty_when_full_coverage():
@@ -846,18 +840,19 @@ def test_authed_api_dimension_only_without_token():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest tests/test_coverage.py -v`
+Run: `python3 -m pytest tests/test_coverage_report.py -v`
 Expected: FAIL (`ModuleNotFoundError: No module named 'coverage'` ou AttributeError)
 
-> Nota: há um pacote `coverage` (cobertura de testes) instalável. O `sys.path.insert`
-> coloca `lib/` à frente, então `import coverage` resolve para `lib/coverage.py`. Se
-> houver conflito no ambiente, rode com `PYTHONPATH=lib`.
+> Nota: o módulo chama-se `coverage_report` (NÃO `coverage`) de propósito — evita
+> colidir com o pacote `coverage` (pytest-cov), que sob cobertura ficaria em
+> `sys.modules` e sequestraria o `import coverage`. O `sys.path.insert(0, "lib")` do
+> teste garante que `import coverage_report` resolve para `lib/coverage_report.py`.
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
 #!/usr/bin/env python3
-"""coverage.py — declara lacunas de cobertura do scan ("Coverage & Blind Spots").
+"""coverage_report.py — declara lacunas de cobertura do scan ("Coverage & Blind Spots").
 
 Lógica pura: recebe SINAIS já derivados pelo stiglitz_report.py e devolve as
 dimensões de lacuna (transforma achado-oculto em lacuna-declarada). NÃO é finding
@@ -937,23 +932,23 @@ def blind_spots(signals):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python3 -m pytest tests/test_coverage.py -v`
+Run: `python3 -m pytest tests/test_coverage_report.py -v`
 Expected: PASS (5 testes)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lib/coverage.py tests/test_coverage.py
+git add lib/coverage_report.py tests/test_coverage_report.py
 git commit -m "feat(coverage): blind_spots puro (4 dimensões de lacuna)"
 ```
 
 ---
 
-### Task 8: `lib/coverage.py` — `render_section_html(dimensions)`
+### Task 8: `lib/coverage_report.py` — `render_section_html(dimensions)`
 
 **Files:**
-- Modify: `lib/coverage.py`
-- Test: `tests/test_coverage.py`
+- Modify: `lib/coverage_report.py`
+- Test: `tests/test_coverage_report.py`
 
 **Interfaces:**
 - Consumes: dimensões de `blind_spots`.
@@ -983,7 +978,7 @@ def test_render_escapes_html():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest tests/test_coverage.py -k render -v`
+Run: `python3 -m pytest tests/test_coverage_report.py -k render -v`
 Expected: FAIL (`AttributeError: ... 'render_section_html'`)
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1014,13 +1009,13 @@ def render_section_html(dimensions):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python3 -m pytest tests/test_coverage.py -v && python3 -m py_compile lib/coverage.py`
+Run: `python3 -m pytest tests/test_coverage_report.py -v && python3 -m py_compile lib/coverage_report.py`
 Expected: PASS (8 testes)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lib/coverage.py tests/test_coverage.py
+git add lib/coverage_report.py tests/test_coverage_report.py
 git commit -m "feat(coverage): render_section_html (seção HTML, escapa, vazio sem lacuna)"
 ```
 
@@ -1033,7 +1028,7 @@ git commit -m "feat(coverage): render_section_html (seção HTML, escapa, vazio 
 - Test: `tests/test_coverage_report_wiring.py` (criar)
 
 **Interfaces:**
-- Consumes: `lib/coverage.py`, `finding_quality.coverage_gap_finding` (já existe; agora alimenta um sinal, não um finding), `tech_categories`, `nf` (`:452`), `_cg_n` (`:1110`).
+- Consumes: `lib/coverage_report.py`, `finding_quality.coverage_gap_finding` (já existe; agora alimenta um sinal, não um finding), `tech_categories`, `nf` (`:452`), `_cg_n` (`:1110`).
 - Produces: `coverage_section_html` no relatório; `_all_f_raw` **sem** o coverage finding.
 
 - [ ] **Step 1: Write the failing characterization test**
@@ -1122,7 +1117,16 @@ if os.path.exists(_cg_path):
 _all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings + apm_findings + service_findings
 ```
 
-- [ ] **Step 3b: Montar `coverage_section_html`**
+- [ ] **Step 3b: Adicionar os imports no topo do report**
+
+Em `stiglitz_report.py`, junto dos imports de `lib/` (após `:40`, estilo `import asv_preflight as _asv  # noqa: E402`), adicionar — **NÃO inline** (o reviewer deste projeto flagga import no meio do arquivo como Minor):
+
+```python
+import service_exposure as _svc_exp  # noqa: E402  (catálogo p/ a cobertura de probe)
+import coverage_report as _coverage  # noqa: E402  (seção Coverage & Blind Spots)
+```
+
+- [ ] **Step 3c: Montar `coverage_section_html`**
 
 Em `stiglitz_report.py`, logo após o bloco `deferred_section_html` (`:2426`), inserir:
 
@@ -1130,9 +1134,6 @@ Em `stiglitz_report.py`, logo após o bloco `deferred_section_html` (`:2426`), i
 # ── Coverage & Blind Spots: declara o que o scan NÃO exercitou (Modo B) ─────────
 # Seção de apresentação, NÃO finding — não entra em severity_counts. Deriva sinais
 # já computados (nmap rodou? serviços fingerprintados sem sonda? API auth sem token?).
-import coverage as _coverage
-import service_exposure as _svc_exp
-
 _probe_coverage = ({s["name"] for s in _svc_exp.SERVICE_CATALOG.values()}
                    | {"Prometheus", "Elastic APM"})
 _infra_detected = set()
@@ -1164,7 +1165,7 @@ coverage_section_html = _coverage.render_section_html(_coverage.blind_spots(_cov
 > Nota: `nf` é definido em `:452` (`nf = os.path.join(OUTDIR,"raw","nmap.txt")`) e está
 > em escopo aqui. Se não estiver, recompute-o: `nf = os.path.join(OUTDIR, "raw", "nmap.txt")`.
 
-- [ ] **Step 3c: Interpolar a seção no template**
+- [ ] **Step 3d: Interpolar a seção no template**
 
 Em `stiglitz_report.py:2513`, trocar:
 
@@ -1205,7 +1206,7 @@ git commit -m "feat(report): seção Coverage & Blind Spots + migra coverage fin
 Run:
 ```bash
 python3 -m pytest tests/ -q
-python3 -m py_compile stiglitz_report.py lib/service_exposure.py lib/coverage.py
+python3 -m py_compile stiglitz_report.py lib/service_exposure.py lib/coverage_report.py
 bash -n stiglitz.sh && shellcheck --severity=warning stiglitz.sh
 ```
 Expected: tudo verde (baseline anterior 943 + novos testes); sem erro de compile/sintaxe; sem novos warnings de shellcheck.
@@ -1216,7 +1217,7 @@ Adicionar duas linhas na tabela `Módulos lib/` (seguindo o estilo das entradas 
 
 ```
 | `service_exposure.py` | Probe config-driven de serviços expostos sem auth (Fase 3, após apm_probe). Catálogo embutido (`SERVICE_CATALOG`) de ES/Kibana/Grafana/Actuator/Consul/etcd/Docker/K8s/RabbitMQ/Airflow/Jenkins — serviço novo = uma entrada de dados. Fingerprint por markers (corpo não-HTML, anti-catch-all) → probe GET dos endpoints sensíveis → classifica 200-sem-auth (CWE-306/200). Não-destrutivo (só GET); fail-safe (no-op sem serviço confirmado) → `raw/service_exposure.json`. Lógica pura + `send_fn` injetável + CLI |
-| `coverage.py` | Seção "Coverage & Blind Spots" do relatório (Modo B): `blind_spots(signals)` declara o que o scan NÃO exercitou (port scan ausente/truncado; serviço fingerprintado sem sonda; host vivo só com `/`; API autenticada sem token) e `render_section_html` monta a seção. **NÃO é finding** — não entra em `severity_counts`. Absorve o ex-`coverage_gap_finding` (migrado de finding info p/ dimensão da seção). Lógica pura |
+| `coverage_report.py` | Seção "Coverage & Blind Spots" do relatório (Modo B): `blind_spots(signals)` declara o que o scan NÃO exercitou (port scan ausente/truncado; serviço fingerprintado sem sonda; host vivo só com `/`; API autenticada sem token) e `render_section_html` monta a seção. **NÃO é finding** — não entra em `severity_counts`. Absorve o ex-`coverage_gap_finding` (migrado de finding info p/ dimensão da seção). Lógica pura |
 ```
 
 - [ ] **Step 3: Marcar o P0 no `docs/ROADMAP.md`**
