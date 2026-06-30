@@ -64,6 +64,7 @@ import ssl as _ssl
 
 def _gen_pair(tmp_path):
     """Par cert+key PEM auto-assinado p/ teste (cryptography)."""
+    pytest.importorskip("cryptography")  # CI não instala cryptography; pula em vez de falhar (espelha test_netproxy_mtls.py)
     from cryptography import x509
     from cryptography.x509.oid import NameOID
     from cryptography.hazmat.primitives import hashes, serialization
