@@ -1090,6 +1090,14 @@ python3 "$SCRIPT_DIR/lib/tech_profile.py" "$OUTDIR" "$TARGET"
 # Extracts datasource names, alert names, PCI-sensitive labels.
 python3 "$SCRIPT_DIR/lib/monitoring_check.py" "$OUTDIR" "$TARGET"
 
+# ── Elastic APM Server: unauth ingestion / agent-config probe ────────────────
+# APM Server é API pura — o ZAP spider só acha a raiz e o nuclei não tem template
+# (exige POST NDJSON). Probe determinístico e NÃO-DESTRUTIVO: POST de NDJSON inválido
+# em /intake/v2/events (→ 400 de schema, nunca indexa) + GET /config/v1/agents, lendo
+# 400/200-sem-auth vs 401-com-token. No-op silencioso fora de APM. → raw/apm_probe.json
+echo -e "  ${BLUE}[…]${NC} Probe de APM Server (ingestão/config sem auth)..."
+python3 "$SCRIPT_DIR/lib/apm_probe.py" "$OUTDIR" "$TARGET" || true
+
 # ── PYSECSCAN: security.txt (RFC-9116) + internal IP exposure ────
 echo -e "  ${BLUE}[…]${NC} Verificando security.txt e exposição de IPs internos..."
 python3 "$SCRIPT_DIR/lib/secscan.py" "$OUTDIR" "$TARGET" "$DOMAIN"

@@ -919,6 +919,36 @@ if os.path.exists(_cors_path):
     except Exception as e:
         errors.append(f"cors_findings: {e}")
 
+# ── APM Probe Findings (lib/apm_probe.py — unauth ingestion / agent config) ─
+# raw/apm_probe.json já traz findings prontos (schema do oauth_audit/_finding);
+# aqui só normalizamos para o schema do report. Lista vazia = no-op (não-APM).
+apm_findings = []
+_apm_path = os.path.join(OUTDIR, 'raw', 'apm_probe.json')
+if os.path.exists(_apm_path) and os.path.getsize(_apm_path) > 0:
+    try:
+        for _af in json.load(open(_apm_path, 'r', encoding='utf-8')):
+            _asev = _af.get('severity', 'medium')
+            apm_findings.append({
+                "id":   f"apm-{_af.get('type','issue')}",
+                "name": _af.get('name', 'APM Server issue'),
+                "severity": _asev, "severity_orig": _asev, "severity_reclassified": False,
+                "source": _af.get('source', 'APM Probe'),
+                "url": _af.get('url', TARGET),
+                "type": _af.get('type', ''),
+                # Mantido como 'estimated' (sem vuln_class) p/ consistência com os demais
+                # findings curados sem CVE (TLS/headers): o piso do estimated preserva a
+                # severity da ferramenta (High continua High; o environmental só eleva).
+                # Forçar o catálogo removeria esse piso e rebaixaria o High via env.
+                "cve": _af.get('cwe', ''), "cve_ids": [],
+                "description": _af.get('description', ''),
+                "remediation": _af.get('remediation', ''),
+                "evidence": _af.get('evidence', ''),
+                "param": "", "attack": "", "other": "",
+                "fingerprint": _af.get('fingerprint', ''),
+            })
+    except Exception as e:
+        errors.append(f"apm_probe: {e}")
+
 # ── Tech Profile ─────────────────────────────────────────────
 tech_profile  = {}
 tech_detected = {}
@@ -1086,7 +1116,7 @@ if os.path.exists(_cg_path):
         coverage_findings.append(_cg)
 
 # Montar lista combinada (todos os tipos) antes de enriquecer com criticidade
-_all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings + coverage_findings
+_all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings + apm_findings + coverage_findings
 
 # (P2) Dedup semântico cross-tool + fuzzy ANTES de enrich/sort/state/SARIF/HTML —
 # garante contagem consistente em todos os artefatos. Degrada sem abortar.

@@ -238,6 +238,10 @@ def _classify(finding):
         return "graphql_introspection"
     if "redirect_uri" in blob or "open redirect" in blob or "cwe-601" in blob:
         return "oauth_redirect_uri"
+    if "apm" in blob and ("ingest" in blob or "intake" in blob
+                          or "telemetry" in blob or "central config" in blob
+                          or "central_config" in blob or "unauth" in blob):
+        return "apm_unauth"
     if "auth" in blob and ("bypass" in blob or "default" in blob):
         return "auth_bypass"
     if "header" in blob and ("missing" in blob or "security" in blob):
@@ -329,6 +333,22 @@ CLASS_TEMPLATES = {
         ],
         "command": "curl -i -s '<TARGET>/<protected_endpoint>'",
         "expected": "The protected resource is served without valid authentication, proving an authentication bypass.",
+    },
+    "apm_unauth": {
+        "prerequisites": "Network access to the Elastic APM Server endpoint. No credentials required.",
+        "steps": [
+            "POST an intentionally invalid NDJSON body to /intake/v2/events with NO Authorization header.",
+            "Observe the server reaches schema validation (HTTP 400, \"accepted\":0) instead of rejecting with 401.",
+            "Repeat the same request with 'Authorization: Bearer <invalid>' and observe HTTP 401.",
+        ],
+        "command": ("curl -i -s -X POST '<TARGET>/intake/v2/events' \\\n"
+                    "  -H 'Content-Type: application/x-ndjson' \\\n"
+                    "  --data-binary '{\"metadata\":{}}'"),
+        "expected": ("Without a token the request is processed (HTTP 400 schema validation, "
+                     "not 401); with an invalid bearer token it returns HTTP 401 — proving "
+                     "anonymous ingestion is enabled (CWE-306). A valid event would be accepted "
+                     "(202) and indexed, so the invalid payload is used to avoid polluting "
+                     "production data."),
     },
     "missing_security_header": {
         "prerequisites": "Network access to the target.",

@@ -329,3 +329,22 @@ def test_cli_no_arg_exits_2():
     repro_py = os.path.join(os.path.dirname(__file__), "..", "lib", "repro.py")
     r = subprocess.run([sys.executable, repro_py], capture_output=True, text=True)
     assert r.returncode == 2
+
+
+# ── APM unauth ingestion ──────────────────────────────────────────────────────
+def test_classify_apm_unauth_ingestion():
+    f = {"type": "apm_unauth_ingestion",
+         "name": "APM Server accepts telemetry ingestion without authentication"}
+    assert R._classify(f) == "apm_unauth"
+
+
+def test_repro_apm_uses_intake_post_template():
+    f = {"type": "apm_unauth_ingestion", "severity": "high",
+         "name": "APM Server accepts telemetry ingestion without authentication",
+         "url": "https://apm.example.com/intake/v2/events"}
+    data = R.build_repro(f)
+    assert data is not None
+    assert "/intake/v2/events" in data["command"]
+    assert "POST" in data["command"].upper()
+    # a prova é a distinção 400-sem-auth vs 401-com-token
+    assert "401" in data["expected"]
