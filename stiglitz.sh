@@ -1291,6 +1291,21 @@ except: pass
         fi
         unset _ba_n
     fi
+    # ── Item #2: OpenAPI diff spec-vs-comportamento ─────────────────────────────
+    # Excessive Data Exposure (resposta com campos fora do schema) + Shadow Endpoint
+    # (path observado ∉ spec). Reusa o spec descoberto e os paths do katana. GET-only,
+    # fail-safe (no-op sem spec/schema). → raw/openapi_diff.json
+    if [ -s "$OUTDIR/raw/openapi_spec.json" ]; then
+        _od_n=$(timeout 180 python3 "$SCRIPT_DIR/lib/openapi_diff.py" \
+                  "$OUTDIR/raw/openapi_spec.json" "$TARGET" "$OUTDIR" \
+                  "$OUTDIR/raw/katana_urls.txt" 2>/dev/null || echo 0)
+        if [ "${_od_n:-0}" -gt 0 ]; then
+            echo -e "  ${RED}[!] OpenAPI spec-vs-behavior: ${_od_n} divergência(s) (excessive data / shadow endpoint)${NC}"
+        else
+            echo -e "  ${GREEN}[✓]${NC} OpenAPI spec-vs-behavior: nenhuma divergência detectada"
+        fi
+        unset _od_n
+    fi
     # Endpoints históricos do OSINT (wayback/gau) alimentam a varredura
     if [ -n "$OSINT_DIR" ] && [ -s "$OSINT_DIR/endpoints_historical.txt" ]; then
         cat "$OSINT_DIR/endpoints_historical.txt" >> "$_nuclei_list"
