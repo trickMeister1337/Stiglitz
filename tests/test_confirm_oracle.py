@@ -346,3 +346,37 @@ def test_lfi_differential_rejected_when_both_signal():
     same = {"status": 200, "headers": {}, "body": "root:x:0:0:root:/root:/bin/bash"}
     v = co.differential_verdict(co.lfi_effect(same), co.lfi_effect(same), "lfi_traversal")
     assert v["state"] == "REJECTED"
+
+
+# ── SSTI ──────────────────────────────────────────────────────────────────────
+SSTI_URL = "https://app.target.com/greet?name={{7*7}}"
+
+
+def test_build_ssti_variants_templated_attack_literal_control():
+    attack, control, expected = co.build_ssti_variants(SSTI_URL)
+    assert expected == "16826323"
+    aval = _qval(attack["url"], "name")
+    cval = _qval(control["url"], "name")
+    assert aval.startswith("{{") and aval.endswith("}}")   # templado
+    assert "{{" not in cval and "}}" not in cval           # controle não-templado
+    assert "4111*4093" in cval
+
+
+def test_build_ssti_variants_none_without_params():
+    assert co.build_ssti_variants("https://app.target.com/greet") is None
+
+
+def test_ssti_differential_confirmed_when_product_only_in_attack():
+    v = co.differential_verdict(
+        co.ssti_effect({"status": 200, "headers": {}, "body": "Hello 16826323"}, "16826323"),
+        co.ssti_effect({"status": 200, "headers": {}, "body": "Hello 4111*4093"}, "16826323"),
+        "ssti")
+    assert v["state"] == "CONFIRMED"
+
+
+def test_ssti_differential_rejected_on_echo():
+    # página ecoa o payload: nenhum lado computa o produto
+    a = co.ssti_effect({"status": 200, "headers": {}, "body": "Hello {{4111*4093}}"}, "16826323")
+    c = co.ssti_effect({"status": 200, "headers": {}, "body": "Hello 4111*4093"}, "16826323")
+    v = co.differential_verdict(a, c, "ssti")
+    assert v["state"] == "REJECTED"

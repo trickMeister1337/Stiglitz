@@ -312,6 +312,61 @@ def build_lfi_variants(url, method="GET", body=""):
     return attack, control
 
 
+# ── SSTI: avaliação de template confirmada por aritmética (não-eco) ───────────
+_SSTI_SYNTAXES = (("{{", "}}"), ("${", "}"), ("#{", "}"), ("<%=", "%>"))
+_SSTI_A, _SSTI_B = 4111, 4093  # produto distinto e improvável: 16826323
+
+
+def _detect_ssti_syntax(pairs):
+    """(open, close) presente no valor de algum param (payload do nuclei); default {{ }}."""
+    for _k, v in pairs:
+        for op, cl in _SSTI_SYNTAXES:
+            if op in (v or "") and cl in (v or ""):
+                return op, cl
+    return _SSTI_SYNTAXES[0]
+
+
+def _pick_ssti_param(pairs):
+    """Param cujo valor tem sintaxe de template; senão o 1º."""
+    for k, v in pairs:
+        for op, cl in _SSTI_SYNTAXES:
+            if op in (v or "") and cl in (v or ""):
+                return k
+    return pairs[0][0] if pairs else None
+
+
+def ssti_product_present(body, expected):
+    """Sinal: produto aritmético presente no corpo (só se o template foi avaliado)."""
+    text = body or ""
+    if expected and expected in text:
+        return {"signal": True, "detail": f"template evaluated: product {expected} present"}
+    return {"signal": False, "detail": f"product {expected} absent"}
+
+
+def ssti_effect(resp, expected):
+    return ssti_product_present(resp.get("body"), expected)
+
+
+def build_ssti_variants(url, method="GET", body=""):
+    """(attack, control, expected) | None — probe SSTI diferencial.
+
+    ataque : param = <op>A*B<cl> (templado) → corpo deve conter o produto A*B;
+    controle: MESMA expressão A*B SEM delimitadores (literal, não avaliada).
+    Motor de template → produto só no ataque. None se não houver parâmetro."""
+    pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    key = _pick_ssti_param(pairs)
+    if not key:
+        return None
+    op, cl = _detect_ssti_syntax(pairs)
+    expr = f"{_SSTI_A}*{_SSTI_B}"
+    expected = str(_SSTI_A * _SSTI_B)
+    attack = {"method": method, "body": body,
+              "url": _rebuild_query(url, key, f"{op}{expr}{cl}")}
+    control = {"method": method, "body": body,
+               "url": _rebuild_query(url, key, expr)}
+    return attack, control, expected
+
+
 # ── Orquestração fina (send_fn injetável, testável sem rede) ──────────────────
 def run_differential(base_url, attack_req, control_req, effect_fn, send_fn, cls):
     """Executa o par ataque/controle via `send_fn` e devolve o veredito diferencial.
