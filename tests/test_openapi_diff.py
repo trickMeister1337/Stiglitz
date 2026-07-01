@@ -77,3 +77,10 @@ def test_classify_excessive_pan_critical():
     # PAN Luhn-válido com contexto de cartão
     body = '{"card_number":"4111111111111111"}'
     assert od.classify_excessive({"card_number"}, body) == "critical"
+
+
+def test_classify_excessive_numeric_id_field_is_not_pii():
+    # Campo id numérico NÃO é PII (bug: extract_canary.isdigit() fazia retornar "high")
+    # Esperado: "medium" (não é CPF/CNPJ/email validado)
+    body = '{"id":1,"order_id":"998877","nickname":"joe"}'
+    assert od.classify_excessive({"nickname"}, body) == "medium"

@@ -23,13 +23,9 @@ import netproxy
 
 # Imports dos detectores de dado sensível (com fallback)
 try:
-    from bola import extract_canary
     from pii_detect import extract_pii
     from pan_scanner import scan_text as _pan_scan
 except Exception:  # importado fora de lib/
-    def extract_canary(b, ct=""):
-        return set()
-
     def extract_pii(content, corporate_domains):
         return {}
 
@@ -122,16 +118,14 @@ def excessive_fields(observed_body, declared_fields, content_type=""):
 
 def classify_excessive(extra_fields, observed_body):
     """Severidade da exposição: critical se há PAN (Luhn+contexto), high se PII
-    (CPF/CNPJ/email), senão medium."""
+    (CPF/CNPJ/email validado), senão medium."""
     if _pan_scan(observed_body or ""):
         return "critical"
     pii = extract_pii(observed_body or "", [])
     # extract_pii retorna dict com listas; qualquer lista não-vazia = PII encontrada
-    has_pii_from_dict = any(
+    # (CPF/CNPJ/email COM validação — não campos id numéricos)
+    has_pii = any(
         isinstance(v, list) and len(v) > 0
         for v in (pii or {}).values()
     )
-    has_canary_pii = any(
-        "@" in c or c.replace(".", "").replace("-", "").isdigit()
-        for c in extract_canary(observed_body or ""))
-    return "high" if (has_pii_from_dict or has_canary_pii) else "medium"
+    return "high" if has_pii else "medium"
