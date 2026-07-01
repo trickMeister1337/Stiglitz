@@ -442,7 +442,7 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
              method_results=None, diff_changed=False, diff_conf=0,
              diff_note="", auth_ev=None, dc_result=None,
              bool_pair=None, canary=None, redir_oracle=None, sqli_oracle=None,
-             lfi_oracle=None):
+             lfi_oracle=None, ssti_oracle=None, cmdi_oracle=None):
     """
     Valida uma vulnerabilidade e retorna (confirmed: bool, confidence: int, note: str).
 
@@ -484,6 +484,8 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
             "redir_oracle": redir_oracle,
             "sqli_oracle": sqli_oracle,
             "lfi_oracle": lfi_oracle,
+            "ssti_oracle": ssti_oracle,
+            "cmdi_oracle": cmdi_oracle,
         }
         return _clamp_confidence(*_plugin(ctx))
 
@@ -978,6 +980,48 @@ def confirm_nuclei(outdir):
                             url, la_req, lc_req, _co.lfi_effect, _send_lfi,
                             "lfi_traversal")
 
+                # Oráculo diferencial SSTI: ataque templado deve computar o produto
+                # aritmético; controle não-templado não. Eco do payload → REJECTED.
+                ssti_oracle = None
+                if _CONFIRM_ORACLE_AVAILABLE and vuln_type == "ssti":
+                    sv = _co.build_ssti_variants(url, method, req_body)
+                    if sv:
+                        sa_req, sc_req, s_exp = sv
+
+                        def _send_ssti(req):
+                            o, e = run_cmd(_apply_oauth(_req_to_curl(req)),
+                                           timeout=15, retries=1)
+                            if e:
+                                return {"status": "000", "headers": {}, "body": ""}
+                            st, hd, bd = parse_http_response(o or "")
+                            return {"status": st,
+                                    "headers": _co.parse_header_block(hd), "body": bd}
+
+                        ssti_oracle = _co.run_differential(
+                            url, sa_req, sc_req,
+                            lambda r: _co.ssti_effect(r, s_exp), _send_ssti, "ssti")
+
+                # Oráculo diferencial command-injection (in-band): ataque com `;expr A+B`
+                # deve refletir o resultado; controle A+(B-1) não. Eco → REJECTED.
+                cmdi_oracle = None
+                if _CONFIRM_ORACLE_AVAILABLE and vuln_type == "cmdi":
+                    cv = _co.build_cmdi_variants(url, method, req_body)
+                    if cv:
+                        ca_req, cc_req, c_exp = cv
+
+                        def _send_cmdi(req):
+                            o, e = run_cmd(_apply_oauth(_req_to_curl(req)),
+                                           timeout=15, retries=1)
+                            if e:
+                                return {"status": "000", "headers": {}, "body": ""}
+                            st, hd, bd = parse_http_response(o or "")
+                            return {"status": st,
+                                    "headers": _co.parse_header_block(hd), "body": bd}
+
+                        cmdi_oracle = _co.run_differential(
+                            url, ca_req, cc_req,
+                            lambda r: _co.cmdi_effect(r, c_exp), _send_cmdi, "cmdi")
+
                 # Testar métodos adicionais
                 method_results = {}
                 for m in ["GET", "POST"]:
@@ -1003,7 +1047,8 @@ def confirm_nuclei(outdir):
                     diff_changed=diff_changed, diff_conf=diff_conf,
                     diff_note=diff_note, auth_ev=auth_ev, dc_result=dc,
                     bool_pair=bool_pair, canary=canary, redir_oracle=redir_oracle,
-                    sqli_oracle=sqli_oracle, lfi_oracle=lfi_oracle)
+                    sqli_oracle=sqli_oracle, lfi_oracle=lfi_oracle,
+                    ssti_oracle=ssti_oracle, cmdi_oracle=cmdi_oracle)
 
                 state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
                 print(f"  [{state}] HTTP {status} | {confidence}% | {poc_note}")
