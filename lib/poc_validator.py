@@ -438,7 +438,8 @@ def classify_vuln(template_id, name, tags=""):
 def validate(vuln_type, url, resp_body, resp_headers, status,
              method_results=None, diff_changed=False, diff_conf=0,
              diff_note="", auth_ev=None, dc_result=None,
-             bool_pair=None, canary=None, redir_oracle=None, sqli_oracle=None):
+             bool_pair=None, canary=None, redir_oracle=None, sqli_oracle=None,
+             lfi_oracle=None):
     """
     Valida uma vulnerabilidade e retorna (confirmed: bool, confidence: int, note: str).
 
@@ -479,6 +480,7 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
             "canary": canary,
             "redir_oracle": redir_oracle,
             "sqli_oracle": sqli_oracle,
+            "lfi_oracle": lfi_oracle,
         }
         return _clamp_confidence(*_plugin(ctx))
 
@@ -951,6 +953,28 @@ def confirm_nuclei(outdir):
                             url, sa_req, sc_req, _co.sqli_error_effect,
                             _send_sqli, "sqli_error")
 
+                # Oráculo diferencial LFI/path-traversal: ataque lê /etc/passwd,
+                # controle lê arquivo inexistente na mesma profundidade. Assinatura
+                # só-no-ataque é atribuível ao traversal. Degrada sem regressão.
+                lfi_oracle = None
+                if _CONFIRM_ORACLE_AVAILABLE and vuln_type == "lfi":
+                    lv = _co.build_lfi_variants(url, method, req_body)
+                    if lv:
+                        la_req, lc_req = lv
+
+                        def _send_lfi(req):
+                            o, e = run_cmd(_apply_oauth(_req_to_curl(req)),
+                                           timeout=15, retries=1)
+                            if e:
+                                return {"status": "000", "headers": {}, "body": ""}
+                            st, hd, bd = parse_http_response(o or "")
+                            return {"status": st,
+                                    "headers": _co.parse_header_block(hd), "body": bd}
+
+                        lfi_oracle = _co.run_differential(
+                            url, la_req, lc_req, _co.lfi_effect, _send_lfi,
+                            "lfi_traversal")
+
                 # Testar métodos adicionais
                 method_results = {}
                 for m in ["GET", "POST"]:
@@ -976,7 +1000,7 @@ def confirm_nuclei(outdir):
                     diff_changed=diff_changed, diff_conf=diff_conf,
                     diff_note=diff_note, auth_ev=auth_ev, dc_result=dc,
                     bool_pair=bool_pair, canary=canary, redir_oracle=redir_oracle,
-                    sqli_oracle=sqli_oracle)
+                    sqli_oracle=sqli_oracle, lfi_oracle=lfi_oracle)
 
                 state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
                 print(f"  [{state}] HTTP {status} | {confidence}% | {poc_note}")

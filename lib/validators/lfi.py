@@ -5,6 +5,11 @@ from . import register
 
 @register("lfi")
 def validate(ctx):
+    oracle = ctx.get("lfi_oracle")
+    if oracle and oracle.get("state") == "CONFIRMED":
+        return (True, oracle.get("confidence", 90),
+                f"LFI confirmed by differential oracle: {(oracle.get('evidence') or '')[:160]}")
+    # REJECTED/ausente → cai no fallback legado (assinatura de sistema / diff).
     resp = ctx["resp_body"] or ""
     diff_changed = ctx["diff_changed"]
     diff_conf    = ctx["diff_conf"]
