@@ -7,8 +7,8 @@ Compara o que o spec OpenAPI/Swagger DECLARA com o que a API OBSERVAVELMENTE faz
 Mass Assignment fica de fora (mutante/gated → bizlogic).
 
 Lógica pura + fetch injetável + CLI (padrão openapi_probe.py). Findings em EN
-(deliverable); console/comentários PT-BR. Reusa helpers de openapi_probe e os
-detectores de dado sensível (pii_detect/pan_scanner/bola).
+(deliverable); console/comentários PT-BR. Reusa helpers de openapi_probe, detectores
+de dado sensível (pii_detect/pan_scanner), e is_safe_method de bola.
 """
 import json
 import os
@@ -22,6 +22,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openapi_probe import _as_dict, documented_operations, op_url, unauth_verdict
 from openapi_seed import _prefix as _spec_prefix
 import netproxy
+
+# Reuse safe-method checker de bola
+try:
+    from bola import is_safe_method
+except Exception:
+    def is_safe_method(method):
+        return (method or "").strip().upper() in ("GET", "HEAD", "OPTIONS")
 
 # Fingerprint para dedup de findings
 try:
@@ -53,11 +60,14 @@ def _resolve_ref(spec, node, seen):
         seen.add(ref)
         # #/components/schemas/X  ou  #/definitions/X
         target = spec
-        for part in ref.lstrip("#/").split("/"):
-            if not isinstance(target, dict):
-                return {}
-            target = target.get(part, {})
-        return _resolve_ref(spec, target, seen)
+        # Só resolve refs locais com prefixo #/; refs externas retornam {}
+        if ref.startswith("#/"):
+            for part in ref[2:].split("/"):
+                if not isinstance(target, dict):
+                    return {}
+                target = target.get(part, {})
+            return _resolve_ref(spec, target, seen)
+        return {}
     return node
 
 
@@ -205,7 +215,7 @@ def probe(spec, base_url, observed_urls, fetch_fn, sample="1"):
 
     # 1) Excessive data — reusa o GET das operações documentadas (só métodos seguros).
     for op in documented_operations(spec):
-        if op["method"] not in ("GET", "HEAD", "OPTIONS"):
+        if not is_safe_method(op["method"]):
             continue
         declared = resolve_response_schema(spec, op["path"], op["method"])
         if not declared:
