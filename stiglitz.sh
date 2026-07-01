@@ -1098,6 +1098,12 @@ python3 "$SCRIPT_DIR/lib/monitoring_check.py" "$OUTDIR" "$TARGET"
 echo -e "  ${BLUE}[…]${NC} Probe de APM Server (ingestão/config sem auth)..."
 python3 "$SCRIPT_DIR/lib/apm_probe.py" "$OUTDIR" "$TARGET" || true
 
+# ── Service Exposure: serviços de API pura expostos sem auth (catálogo) ──────
+# Generaliza o probe do APM: ES/Kibana/Grafana/Actuator/Consul/etcd/Docker/K8s/
+# RabbitMQ/Airflow/Jenkins. Só GET, fail-safe (no-op fora do catálogo). → raw/service_exposure.json
+echo -e "  ${BLUE}[…]${NC} Probe de exposição de serviços (catálogo, sem auth)..."
+python3 "$SCRIPT_DIR/lib/service_exposure.py" "$OUTDIR" "$TARGET" || true
+
 # ── PYSECSCAN: security.txt (RFC-9116) + internal IP exposure ────
 echo -e "  ${BLUE}[…]${NC} Verificando security.txt e exposição de IPs internos..."
 python3 "$SCRIPT_DIR/lib/secscan.py" "$OUTDIR" "$TARGET" "$DOMAIN"
