@@ -21,6 +21,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openapi_probe import _as_dict, documented_operations, op_url, unauth_verdict
 import netproxy
 
+# Imports dos detectores de dado sensível (com fallback)
+try:
+    from bola import extract_canary
+    from pii_detect import extract_pii
+    from pan_scanner import scan_text as _pan_scan
+except Exception:  # importado fora de lib/
+    def extract_canary(b, ct=""):
+        return set()
+
+    def extract_pii(content, corporate_domains):
+        return {}
+
+    def _pan_scan(body):
+        return []
+
 
 def _resolve_ref(spec, node, seen):
     """Resolve um nó de schema, seguindo $ref (guarda anti-ciclo via `seen`)."""
@@ -82,3 +97,41 @@ def resolve_response_schema(spec, path, method):
     if not isinstance(props, dict):
         return set()
     return set(props.keys())
+
+
+def observed_fields(body, content_type=""):
+    """Chaves de topo de um corpo JSON de objeto. Não-JSON / lista / inválido → set()."""
+    ct = (content_type or "").lower()
+    text = (body or "").lstrip()
+    if not ("json" in ct or text[:1] == "{"):
+        return set()
+    try:
+        obj = json.loads(body)
+    except (ValueError, TypeError):
+        return set()
+    return set(obj.keys()) if isinstance(obj, dict) else set()
+
+
+def excessive_fields(observed_body, declared_fields, content_type=""):
+    """Campos de topo na resposta AUSENTES do schema declarado. Sem baseline
+    (declared_fields vazio) → set() (não inventa exposição)."""
+    if not declared_fields:
+        return set()
+    return observed_fields(observed_body, content_type) - set(declared_fields)
+
+
+def classify_excessive(extra_fields, observed_body):
+    """Severidade da exposição: critical se há PAN (Luhn+contexto), high se PII
+    (CPF/CNPJ/email), senão medium."""
+    if _pan_scan(observed_body or ""):
+        return "critical"
+    pii = extract_pii(observed_body or "", [])
+    # extract_pii retorna dict com listas; qualquer lista não-vazia = PII encontrada
+    has_pii_from_dict = any(
+        isinstance(v, list) and len(v) > 0
+        for v in (pii or {}).values()
+    )
+    has_canary_pii = any(
+        "@" in c or c.replace(".", "").replace("-", "").isdigit()
+        for c in extract_canary(observed_body or ""))
+    return "high" if (has_pii_from_dict or has_canary_pii) else "medium"
