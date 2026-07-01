@@ -38,7 +38,7 @@ Ranqueados por alavanca no caso dominante (black-box CDE, zero-cred, sintoma "~1
 
 | # | Capacidade de analista | Técnica determinística que a captura | Estende / novo | Alavanca | Status |
 |---|---|---|---|---|---|
-| **1** | Confirmar por experimento de controle (matar FP e nascer TP por diferencial, não por confiar no scanner) | **Oráculos de confirmação diferencial:** todo finding candidato passa por baseline vs. ataque **+ um payload-controle que NÃO deveria disparar**. Confirmado só se o efeito existe no ataque **e ausente no controle** → o efeito é atribuível ao payload, não a gate/WAF/eco genérico. Generaliza `active_probe` (boolean-pair/canary) p/ todas as classes. | `lib/confirm_oracle.py` (novo) + integração em `poc_validator.py` | **Máxima** | 🚧 **em implementação** |
+| **1** | Confirmar por experimento de controle (matar FP e nascer TP por diferencial, não por confiar no scanner) | **Oráculos de confirmação diferencial:** todo finding candidato passa por baseline vs. ataque **+ um payload-controle que NÃO deveria disparar**. Confirmado só se o efeito existe no ataque **e ausente no controle** → o efeito é atribuível ao payload, não a gate/WAF/eco genérico. Generaliza `active_probe` (boolean-pair/canary) p/ todas as classes. | `lib/confirm_oracle.py` (novo) + integração em `poc_validator.py` | **Máxima** | ✅ **núcleo + open redirect end-to-end** (SQLi-error só falta plugar) |
 | **2** | Diff spec-vs-comportamento (mass assignment, excessive data exposure, shadow endpoints, campos não-documentados na resposta) | Parse OpenAPI + compara `schema`/`security:` **declarado** ao **observado**: resposta traz campos fora do schema → exposição; path observado ∉ spec → shadow; campo não-declarado aceito no body → mass assignment. | `lib/openapi_probe.py` (P0.1 do ROADMAP-blackbox-cde) | **Alta** | ⏳ pendente |
 | **3** | Classificar o que é sensível numa resposta (além de PAN: JWT no body, CPF/email/telefone, ID interno sequencial, stack trace, IP privado, erro verboso) | **Classificador de corpo de resposta:** catálogo de detectores regex/schema. Reusa `pan_scanner` + `pii_detect`, amplia alcance → severidade contextual em escopo CDE. | `lib/response_classify.py` (novo) | **Alta** | ⏳ pendente |
 | **4** | Descobrir falha de lógica por padrão estrutural (tampering de valor monetário, ID sequencial, quebra de máquina de estado) | **Engine de semântica de parâmetro:** classifica params por nome/tipo/schema (money/id/qty/state) e aplica **catálogo de mutação por classe** (negativo, zero, overflow, precisão decimal, moeda trocada, reordenar passos). Determinístico; pega o grosso, não a lógica inédita. | `lib/bizlogic.py` (hoje só executa config fixo) | **Média-alta** | ⏳ pendente |
@@ -76,9 +76,17 @@ barreira (ambos 401/403, ambos a mesma página de bloqueio, corpos ≈ iguais), 
 **Fora de escopo do #1 (YAGNI):** correlação de chain (é o #5), classificação de dado sensível
 (é o #3). O #1 só decide "este candidato é real?".
 
-**Integração (passo 2, depois do núcleo):** `poc_validator.confirm_nuclei` chama o oráculo por
-classe de finding; degrada sem regressão (detector None / fetch falho → fallback legado, igual
-o boolean-pair fez). Findings do oráculo entram com `state=CONFIRMED` + `evidence` diferencial.
+**Integração (feita p/ open redirect):** `poc_validator.confirm_nuclei` computa o oráculo quando
+`vuln_type == "redirect"` (builder `build_redirect_variants` injeta host-canário externo; probe
+sem `-L` via `_req_to_curl(follow=False)`; `parse_header_block` adapta os headers crus) e passa
+`redir_oracle` ao `validate()`; o `validators/redirect.py` consome `ctx["redir_oracle"]` — degrada
+sem regressão (builder None / fetch falho → fallback legado). Findings entram com `state`
+`CONFIRMED`/`REJECTED` + `evidence` diferencial.
+
+**Falta plugar (amanhã, extensão trivial):** o oráculo **SQLi error-based** já existe no núcleo
+(`db_error_signature`/`sqli_error_effect`), mas o branch `vuln_type == "sqli"` do `confirm_nuclei`
+ainda só roda o `boolean_pair` do `active_probe`. Basta um probe controle-vs-ataque com `'` e
+threadar como sinal complementar (mesmo padrão do bloco de redirect).
 
 ---
 
