@@ -949,6 +949,33 @@ if os.path.exists(_apm_path) and os.path.getsize(_apm_path) > 0:
     except Exception as e:
         errors.append(f"apm_probe: {e}")
 
+# ── Service Exposure Findings (lib/service_exposure.py — serviços sem auth) ─
+# raw/service_exposure.json já traz findings prontos (mesmo schema do apm_probe);
+# mantidos como 'estimated' (sem vuln_class) p/ o piso preservar a severity do
+# catálogo (igual APM/TLS). Lista vazia = no-op (nenhum serviço do catálogo exposto).
+service_findings = []
+_se_path = os.path.join(OUTDIR, 'raw', 'service_exposure.json')
+if os.path.exists(_se_path) and os.path.getsize(_se_path) > 0:
+    try:
+        for _sf in json.load(open(_se_path, 'r', encoding='utf-8')):
+            _ssev = _sf.get('severity', 'medium')
+            service_findings.append({
+                "id":   f"svc-{_sf.get('type','issue')}",
+                "name": _sf.get('name', 'Service exposure'),
+                "severity": _ssev, "severity_orig": _ssev, "severity_reclassified": False,
+                "source": _sf.get('source', 'Service Exposure'),
+                "url": _sf.get('url', TARGET),
+                "type": _sf.get('type', ''),
+                "cve": _sf.get('cwe', ''), "cve_ids": [],
+                "description": _sf.get('description', ''),
+                "remediation": _sf.get('remediation', ''),
+                "evidence": _sf.get('evidence', ''),
+                "param": "", "attack": "", "other": "",
+                "fingerprint": _sf.get('fingerprint', ''),
+            })
+    except Exception as e:
+        errors.append(f"service_exposure: {e}")
+
 # ── Tech Profile ─────────────────────────────────────────────
 tech_profile  = {}
 tech_detected = {}
@@ -1116,7 +1143,7 @@ if os.path.exists(_cg_path):
         coverage_findings.append(_cg)
 
 # Montar lista combinada (todos os tipos) antes de enriquecer com criticidade
-_all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings + apm_findings + coverage_findings
+_all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings + apm_findings + service_findings + coverage_findings
 
 # (P2) Dedup semântico cross-tool + fuzzy ANTES de enrich/sort/state/SARIF/HTML —
 # garante contagem consistente em todos os artefatos. Degrada sem abortar.
