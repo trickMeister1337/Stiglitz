@@ -84,3 +84,29 @@ def test_classify_excessive_numeric_id_field_is_not_pii():
     # Esperado: "medium" (não é CPF/CNPJ/email validado)
     body = '{"id":1,"order_id":"998877","nickname":"joe"}'
     assert od.classify_excessive({"nickname"}, body) == "medium"
+
+
+_SPEC_PATHS = {"openapi": "3.0.0", "paths": {
+    "/cards/{id}": {"get": {}}, "/users": {"get": {}}}}
+
+
+def test_matchers_match_templated_path():
+    m = od.documented_path_matchers(_SPEC_PATHS)
+    # /cards/123 casa (documentado); não é shadow
+    assert od.shadow_paths(["https://h/cards/123"], m) == []
+
+
+def test_shadow_path_not_in_spec():
+    m = od.documented_path_matchers(_SPEC_PATHS)
+    assert od.shadow_paths(["https://h/admin/debug"], m) == ["/admin/debug"]
+
+
+def test_shadow_ignores_querystring():
+    m = od.documented_path_matchers(_SPEC_PATHS)
+    assert od.shadow_paths(["https://h/users?page=2"], m) == []
+
+
+def test_shadow_dedups_and_filters_scope():
+    m = od.documented_path_matchers(_SPEC_PATHS)
+    urls = ["https://h/admin", "https://h/admin", "https://evil.com/x"]
+    assert od.shadow_paths(urls, m, scope_host="h") == ["/admin"]

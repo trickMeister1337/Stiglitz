@@ -16,9 +16,11 @@ import re
 import sys
 import urllib.request
 import urllib.error
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openapi_probe import _as_dict, documented_operations, op_url, unauth_verdict
+from openapi_seed import _prefix as _spec_prefix
 import netproxy
 
 # Imports dos detectores de dado sensível (com fallback)
@@ -129,3 +131,38 @@ def classify_excessive(extra_fields, observed_body):
         for v in (pii or {}).values()
     )
     return "high" if has_pii else "medium"
+
+
+def documented_path_matchers(spec):
+    """Um regex por path do spec: {param} (segmento inteiro) -> [^/]+ ; resto escapado;
+    ancorado. Respeita basePath/servers via openapi_seed._prefix."""
+    spec = _as_dict(spec) or {}
+    prefix = _spec_prefix(spec) or ""
+    out = []
+    for raw in (spec.get("paths") or {}):
+        if not isinstance(raw, str) or not raw.startswith("/"):
+            continue
+        full = raw if (not prefix or raw.startswith(prefix)) else prefix + raw
+        # constrói o regex segmento a segmento: {param} vira [^/]+, o resto é literal
+        segs = ["[^/]+" if (s.startswith("{") and s.endswith("}")) else re.escape(s)
+                for s in full.split("/")]
+        out.append(re.compile("^" + "/".join(segs) + "$"))
+    return out
+
+
+def shadow_paths(observed_urls, matchers, scope_host=""):
+    """Paths observados que não casam nenhum matcher. Query-string removida;
+    fora do scope_host descartado; dedup preservando ordem de 1ª ocorrência."""
+    seen, out = set(), []
+    for u in observed_urls or []:
+        parts = urlsplit(u if "://" in u else "//" + u)
+        if scope_host and parts.netloc and parts.netloc != scope_host:
+            continue
+        path = parts.path or "/"
+        if path in seen:
+            continue
+        if any(m.match(path) for m in matchers):
+            continue
+        seen.add(path)
+        out.append(path)
+    return out
