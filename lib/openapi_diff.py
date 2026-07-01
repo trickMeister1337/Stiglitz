@@ -184,3 +184,128 @@ def _finding(ftype, name, severity, cwe, url, description, evidence, method=""):
     }
     f["fingerprint"] = _fingerprint(f)
     return f
+
+
+_EXCESSIVE_DESC = (
+    "An endpoint returned fields in its response body that are NOT declared in the "
+    "OpenAPI/Swagger response schema. Undeclared fields indicate the API exposes more "
+    "data than documented; when they carry sensitive values (PAN, PII) this is a "
+    "confidentiality exposure that schema review would not catch.")
+_SHADOW_DESC = (
+    "A path observed during crawling is NOT documented in the OpenAPI/Swagger "
+    "specification. Undocumented (shadow) endpoints are outside the security inventory: "
+    "they are typically unreviewed, unmonitored, and a frequent source of forgotten "
+    "debug/admin surface.")
+
+
+def probe(spec, base_url, observed_urls, fetch_fn, sample="1"):
+    """Roda as duas detecções. Retorna lista de findings (EN)."""
+    spec = _as_dict(spec) or {}
+    findings = []
+
+    # 1) Excessive data — reusa o GET das operações documentadas (só métodos seguros).
+    for op in documented_operations(spec):
+        if op["method"] not in ("GET", "HEAD", "OPTIONS"):
+            continue
+        declared = resolve_response_schema(spec, op["path"], op["method"])
+        if not declared:
+            continue
+        url = op_url(spec, base_url, op["path"], sample=sample)
+        try:
+            status, body, content_type = fetch_fn(url, op["method"])
+        except Exception:
+            continue
+        if not (200 <= int(status or 0) < 300):
+            continue
+        extra = excessive_fields(body, declared, content_type)
+        if not extra:
+            continue
+        sev = classify_excessive(extra, body)
+        findings.append(_finding(
+            "openapi_excessive_data",
+            "Excessive Data Exposure vs OpenAPI schema", sev, "CWE-213",
+            url, _EXCESSIVE_DESC,
+            "Undeclared response field(s): %s (declared schema: %s)" % (
+                ", ".join(sorted(extra)), ", ".join(sorted(declared))),
+            method=op["method"]))
+
+    # 2) Shadow endpoints — set-diff observed - documented.
+    matchers = documented_path_matchers(spec)
+    host = urlsplit(base_url).netloc
+    for path in shadow_paths(observed_urls, matchers, scope_host=host):
+        url = base_url.rstrip("/") + path
+        sev = "low"
+        try:
+            status, body, ct = fetch_fn(url, "GET")
+            v = unauth_verdict(status, body, ct)
+            if v["state"] == "BROKEN_AUTH":
+                sev = "medium"
+        except Exception:
+            pass
+        findings.append(_finding(
+            "openapi_shadow_endpoint",
+            "Shadow Endpoint (undocumented, observed at runtime)", sev, "CWE-1059",
+            url, _SHADOW_DESC, "Observed path %s not present in the OpenAPI spec" % path,
+            method="GET"))
+    return findings
+
+
+def _default_fetch(url, method, timeout=10):
+    """Fetch real via netproxy (herda --proxy + mTLS). (status, body, content_type)."""
+    req = urllib.request.Request(url, method=method,
+                                 headers={"Accept": "application/json, */*"})
+    try:
+        with netproxy.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read(65536).decode("utf-8", "replace"), \
+                resp.headers.get("content-type", "")
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read(65536).decode("utf-8", "replace")
+        except Exception:
+            pass
+        ct = e.headers.get("content-type", "") if getattr(e, "headers", None) else ""
+        return e.code, body, ct
+    except Exception:
+        return 0, "", ""
+
+
+def run(spec_path, base_url, outdir, observed_urls_path=None, fetch_fn=_default_fetch):
+    """Lê spec + observed_urls, sonda, grava <outdir>/raw/openapi_diff.json. Retorna a contagem."""
+    try:
+        with open(spec_path, encoding="utf-8") as f:
+            spec = json.load(f)
+    except (OSError, ValueError):
+        return 0
+    observed = []
+    if observed_urls_path and os.path.exists(observed_urls_path):
+        try:
+            with open(observed_urls_path, encoding="utf-8") as f:
+                observed = [ln.strip() for ln in f if ln.strip()]
+        except OSError:
+            observed = []
+    findings = probe(spec, base_url, observed, fetch_fn)
+    raw = os.path.join(outdir, "raw")
+    try:
+        os.makedirs(raw, exist_ok=True)
+        with open(os.path.join(raw, "openapi_diff.json"), "w", encoding="utf-8") as f:
+            json.dump(findings, f, indent=2)
+    except OSError:
+        pass
+    return len(findings)
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) < 2:
+        print("uso: openapi_diff.py <spec.json> <base_url> [outdir] [observed_urls.txt]",
+              file=sys.stderr)
+        return 2
+    outdir = argv[2] if len(argv) > 2 else "."
+    observed = argv[3] if len(argv) > 3 else None
+    print(run(argv[0], argv[1], outdir, observed))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

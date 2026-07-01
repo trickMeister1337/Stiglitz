@@ -127,3 +127,44 @@ def test_build_finding_distinct_types_distinct_fingerprints():
     a = od._finding("openapi_excessive_data", "n", "medium", "CWE-213", "https://h/x", "d", "e")
     b = od._finding("openapi_shadow_endpoint", "n", "low", "CWE-1059", "https://h/x", "d", "e")
     assert a["fingerprint"] != b["fingerprint"]
+
+
+def test_probe_emits_excessive_when_extra_field_returned(tmp_path):
+    spec = {"openapi": "3.0.0",
+            "paths": {"/cards/{id}": {"get": {"responses": {"200": {"content": {
+                "application/json": {"schema": {"$ref": "#/components/schemas/Card"}}}}}}}},
+            "components": {"schemas": {"Card": {"properties": {"id": {}, "last4": {}}}}}}
+
+    def fake_fetch(url, method):
+        # servidor devolve um campo extra não-documentado (full_pan)
+        return 200, '{"id":1,"last4":"1234","full_pan":"4111111111111111"}', "application/json"
+
+    findings = od.probe(spec, "https://h", observed_urls=[], fetch_fn=fake_fetch)
+    exc = [f for f in findings if f["type"] == "openapi_excessive_data"]
+    assert exc and exc[0]["severity"] == "critical"        # full_pan é PAN Luhn-válido
+    assert "full_pan" in exc[0]["evidence"]
+
+
+def test_probe_emits_shadow_for_undocumented_observed_path():
+    spec = {"openapi": "3.0.0", "paths": {"/users": {"get": {}}}}
+    findings = od.probe(spec, "https://h", observed_urls=["https://h/admin/secret"],
+                        fetch_fn=lambda u, m: (0, "", ""))
+    shadow = [f for f in findings if f["type"] == "openapi_shadow_endpoint"]
+    assert shadow and "/admin/secret" in shadow[0]["url"]
+
+
+def test_run_writes_openapi_diff_json(tmp_path):
+    spec = {"openapi": "3.0.0", "paths": {"/users": {"get": {}}}}
+    sp = tmp_path / "spec.json"
+    sp.write_text(__import__("json").dumps(spec))
+    obs = tmp_path / "katana.txt"
+    obs.write_text("https://h/admin\n")
+    n = od.run(str(sp), "https://h", str(tmp_path), str(obs),
+               fetch_fn=lambda u, m: (0, "", ""))
+    assert n >= 1
+    saved = __import__("json").load(open(tmp_path / "raw" / "openapi_diff.json"))
+    assert any(f["type"] == "openapi_shadow_endpoint" for f in saved)
+
+
+def test_run_missing_spec_returns_zero(tmp_path):
+    assert od.run(str(tmp_path / "nope.json"), "https://h", str(tmp_path)) == 0
