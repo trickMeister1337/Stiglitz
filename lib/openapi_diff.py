@@ -23,6 +23,13 @@ from openapi_probe import _as_dict, documented_operations, op_url, unauth_verdic
 from openapi_seed import _prefix as _spec_prefix
 import netproxy
 
+# Fingerprint para dedup de findings
+try:
+    from fingerprint import fingerprint as _fingerprint
+except Exception:
+    def _fingerprint(f):
+        return "0" * 16
+
 # Imports dos detectores de dado sensível (com fallback)
 try:
     from pii_detect import extract_pii
@@ -166,3 +173,14 @@ def shadow_paths(observed_urls, matchers, scope_host=""):
         seen.add(path)
         out.append(path)
     return out
+
+
+def _finding(ftype, name, severity, cwe, url, description, evidence, method=""):
+    """Finding normalizado (EN). Schema alinhado ao openapi_probe.build_finding."""
+    f = {
+        "type": ftype, "name": name, "severity": severity, "cwe": cwe,
+        "url": url, "method": method, "source": "openapi_diff", "tool": "openapi_diff",
+        "description": description, "evidence": evidence,
+    }
+    f["fingerprint"] = _fingerprint(f)
+    return f

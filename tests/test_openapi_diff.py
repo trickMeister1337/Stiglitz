@@ -110,3 +110,20 @@ def test_shadow_dedups_and_filters_scope():
     m = od.documented_path_matchers(_SPEC_PATHS)
     urls = ["https://h/admin", "https://h/admin", "https://evil.com/x"]
     assert od.shadow_paths(urls, m, scope_host="h") == ["/admin"]
+
+
+def test_build_finding_excessive_shape():
+    f = od._finding("openapi_excessive_data",
+                    "Excessive Data Exposure vs OpenAPI schema", "high", "CWE-213",
+                    "https://h/cards/1", "desc", "ev", method="GET")
+    assert f["type"] == "openapi_excessive_data"
+    assert f["severity"] == "high"
+    assert f["cwe"] == "CWE-213"
+    assert f["source"] == "openapi_diff" and f["tool"] == "openapi_diff"
+    assert f["fingerprint"] and f["fingerprint"] != "0" * 16
+
+
+def test_build_finding_distinct_types_distinct_fingerprints():
+    a = od._finding("openapi_excessive_data", "n", "medium", "CWE-213", "https://h/x", "d", "e")
+    b = od._finding("openapi_shadow_endpoint", "n", "low", "CWE-1059", "https://h/x", "d", "e")
+    assert a["fingerprint"] != b["fingerprint"]
