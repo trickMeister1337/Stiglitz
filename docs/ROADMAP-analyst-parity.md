@@ -38,7 +38,7 @@ Ranqueados por alavanca no caso dominante (black-box CDE, zero-cred, sintoma "~1
 
 | # | Capacidade de analista | Técnica determinística que a captura | Estende / novo | Alavanca | Status |
 |---|---|---|---|---|---|
-| **1** | Confirmar por experimento de controle (matar FP e nascer TP por diferencial, não por confiar no scanner) | **Oráculos de confirmação diferencial:** todo finding candidato passa por baseline vs. ataque **+ um payload-controle que NÃO deveria disparar**. Confirmado só se o efeito existe no ataque **e ausente no controle** → o efeito é atribuível ao payload, não a gate/WAF/eco genérico. Generaliza `active_probe` (boolean-pair/canary) p/ todas as classes. | `lib/confirm_oracle.py` (novo) + integração em `poc_validator.py` | **Máxima** | ✅ **FEITO** — open redirect + SQLi-error end-to-end |
+| **1** | Confirmar por experimento de controle (matar FP e nascer TP por diferencial, não por confiar no scanner) | **Oráculos de confirmação diferencial:** todo finding candidato passa por baseline vs. ataque **+ um payload-controle que NÃO deveria disparar**. Confirmado só se o efeito existe no ataque **e ausente no controle** → o efeito é atribuível ao payload, não a gate/WAF/eco genérico. Generaliza `active_probe` (boolean-pair/canary) p/ todas as classes. | `lib/confirm_oracle.py` (novo) + integração em `poc_validator.py` | **Máxima** | ✅ **FEITO** — open redirect + SQLi-error + **LFI/traversal + SSTI + command-injection** (Tier 0.2, efeito por valor computado); classes cegas → OOB/Tier 0.1 |
 | **2** | Diff spec-vs-comportamento (mass assignment, excessive data exposure, shadow endpoints, campos não-documentados na resposta) | Parse OpenAPI + compara `schema`/`security:` **declarado** ao **observado**: resposta traz campos fora do schema → exposição; path observado ∉ spec → shadow; campo não-declarado aceito no body → mass assignment. | `lib/openapi_probe.py` (P0.1 do ROADMAP-blackbox-cde) | **Alta** | ✅ **FEITO** — Excessive Data Exposure + Shadow Endpoint (Mass Assignment deferido → bizlogic) |
 | **3** | Classificar o que é sensível numa resposta (além de PAN: JWT no body, CPF/email/telefone, ID interno sequencial, stack trace, IP privado, erro verboso) | **Classificador de corpo de resposta:** catálogo de detectores regex/schema. Reusa `pan_scanner` + `pii_detect`, amplia alcance → severidade contextual em escopo CDE. | `lib/response_classify.py` (novo) | **Alta** | ⏳ pendente |
 | **4** | Descobrir falha de lógica por padrão estrutural (tampering de valor monetário, ID sequencial, quebra de máquina de estado) | **Engine de semântica de parâmetro:** classifica params por nome/tipo/schema (money/id/qty/state) e aplica **catálogo de mutação por classe** (negativo, zero, overflow, precisão decimal, moeda trocada, reordenar passos). Determinístico; pega o grosso, não a lógica inédita. | `lib/bizlogic.py` (hoje só executa config fixo) | **Média-alta** | ⏳ pendente |
@@ -89,6 +89,18 @@ sem erro). O `confirm_nuclei` computa `sqli_oracle` no branch `vuln_type == "sql
 ao `boolean_pair`) e o `validators/sqli.py` o consome como positivo — `CONFIRMED` confirma;
 `REJECTED` **não veta** os demais sinais (error-pattern/bool-pair/diff seguem valendo). Mata o FP
 da página que sempre exibe erro de DB.
+
+**LFI / SSTI / command-injection (feito — Tier 0.2, 2026-07-01):** generaliza o oráculo para três
+classes **in-band** unidas pela mesma ideia — **efeito de valor computado** que um eco do payload
+não reproduz. LFI: assinatura `root:.*:0:0:`/win.ini no ataque (`/etc/passwd`) ausente no controle
+(arquivo inexistente, mesma profundidade). SSTI: produto `{{4111*4093}}`→`16826323` no ataque
+templado, ausente no controle não-templado (literal). Cmd-injection: `;expr A+B`→resultado no
+ataque, `+(B-1)` no controle. `build_*_variants`/`*_effect` em `confirm_oracle.py`; wiring em
+`confirm_nuclei` (`lfi_oracle`/`ssti_oracle`/`cmdi_oracle`); `validators/lfi|ssti|cmdi.py` consomem
+`CONFIRMED` como positivo, `REJECTED`/ausente → fallback legado (não veta). Correção de tabela:
+`classify_vuln` agora roteia `template-injection`/`command-injection`/`rce` para `ssti`/`cmdi`
+(antes caíam no sqli). **Classes cegas** (blind SSRF/RCE/SSTI/XXE) permanecem fora — dependem de
+OOB (Tier 0.1). **Follow-ups:** Windows `set /a` no cmdi; OOB de cmdi; SSRF refletido in-band.
 
 ---
 
