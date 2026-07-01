@@ -38,6 +38,8 @@ import finding_quality  # noqa: E402  (FP de disclosure ruidoso + enriquecimento
 import asv_preflight as _asv  # noqa: E402  (ASV Preflight hook, opt-in)
 import zap_authgate as _zap_authgate
 import evidence_render as _evrender  # noqa: E402  (evidência gigante → arquivo lateral linkado)
+import service_exposure as _svc_exp  # noqa: E402  (catálogo p/ a cobertura de probe)
+import coverage_report as _covreport  # noqa: E402  (seção Coverage & Blind Spots)
 REPRO_RAW = os.environ.get("STIGLITZ_REPRO_RAW") == "1"
 ASV_PREFLIGHT = os.environ.get("STIGLITZ_ASV_PREFLIGHT") == "1"
 
@@ -1128,22 +1130,18 @@ for f in findings:
         f.setdefault('severity_reclassified', False)
 
 
-# (Cobertura) Meta-finding: superfície de API autenticada não testada por falta de
-# token — registra no deliverable que o 0-High reflete só a casca não-autenticada.
-coverage_findings = []
+# (Cobertura) lê o nº de endpoints autenticados não testados — vira sinal da seção
+# "Coverage & Blind Spots" (migrado de finding info p/ não inflar severity_counts).
 _cg_path = _raw(".coverage_gap_authed_api")
+_cg_n = 0
 if os.path.exists(_cg_path):
     try:
         _cg_n = int((open(_cg_path).read().strip() or "0"))
     except (ValueError, OSError):
         _cg_n = 0
-    _cg = finding_quality.coverage_gap_finding(
-        _cg_n, has_token=bool(os.environ.get("AUTH_TOKEN", "")))
-    if _cg:
-        coverage_findings.append(_cg)
 
 # Montar lista combinada (todos os tipos) antes de enriquecer com criticidade
-_all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings + apm_findings + service_findings + coverage_findings
+_all_f_raw = findings + zap_findings + header_findings + version_findings + tls_findings + email_findings + apm_findings + service_findings
 
 # (P2) Dedup semântico cross-tool + fuzzy ANTES de enrich/sort/state/SARIF/HTML —
 # garante contagem consistente em todos os artefatos. Degrada sem abortar.
@@ -2452,6 +2450,36 @@ if _deferred_authgated:
         "<table><tr><th>Alert</th><th>Parameter</th><th>Confidence</th><th>Attack status</th><th>URL</th></tr>"
         + _drows + "</table>")
 
+# ── Coverage & Blind Spots: declara o que o scan NÃO exercitou (Modo B) ─────────
+# Seção de apresentação, NÃO finding — não entra em severity_counts. Deriva sinais
+# já computados (nmap rodou? serviços fingerprintados sem sonda? API auth sem token?).
+_probe_coverage = ({s["name"] for s in _svc_exp.SERVICE_CATALOG.values()}
+                   | {"Prometheus", "Elastic APM"})
+_infra_detected = set()
+for _cat in ("monitoring", "database", "message-queue", "cache"):
+    for _name in (tech_categories.get(_cat) or []):
+        _infra_detected.add(_name)
+
+_katana = _raw("katana_urls.txt")
+_n_urls = 0
+if os.path.exists(_katana):
+    try:
+        _n_urls = sum(1 for _ in open(_katana, encoding="utf-8", errors="ignore"))
+    except OSError:
+        _n_urls = 0
+_has_openapi = os.path.exists(_raw("openapi_urls.txt")) or _cg_n > 0
+
+_cov_signals = {
+    "nmap_ran": os.path.exists(nf) and os.path.getsize(nf) > 0,
+    "nmap_note": ("" if (os.path.exists(nf) and os.path.getsize(nf) > 0)
+                  else "TCP port scan was skipped (proxy/edge mode) or produced no output."),
+    "fingerprinted_services": sorted(_infra_detected),
+    "probed_services": sorted(_probe_coverage),
+    "live_hosts_no_surface": 1 if (_n_urls <= 1 and not _has_openapi) else 0,
+    "authed_api": {"count": _cg_n, "has_token": bool(os.environ.get("AUTH_TOKEN", ""))},
+}
+coverage_section_html = _covreport.render_section_html(_covreport.blind_spots(_cov_signals))
+
 # ── Remediation SLA — overdue (CISA KEV BOD 22-01) (#9) ──────
 _overdue = [f for f in all_f if (f.get("sla") or {}).get("overdue")]
 sla_section_html = ""
@@ -2538,6 +2566,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {compliance_section_html}
 {owasp_section_html}{asv_section_html}
 {deferred_section_html}
+{coverage_section_html}
 {pci_section_html}
 
 <!-- Scan Behavior -->
