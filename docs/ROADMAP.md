@@ -15,6 +15,9 @@ Módulos novos = lógica pura + CLI primeiro (padrão `bola.py`/`takeover.py`), 
 
 **Roadmaps temáticos:** [`ROADMAP-blackbox-cde.md`](ROADMAP-blackbox-cde.md) — melhoria dos
 achados em scan black-box de CDE zero-credencial (OpenAPI como motor, OOB self-host, CDE-driver).
+[`ROADMAP-analyst-parity.md`](ROADMAP-analyst-parity.md) — paridade com analista black-box
+**sem LLM** (determinístico/offline): oráculos de confirmação diferencial, spec-vs-comportamento,
+classificador de resposta, correlação de chain. Item #1 em implementação.
 
 ---
 
