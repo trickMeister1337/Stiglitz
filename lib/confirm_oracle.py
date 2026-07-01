@@ -367,6 +367,50 @@ def build_ssti_variants(url, method="GET", body=""):
     return attack, control, expected
 
 
+# ── Command injection (in-band): resultado computado por `expr` (não-eco) ─────
+# Unix. Windows (set /a) é follow-up anotado.
+_CMDI_SEP = ";"
+_CMDI_A, _CMDI_B = 1000000, 337  # resultado distinto: 1000337
+
+
+def cmdi_result_present(body, expected):
+    """Sinal: resultado aritmético presente no corpo (só se o comando executou)."""
+    text = body or ""
+    if expected and expected in text:
+        return {"signal": True, "detail": f"command executed: result {expected} present"}
+    return {"signal": False, "detail": f"result {expected} absent"}
+
+
+def cmdi_effect(resp, expected):
+    return cmdi_result_present(resp.get("body"), expected)
+
+
+def _pick_cmdi_param(pairs):
+    return pairs[0][0] if pairs else None
+
+
+def build_cmdi_variants(url, method="GET", body=""):
+    """(attack, control, expected) | None — probe cmd-injection diferencial (unix).
+
+    ataque : param = <base>;expr A + B → corpo deve conter o resultado A+B;
+    controle: <base>;expr A + (B-1) → resultado difere. Reflexão do payload
+    mostraria 'expr A + B' (não o resultado) em ambos. None se não houver param."""
+    pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    key = _pick_cmdi_param(pairs)
+    if not key:
+        return None
+    base = next((v for k, v in pairs if k == key), "") or "1"
+    base_clean = re.sub(r"[;&|`$].*$", "", base) or "1"
+    expected = str(_CMDI_A + _CMDI_B)
+    attack = {"method": method, "body": body,
+              "url": _rebuild_query(url, key,
+                                    f"{base_clean}{_CMDI_SEP}expr {_CMDI_A} + {_CMDI_B}")}
+    control = {"method": method, "body": body,
+               "url": _rebuild_query(url, key,
+                                     f"{base_clean}{_CMDI_SEP}expr {_CMDI_A} + {_CMDI_B - 1}")}
+    return attack, control, expected
+
+
 # ── Orquestração fina (send_fn injetável, testável sem rede) ──────────────────
 def run_differential(base_url, attack_req, control_req, effect_fn, send_fn, cls):
     """Executa o par ataque/controle via `send_fn` e devolve o veredito diferencial.

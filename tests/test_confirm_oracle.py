@@ -380,3 +380,40 @@ def test_ssti_differential_rejected_on_echo():
     c = co.ssti_effect({"status": 200, "headers": {}, "body": "Hello 4111*4093"}, "16826323")
     v = co.differential_verdict(a, c, "ssti")
     assert v["state"] == "REJECTED"
+
+
+# ── Command injection (in-band) ───────────────────────────────────────────────
+CMDI_URL = "https://app.target.com/ping?host=127.0.0.1"
+
+
+def test_build_cmdi_variants_computed_result():
+    attack, control, expected = co.build_cmdi_variants(CMDI_URL)
+    assert expected == "1000337"
+    assert "expr 1000000 + 337" in _qval(attack["url"], "host")
+    assert "expr 1000000 + 336" in _qval(control["url"], "host")
+
+
+def test_build_cmdi_variants_strips_injected_payload():
+    # valor-base com payload já injetado pelo nuclei → é limpo antes do probe
+    attack, _, _ = co.build_cmdi_variants("https://app.target.com/ping?host=127.0.0.1;id")
+    assert ";id" not in _qval(attack["url"], "host")
+
+
+def test_build_cmdi_variants_none_without_params():
+    assert co.build_cmdi_variants("https://app.target.com/ping") is None
+
+
+def test_cmdi_differential_confirmed_when_result_only_in_attack():
+    v = co.differential_verdict(
+        co.cmdi_effect({"status": 200, "headers": {}, "body": "PING result 1000337 ok"}, "1000337"),
+        co.cmdi_effect({"status": 200, "headers": {}, "body": "PING result 1000336 ok"}, "1000337"),
+        "cmdi")
+    assert v["state"] == "CONFIRMED"
+
+
+def test_cmdi_differential_rejected_on_echo():
+    # reflexão do payload: corpo mostra 'expr 1000000 + 337', não o resultado
+    echo = {"status": 200, "headers": {}, "body": "host=127.0.0.1;expr 1000000 + 337"}
+    a = co.cmdi_effect(echo, "1000337")
+    c = co.cmdi_effect({"status": 200, "headers": {}, "body": "host=127.0.0.1;expr 1000000 + 336"}, "1000337")
+    assert co.differential_verdict(a, c, "cmdi")["state"] == "REJECTED"
