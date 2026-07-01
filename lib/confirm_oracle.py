@@ -25,7 +25,7 @@ Uso (CLI): python3 lib/confirm_oracle.py redirect <base_url> <location>
 import re
 import sys
 import json
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
 
 
 # ── Decisão central (cláusula-de-controle) ────────────────────────────────────
@@ -133,13 +133,37 @@ def _header_get(headers, name):
     return None
 
 
+def parse_header_block(raw_headers):
+    """Converte o bloco cru de headers do `curl -D -` em dict (última ocorrência vence).
+
+    Ignora a status line (`HTTP/...`) e linhas de continuação (indentadas). Pareado
+    com o `parse_http_response` do poc_validator, que devolve os headers como string.
+    """
+    out = {}
+    for line in (raw_headers or "").splitlines():
+        if not line or line[0] in " \t" or line.startswith("HTTP/") or ":" not in line:
+            continue
+        k, _, v = line.partition(":")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def _safe_int(value):
+    """int tolerante — parse_http_response pode devolver '???'/'ERR'/'000'."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def redirect_effect(resp, base_url, allow_hosts=()):
     """Sinal de open redirect: status 3xx + Location off-site.
 
     `resp` = {"status", "headers", "body"}. Só conta como sinal um redirect real
     (3xx) para host fora de escopo — 200 com Location ou redirect same-site não disparam.
+    Robusto a status não-numérico (string do parse_http_response) → tratado como 0.
     """
-    status = int(resp.get("status") or 0)
+    status = _safe_int(resp.get("status"))
     location = _header_get(resp.get("headers"), "Location")
     is_3xx = 300 <= status < 400
     offsite = bool(location) and is_offsite_redirect(base_url, location, allow_hosts)
@@ -153,6 +177,61 @@ def sqli_error_effect(resp):
     """Sinal de SQLi error-based: assinatura de erro de DB no corpo da resposta."""
     sig = db_error_signature(resp.get("body"))
     return {"signal": sig["signal"], "detail": sig["detail"]}
+
+
+# ── Builder do probe de open redirect (monta ataque/controle) ────────────────
+# Nomes convencionais de parâmetro que carregam destino de redirect.
+_REDIRECT_PARAM_NAMES = {
+    "next", "url", "redirect", "redirect_uri", "redirect_url", "redirecturl",
+    "return", "return_url", "returnurl", "returnto", "return_to", "dest",
+    "destination", "continue", "callback", "goto", "target", "rurl", "forward",
+    "to", "u", "link", "checkout_url",
+}
+
+
+def _looks_like_redirect_value(v):
+    """Heurística de formato: valor que parece um destino de navegação."""
+    return (v or "").strip().startswith(("http://", "https://", "//", "/"))
+
+
+def _pick_redirect_param(pairs):
+    """Escolhe o parâmetro-alvo: nome convencional primeiro, senão valor com formato
+    de destino. None se nenhum. Seleção errada é fail-safe: o ataque não vira offsite
+    → oráculo devolve REJECTED (nunca inventa finding)."""
+    for k, _v in pairs:
+        if k.lower() in _REDIRECT_PARAM_NAMES:
+            return k
+    for k, v in pairs:
+        if _looks_like_redirect_value(v):
+            return k
+    return None
+
+
+def _rebuild_query(url, key, new_value):
+    """`url` com o parâmetro `key` trocado por `new_value` (demais preservados)."""
+    parts = urlsplit(url)
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    rebuilt = [(k, new_value if k == key else v) for k, v in pairs]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path,
+                       urlencode(rebuilt), parts.fragment))
+
+
+def build_redirect_variants(url, canary_host, method="GET", body=""):
+    """(attack_req, control_req) | None — cada req é {"url","method","body"}.
+
+    ataque   : parâmetro de redirect = `https://<canary_host>/` (destino externo);
+    controle : mesmo parâmetro = `/` (path same-site, não deve virar offsite).
+    O canary_host deve ser externo e inócuo (ex.: TLD reservado `.example`). None se
+    nenhum parâmetro de redirect for identificado na query."""
+    pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    key = _pick_redirect_param(pairs)
+    if not key:
+        return None
+    attack = {"method": method, "body": body,
+              "url": _rebuild_query(url, key, f"https://{canary_host}/")}
+    control = {"method": method, "body": body,
+               "url": _rebuild_query(url, key, "/")}
+    return attack, control
 
 
 # ── Orquestração fina (send_fn injetável, testável sem rede) ──────────────────

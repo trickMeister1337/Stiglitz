@@ -10,6 +10,18 @@ def validate(ctx):
     url     = ctx["url"]
     p       = ctx["patterns"]
 
+    # Oráculo de confirmação diferencial (confirm_oracle): quando presente, é a
+    # fonte de verdade — ataque vira offsite E controle não → CONFIRMED; controle
+    # também dispara (gate/SSO/eco) → REJECTED. Ausente → fallback passivo legado.
+    oracle = ctx.get("redir_oracle")
+    if oracle:
+        if oracle.get("state") == "CONFIRMED":
+            return (True, oracle.get("confidence", 90),
+                    f"Open redirect confirmado por oráculo diferencial: "
+                    f"{(oracle.get('evidence') or '')[:160]}")
+        return (False, oracle.get("confidence", 25),
+                f"Oráculo diferencial não confirmou: {(oracle.get('note') or '')[:120]}")
+
     loc = next((l for l in headers.split("\n")
                 if "location:" in l.lower()), "")
     if not loc:

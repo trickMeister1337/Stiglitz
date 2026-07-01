@@ -41,6 +41,18 @@ try:
 except Exception:
     _ACTIVE_PROBE_AVAILABLE = False
 
+# Oráculo de confirmação diferencial (confirm_oracle) — opcional, degrada sem erro.
+try:
+    import confirm_oracle as _co
+    _CONFIRM_ORACLE_AVAILABLE = True
+except Exception:
+    _CONFIRM_ORACLE_AVAILABLE = False
+
+# Host-canário externo e inócuo (TLD reservado — nunca resolve/atribui) usado no
+# probe de open redirect: injetado no parâmetro de redirect; se aparecer no Location
+# prova o redirect arbitrário sem apontar p/ infra real.
+_REDIR_CANARY_HOST = "stg-redir-canary.example"
+
 # OAuth refresh é opcional — só ativa quando STIGLITZ_OAUTH_TOKEN_URL estiver
 # configurada. Refresh inicial no startup + retry em 401 dentro do loop.
 try:
@@ -338,13 +350,18 @@ def build_safe_baseline(curl_cmd, matched_at):
     return clean, safe_curl
 
 
-def _req_to_curl(req):
+def _req_to_curl(req, follow=True):
     """Monta um curl shell-safe a partir de {"url","method","body"} (active_probe).
-    Toda a shell-safety (shlex.quote) fica concentrada aqui."""
+    Toda a shell-safety (shlex.quote) fica concentrada aqui.
+
+    `follow=False` (sem -L) é obrigatório p/ o probe de open redirect: precisamos ver
+    o Location do 3xx, não a página final (com -L o parse_http_response veria o status
+    do último hop)."""
     method = req.get("method", "GET")
     url    = req.get("url", "")
     body   = req.get("body", "")
-    cmd = f"curl -sk -L -X {shlex.quote(method)} --max-time 15 {shlex.quote(url)}"
+    redir  = " -L" if follow else ""
+    cmd = f"curl -sk{redir} -X {shlex.quote(method)} --max-time 15 {shlex.quote(url)}"
     if body and method in ("POST", "PUT", "PATCH"):
         cmd += f" --data {shlex.quote(body[:500])}"
     return cmd + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
@@ -421,7 +438,7 @@ def classify_vuln(template_id, name, tags=""):
 def validate(vuln_type, url, resp_body, resp_headers, status,
              method_results=None, diff_changed=False, diff_conf=0,
              diff_note="", auth_ev=None, dc_result=None,
-             bool_pair=None, canary=None):
+             bool_pair=None, canary=None, redir_oracle=None):
     """
     Valida uma vulnerabilidade e retorna (confirmed: bool, confidence: int, note: str).
 
@@ -460,6 +477,7 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
             "method_results": method_results or {},
             "bool_pair": bool_pair,
             "canary": canary,
+            "redir_oracle": redir_oracle,
         }
         return _clamp_confidence(*_plugin(ctx))
 
@@ -884,6 +902,32 @@ def confirm_nuclei(outdir):
                             _, _, c_body = parse_http_response(c_out)
                             canary = _ap.canary_reflection(token, c_body)
 
+                # Oráculo de confirmação diferencial: open redirect (item #1).
+                # Ataque injeta host-canário externo, controle usa path same-site;
+                # confirma só se o ataque vira offsite E o controle não. Builder None
+                # (sem param de redirect) ou fetch falho → oracle None → fallback legado.
+                redir_oracle = None
+                if _CONFIRM_ORACLE_AVAILABLE and vuln_type == "redirect":
+                    variants = _co.build_redirect_variants(
+                        url, _REDIR_CANARY_HOST, method, req_body)
+                    if variants:
+                        a_req, ctrl_req = variants
+
+                        def _send_redir(req):
+                            # sem -L: precisamos do Location do 3xx, não da página final
+                            o, e = run_cmd(_apply_oauth(_req_to_curl(req, follow=False)),
+                                           timeout=15, retries=1)
+                            if e:
+                                return {"status": "000", "headers": {}, "body": ""}
+                            st, hd, bd = parse_http_response(o or "")
+                            return {"status": st,
+                                    "headers": _co.parse_header_block(hd), "body": bd}
+
+                        redir_oracle = _co.run_differential(
+                            url, a_req, ctrl_req,
+                            lambda r: _co.redirect_effect(r, url),
+                            _send_redir, "open_redirect")
+
                 # Testar métodos adicionais
                 method_results = {}
                 for m in ["GET", "POST"]:
@@ -908,7 +952,7 @@ def confirm_nuclei(outdir):
                     method_results=method_results,
                     diff_changed=diff_changed, diff_conf=diff_conf,
                     diff_note=diff_note, auth_ev=auth_ev, dc_result=dc,
-                    bool_pair=bool_pair, canary=canary)
+                    bool_pair=bool_pair, canary=canary, redir_oracle=redir_oracle)
 
                 state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
                 print(f"  [{state}] HTTP {status} | {confidence}% | {poc_note}")

@@ -5,6 +5,7 @@ import confirm_oracle as co
 
 
 BASE = "https://app.target.com/login"
+CANARY = "stg-redir-canary.example"
 
 
 # ── differential_verdict: o coração (cláusula-de-controle) ────────────────────
@@ -150,3 +151,90 @@ def test_run_differential_rejects_when_page_always_errors():
         fake_send, "sqli_error")
     assert v["state"] == "REJECTED"
     assert "controle" in v["note"].lower()
+
+
+# ── build_redirect_variants (builder do probe de open redirect) ───────────────
+def test_build_redirect_variants_named_param():
+    v = co.build_redirect_variants("https://app.target.com/login?next=/home", CANARY)
+    assert v is not None
+    attack, control = v
+    assert CANARY in attack["url"]
+    assert CANARY not in control["url"]
+    assert attack["url"] != control["url"]
+
+
+def test_build_redirect_variants_value_shaped_param():
+    # nome de param desconhecido, mas o valor é um path → detectado por formato
+    v = co.build_redirect_variants("https://app.target.com/go?x=/dashboard", CANARY)
+    assert v is not None
+    attack, _control = v
+    assert CANARY in attack["url"]
+
+
+def test_build_redirect_variants_none_when_no_redirect_param():
+    assert co.build_redirect_variants("https://app.target.com/search?q=hello", CANARY) is None
+
+
+# ── parse_header_block (bloco cru do curl -D - → dict) ────────────────────────
+def test_parse_header_block_extracts_location():
+    raw = "HTTP/1.1 302 Found\r\nLocation: https://evil.com/\r\nContent-Length: 0"
+    hd = co.parse_header_block(raw)
+    assert hd["Location"] == "https://evil.com/"
+    assert "302" not in hd            # a status line não vira header
+
+
+# ── redirect_effect: robusto a status não-numérico do parse_http_response ─────
+def test_redirect_effect_non_numeric_status_no_crash():
+    resp = {"status": "???", "headers": {"Location": "https://evil.com/"}, "body": ""}
+    eff = co.redirect_effect(resp, BASE)
+    assert eff["signal"] is False
+
+
+def test_run_differential_open_redirect_production_shape():
+    # espelha o adapter do confirm_nuclei: status string + headers via parse_header_block
+    def fake_send(req):
+        if req["mark"] == "attack":
+            raw = f"HTTP/1.1 302 Found\r\nLocation: https://{CANARY}/\r\n"
+        else:
+            raw = "HTTP/1.1 302 Found\r\nLocation: /dashboard\r\n"
+        return {"status": "302", "headers": co.parse_header_block(raw), "body": ""}
+
+    v = co.run_differential(
+        BASE, {"mark": "attack"}, {"mark": "control"},
+        lambda r: co.redirect_effect(r, BASE), fake_send, "open_redirect")
+    assert v["state"] == "CONFIRMED"
+
+
+# ── validators/redirect.py consumindo ctx["redir_oracle"] ─────────────────────
+from validators.redirect import validate as _redir_validate
+
+
+def _redir_ctx(**over):
+    ctx = {"url": "https://app.target.com/login", "resp_body": "", "resp_headers": "",
+           "status": "302", "patterns": {}, "redir_oracle": None}
+    ctx.update(over)
+    return ctx
+
+
+def test_redirect_validator_confirms_on_oracle_confirmed():
+    ctx = _redir_ctx(redir_oracle={"state": "CONFIRMED", "confidence": 85,
+                                   "class": "open_redirect", "note": "x",
+                                   "evidence": "Location -> evil (offsite)"})
+    confirmed, conf, _note = _redir_validate(ctx)
+    assert confirmed is True
+    assert conf == 85
+
+
+def test_redirect_validator_rejects_on_oracle_rejected():
+    ctx = _redir_ctx(redir_oracle={"state": "REJECTED", "confidence": 30,
+                                   "class": "open_redirect",
+                                   "note": "efeito também no controle", "evidence": ""})
+    confirmed, _conf, _note = _redir_validate(ctx)
+    assert confirmed is False
+
+
+def test_redirect_validator_legacy_fallback_without_oracle():
+    # sem oráculo → lógica passiva legada (guarda de regressão)
+    ctx = _redir_ctx(resp_headers="HTTP/1.1 302\nLocation: https://evil.com/x", redir_oracle=None)
+    confirmed, _conf, _note = _redir_validate(ctx)
+    assert confirmed is True
