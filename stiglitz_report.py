@@ -1012,6 +1012,7 @@ for _vf_file, _vf_label in [
     ('oauth_findings.json',      'oauth_findings'),
     ('bizlogic_findings.json',   'bizlogic_findings'),
     ('openapi_authz.json',       'openapi_authz'),
+    ('openapi_diff.json',        'openapi_diff'),
 ]:
     _vff = os.path.join(OUTDIR, 'raw', _vf_file)
     if os.path.exists(_vff):
