@@ -146,6 +146,16 @@ Itens de produto reconciliados com o código (detalhe e priorização vivem na m
 
 ## Follow-ups conhecidos
 
+- ✅ **Cobertura — 2 P0 do roadmap de achados ocultos (FEITO)**: `lib/service_exposure.py`
+  (probe config-driven, Fase 3 após apm_probe) — catálogo embutido `SERVICE_CATALOG`
+  (ES/Kibana/Grafana/Actuator/Consul/etcd/Docker/K8s/RabbitMQ/Airflow/Jenkins; serviço novo
+  = entrada de dados), fingerprint por markers → probe GET dos endpoints sensíveis → classifica
+  200-sem-auth (CWE-306/200); não-destrutivo (só GET), fail-safe → `raw/service_exposure.json`.
+  `lib/coverage_report.py` — seção "Coverage & Blind Spots" (Modo B) declara o que o scan NÃO
+  exercitou (port scan ausente/truncado; serviço fingerprintado sem sonda; host vivo só com `/`;
+  API autenticada sem token); **não é finding**, fora de `severity_counts`; absorve o
+  ex-`coverage_gap_finding` (migrado de finding info p/ dimensão da seção). Endereça Modo A
+  (cegueira de descoberta) e Modo B (supressão) do roadmap de cobertura
 - ✅ **Cobertura PCI (FEITO)** — porte do swarm-pci entregue: `lib/cde_scope.py`,
   `lib/pan_scanner.py` (PAN com Luhn+máscara, 3.5.1), `lib/payment_page_monitor.py` (integridade
   de scripts/Magecart 6.4.3/11.6.1), `lib/pci_verdicts.py`; tag `pci_req`; escopo via
