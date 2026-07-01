@@ -26,6 +26,14 @@ def validate(ctx):
     if bp and bp.get("confirmed"):
         return True, bp["confidence"], f"Par booleano confirmado: {bp.get('note', '')}"
 
+    # Oráculo error-based diferencial (confirm_oracle): ataque com nº ímpar de aspas
+    # quebra a sintaxe (erro de DB), controle balanceado não → erro atribuível à
+    # injeção. Complementar: REJECTED apenas cai adiante (não veta os demais sinais).
+    so = ctx.get("sqli_oracle")
+    if so and so.get("state") == "CONFIRMED":
+        return (True, so.get("confidence", 85),
+                f"Oráculo SQLi error-based (diferencial): {(so.get('evidence') or '')[:140]}")
+
     # Padrões de erro SQL no response são prova direta
     for pat in patterns:
         try:

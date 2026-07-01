@@ -38,7 +38,7 @@ Ranqueados por alavanca no caso dominante (black-box CDE, zero-cred, sintoma "~1
 
 | # | Capacidade de analista | Técnica determinística que a captura | Estende / novo | Alavanca | Status |
 |---|---|---|---|---|---|
-| **1** | Confirmar por experimento de controle (matar FP e nascer TP por diferencial, não por confiar no scanner) | **Oráculos de confirmação diferencial:** todo finding candidato passa por baseline vs. ataque **+ um payload-controle que NÃO deveria disparar**. Confirmado só se o efeito existe no ataque **e ausente no controle** → o efeito é atribuível ao payload, não a gate/WAF/eco genérico. Generaliza `active_probe` (boolean-pair/canary) p/ todas as classes. | `lib/confirm_oracle.py` (novo) + integração em `poc_validator.py` | **Máxima** | ✅ **núcleo + open redirect end-to-end** (SQLi-error só falta plugar) |
+| **1** | Confirmar por experimento de controle (matar FP e nascer TP por diferencial, não por confiar no scanner) | **Oráculos de confirmação diferencial:** todo finding candidato passa por baseline vs. ataque **+ um payload-controle que NÃO deveria disparar**. Confirmado só se o efeito existe no ataque **e ausente no controle** → o efeito é atribuível ao payload, não a gate/WAF/eco genérico. Generaliza `active_probe` (boolean-pair/canary) p/ todas as classes. | `lib/confirm_oracle.py` (novo) + integração em `poc_validator.py` | **Máxima** | ✅ **FEITO** — open redirect + SQLi-error end-to-end |
 | **2** | Diff spec-vs-comportamento (mass assignment, excessive data exposure, shadow endpoints, campos não-documentados na resposta) | Parse OpenAPI + compara `schema`/`security:` **declarado** ao **observado**: resposta traz campos fora do schema → exposição; path observado ∉ spec → shadow; campo não-declarado aceito no body → mass assignment. | `lib/openapi_probe.py` (P0.1 do ROADMAP-blackbox-cde) | **Alta** | ⏳ pendente |
 | **3** | Classificar o que é sensível numa resposta (além de PAN: JWT no body, CPF/email/telefone, ID interno sequencial, stack trace, IP privado, erro verboso) | **Classificador de corpo de resposta:** catálogo de detectores regex/schema. Reusa `pan_scanner` + `pii_detect`, amplia alcance → severidade contextual em escopo CDE. | `lib/response_classify.py` (novo) | **Alta** | ⏳ pendente |
 | **4** | Descobrir falha de lógica por padrão estrutural (tampering de valor monetário, ID sequencial, quebra de máquina de estado) | **Engine de semântica de parâmetro:** classifica params por nome/tipo/schema (money/id/qty/state) e aplica **catálogo de mutação por classe** (negativo, zero, overflow, precisão decimal, moeda trocada, reordenar passos). Determinístico; pega o grosso, não a lógica inédita. | `lib/bizlogic.py` (hoje só executa config fixo) | **Média-alta** | ⏳ pendente |
@@ -83,10 +83,12 @@ sem `-L` via `_req_to_curl(follow=False)`; `parse_header_block` adapta os header
 sem regressão (builder None / fetch falho → fallback legado). Findings entram com `state`
 `CONFIRMED`/`REJECTED` + `evidence` diferencial.
 
-**Falta plugar (amanhã, extensão trivial):** o oráculo **SQLi error-based** já existe no núcleo
-(`db_error_signature`/`sqli_error_effect`), mas o branch `vuln_type == "sqli"` do `confirm_nuclei`
-ainda só roda o `boolean_pair` do `active_probe`. Basta um probe controle-vs-ataque com `'` e
-threadar como sinal complementar (mesmo padrão do bloco de redirect).
+**SQLi error-based (feito):** `build_sqli_error_variants` monta o par ataque (`base + '`, nº
+ÍMPAR de aspas → quebra sintaxe → erro de DB) vs. controle (`base + ''`, nº PAR → balanceado →
+sem erro). O `confirm_nuclei` computa `sqli_oracle` no branch `vuln_type == "sqli"` (complementar
+ao `boolean_pair`) e o `validators/sqli.py` o consome como positivo — `CONFIRMED` confirma;
+`REJECTED` **não veta** os demais sinais (error-pattern/bool-pair/diff seguem valendo). Mata o FP
+da página que sempre exibe erro de DB.
 
 ---
 

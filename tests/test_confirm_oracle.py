@@ -1,11 +1,16 @@
 # tests/test_confirm_oracle.py
 import os, sys
+from urllib.parse import urlsplit, parse_qs
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import confirm_oracle as co
 
 
 BASE = "https://app.target.com/login"
 CANARY = "stg-redir-canary.example"
+
+
+def _qval(url, key):
+    return parse_qs(urlsplit(url).query)[key][0]
 
 
 # ── differential_verdict: o coração (cláusula-de-controle) ────────────────────
@@ -237,4 +242,59 @@ def test_redirect_validator_legacy_fallback_without_oracle():
     # sem oráculo → lógica passiva legada (guarda de regressão)
     ctx = _redir_ctx(resp_headers="HTTP/1.1 302\nLocation: https://evil.com/x", redir_oracle=None)
     confirmed, _conf, _note = _redir_validate(ctx)
+    assert confirmed is True
+
+
+# ── build_sqli_error_variants (par ímpar/par de aspas) ────────────────────────
+def test_build_sqli_error_variants_odd_even_quotes():
+    v = co.build_sqli_error_variants("https://x/item?id=1' OR '1'='1&p=2")
+    assert v is not None
+    attack, control = v
+    av, cv = _qval(attack["url"], "id"), _qval(control["url"], "id")
+    assert av.endswith("'") and not av.endswith("''")   # ímpar → quebra sintaxe
+    assert cv.endswith("''")                             # par → balanceado
+    assert av != cv
+    assert _qval(attack["url"], "p") == "2"              # demais params preservados
+
+
+def test_build_sqli_error_variants_fallback_first_param():
+    # sem keyword SQL no valor → cai no primeiro parâmetro
+    v = co.build_sqli_error_variants("https://x/item?ref=abc")
+    assert v is not None
+    attack, _c = v
+    assert _qval(attack["url"], "ref") == "abc'"
+
+
+def test_build_sqli_error_variants_none_without_query():
+    assert co.build_sqli_error_variants("https://x/item") is None
+
+
+# ── validators/sqli.py consumindo ctx["sqli_oracle"] ──────────────────────────
+from validators.sqli import validate as _sqli_validate
+
+
+def _sqli_ctx(**over):
+    ctx = {"resp_body": "", "status": "200", "diff_changed": False, "diff_conf": 0,
+           "diff_note": "", "dc_bonus": 0, "dc_result": None,
+           "patterns": {"patterns": []}, "bool_pair": None, "sqli_oracle": None}
+    ctx.update(over)
+    return ctx
+
+
+def test_sqli_validator_confirms_on_oracle_confirmed():
+    ctx = _sqli_ctx(sqli_oracle={"state": "CONFIRMED", "confidence": 85,
+                                 "class": "sqli_error", "note": "x",
+                                 "evidence": "MySQL error signature"})
+    confirmed, conf, _note = _sqli_validate(ctx)
+    assert confirmed is True
+    assert conf == 85
+
+
+def test_sqli_validator_oracle_rejected_does_not_veto_error_pattern():
+    # oráculo REJECTED, mas há erro SQL no corpo → ainda confirma (complementar, não veta)
+    ctx = _sqli_ctx(resp_body="You have an error in your SQL syntax",
+                    patterns={"patterns": ["error in your sql"]},
+                    sqli_oracle={"state": "REJECTED", "confidence": 30,
+                                 "class": "sqli_error", "note": "n", "evidence": ""})
+    confirmed, _conf, _note = _sqli_validate(ctx)
     assert confirmed is True

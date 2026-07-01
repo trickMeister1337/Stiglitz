@@ -438,7 +438,7 @@ def classify_vuln(template_id, name, tags=""):
 def validate(vuln_type, url, resp_body, resp_headers, status,
              method_results=None, diff_changed=False, diff_conf=0,
              diff_note="", auth_ev=None, dc_result=None,
-             bool_pair=None, canary=None, redir_oracle=None):
+             bool_pair=None, canary=None, redir_oracle=None, sqli_oracle=None):
     """
     Valida uma vulnerabilidade e retorna (confirmed: bool, confidence: int, note: str).
 
@@ -478,6 +478,7 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
             "bool_pair": bool_pair,
             "canary": canary,
             "redir_oracle": redir_oracle,
+            "sqli_oracle": sqli_oracle,
         }
         return _clamp_confidence(*_plugin(ctx))
 
@@ -928,6 +929,28 @@ def confirm_nuclei(outdir):
                             lambda r: _co.redirect_effect(r, url),
                             _send_redir, "open_redirect")
 
+                # Oráculo error-based diferencial (SQLi): ataque com nº ímpar de aspas
+                # quebra a sintaxe (erro de DB), controle balanceado não. Complementar
+                # ao boolean-pair; degrada sem regressão (builder None / fetch falho).
+                sqli_oracle = None
+                if _CONFIRM_ORACLE_AVAILABLE and vuln_type == "sqli":
+                    sv = _co.build_sqli_error_variants(url, method, req_body)
+                    if sv:
+                        sa_req, sc_req = sv
+
+                        def _send_sqli(req):
+                            o, e = run_cmd(_apply_oauth(_req_to_curl(req)),
+                                           timeout=15, retries=1)
+                            if e:
+                                return {"status": "000", "headers": {}, "body": ""}
+                            st, hd, bd = parse_http_response(o or "")
+                            return {"status": st,
+                                    "headers": _co.parse_header_block(hd), "body": bd}
+
+                        sqli_oracle = _co.run_differential(
+                            url, sa_req, sc_req, _co.sqli_error_effect,
+                            _send_sqli, "sqli_error")
+
                 # Testar métodos adicionais
                 method_results = {}
                 for m in ["GET", "POST"]:
@@ -952,7 +975,8 @@ def confirm_nuclei(outdir):
                     method_results=method_results,
                     diff_changed=diff_changed, diff_conf=diff_conf,
                     diff_note=diff_note, auth_ev=auth_ev, dc_result=dc,
-                    bool_pair=bool_pair, canary=canary, redir_oracle=redir_oracle)
+                    bool_pair=bool_pair, canary=canary, redir_oracle=redir_oracle,
+                    sqli_oracle=sqli_oracle)
 
                 state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
                 print(f"  [{state}] HTTP {status} | {confidence}% | {poc_note}")

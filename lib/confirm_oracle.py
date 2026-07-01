@@ -234,6 +234,34 @@ def build_redirect_variants(url, canary_host, method="GET", body=""):
     return attack, control
 
 
+# ── Builder do probe SQLi error-based (par ímpar/par de aspas) ────────────────
+# Keywords que sinalizam o parâmetro que o nuclei já injetou com payload SQL.
+_SQLI_KW = re.compile(
+    r"(?:\bOR\b|\bAND\b|\bUNION\b|\bSELECT\b|\bWHERE\b|\bSLEEP\b|\bWAITFOR\b"
+    r"|\bBENCHMARK\b|--|#|')", re.IGNORECASE)
+
+
+def build_sqli_error_variants(url, method="GET", body=""):
+    """(attack_req, control_req) | None — probe error-based diferencial.
+
+    ataque   : valor-base + `'`  (nº ÍMPAR de aspas → quebra a sintaxe → erro de DB);
+    controle : valor-base + `''` (nº PAR → aspas balanceadas → sem erro).
+    Se o erro só aparece no ataque, é atribuível à injeção (não a página que sempre
+    erra). Alvo: o parâmetro que carrega keyword SQL (payload do nuclei); senão o 1º.
+    None se a query não tiver parâmetros."""
+    pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    if not pairs:
+        return None
+    key, base = next(((k, v) for k, v in pairs if _SQLI_KW.search(v or "")), pairs[0])
+    # Remove o payload que o nuclei já injetou (do 1º delimitador em diante).
+    base_clean = re.sub(r"['\"].*$", "", base or "") or "1"
+    attack = {"method": method, "body": body,
+              "url": _rebuild_query(url, key, base_clean + "'")}
+    control = {"method": method, "body": body,
+               "url": _rebuild_query(url, key, base_clean + "''")}
+    return attack, control
+
+
 # ── Orquestração fina (send_fn injetável, testável sem rede) ──────────────────
 def run_differential(base_url, attack_req, control_req, effect_fn, send_fn, cls):
     """Executa o par ataque/controle via `send_fn` e devolve o veredito diferencial.
