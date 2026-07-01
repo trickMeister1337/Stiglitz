@@ -225,3 +225,99 @@ def build_findings(service_key, confirmed, target):
         if (verdict or {}).get("state") == "CONFIRMED":
             out.append(_finding(probe, base, spec, verdict))
     return out
+
+
+# ── Rede (injetável) ────────────────────────────────────────────────────────────
+def send_request(method, url, headers, data, timeout=15):
+    """GET via curl (herda proxy/mTLS). Retorna (status, body). Não segue redirect; -k."""
+    import subprocess
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return (0, "")
+    cmd = ["curl", *netproxy.curl_proxy_args(), *mtls.curl_cert_args(),
+           "-sk", "-S", "--max-time", str(timeout),
+           "-o", "-", "-w", "\n__HTTP_STATUS__:%{http_code}", "-X", method]
+    for k, v in (headers or {}).items():
+        cmd += ["-H", f"{k}: {v}"]
+    if data is not None:
+        cmd += ["--data-binary", data]
+    cmd += ["--", url]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        raw = p.stdout or ""
+    except Exception:
+        return (0, "")
+    status, body = 0, raw
+    sm = raw.rfind("__HTTP_STATUS__:")
+    if sm != -1:
+        body = raw[:sm].rstrip("\n")
+        try:
+            status = int(raw[sm:].split(":", 1)[1].strip())
+        except (ValueError, IndexError):
+            status = 0
+    return (status, body)
+
+
+# ── Orquestração ──────────────────────────────────────────────────────────────
+def run(scan_dir, target, send_fn=send_request, timeout=15):
+    """Fingerprinta o catálogo contra o alvo; no 1º serviço confirmado, sonda os
+    endpoints sensíveis e emite findings CONFIRMED. Grava raw/service_exposure.json.
+
+    Fail-safe: sem serviço fingerprintado → no-op (lista vazia). SOMENTE GET."""
+    base = (target or "").rstrip("/")
+    detected = None
+    findings = []
+    for key, spec in SERVICE_CATALOG.items():
+        matched = False
+        for fp in spec["fingerprint"]:
+            st, bo = send_fn("GET", base + fp["path"], {}, None, timeout)
+            if is_service(st, bo, fp["markers"]):
+                matched = True
+                break
+        if not matched:
+            continue
+        detected = key
+        confirmed = []
+        for pr in spec["probes"]:
+            st, bo = send_fn("GET", base + pr["path"], {}, None, timeout)
+            auth_st = None
+            if pr.get("auth_contrast"):
+                auth_st, _ = send_fn("GET", base + pr["path"],
+                                     {"Authorization": _PROBE_TOKEN}, None, timeout)
+            verdict = classify_exposure(st, bo, auth_st)
+            if verdict["state"] == "CONFIRMED":
+                confirmed.append((pr, verdict))
+        findings = build_findings(key, confirmed, base)
+        break  # um host = um serviço; evita ruído e custo
+
+    summary = {"service": detected, "total": len(findings)}
+    raw_dir = os.path.join(scan_dir, "raw")
+    try:
+        os.makedirs(raw_dir, exist_ok=True)
+        with open(os.path.join(raw_dir, "service_exposure.json"), "w", encoding="utf-8") as fh:
+            json.dump(findings, fh, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        print(f"  aviso: não foi possível gravar service_exposure.json: {exc}", file=sys.stderr)
+    return {"findings": findings, "summary": summary}
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+def main(argv):
+    if len(argv) >= 4 and argv[1] == "run":
+        scan_dir, target = argv[2], argv[3]
+    elif len(argv) >= 3:
+        scan_dir, target = argv[1], argv[2]
+    else:
+        print("uso: service_exposure.py <scan_dir> <target_url>", file=sys.stderr)
+        return 2
+    res = run(scan_dir, target)
+    s = res["summary"]
+    if s["service"]:
+        print(f"  service-exposure: {s['service']} detectado → {s['total']} finding(s)")
+    else:
+        print("  service-exposure: nenhum serviço do catálogo exposto sem auth")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
