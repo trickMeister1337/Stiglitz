@@ -262,6 +262,56 @@ def build_sqli_error_variants(url, method="GET", body=""):
     return attack, control
 
 
+# ── LFI / path traversal: assinatura de arquivo de sistema (baixo-FP) ─────────
+_LFI_PARAM_HINTS = ("../", "..\\", "%2e%2e", "/etc/", "passwd", "boot.ini", "win.ini")
+_PASSWD_RX = re.compile(r"root:.*?:0:0:")
+_WINI_RX = re.compile(r"\[extensions\]|for 16-bit app support|\[boot loader\]", re.I)
+_LFI_DEPTH = "../" * 8
+
+
+def passwd_signature(body):
+    """Assinatura inequívoca de arquivo de sistema lido via traversal. {"signal","detail"}."""
+    text = body or ""
+    m = _PASSWD_RX.search(text)
+    if m:
+        return {"signal": True, "detail": f"unix passwd signature: {m.group(0)[:60]!r}"}
+    m = _WINI_RX.search(text)
+    if m:
+        return {"signal": True, "detail": f"windows ini/boot signature: {m.group(0)[:60]!r}"}
+    return {"signal": False, "detail": "no system-file signature"}
+
+
+def lfi_effect(resp):
+    """Sinal de LFI: assinatura de arquivo de sistema no corpo da resposta."""
+    return passwd_signature(resp.get("body"))
+
+
+def _pick_lfi_param(pairs):
+    """Param cujo valor parece payload de traversal (do nuclei); senão o 1º."""
+    for k, v in pairs:
+        if any(h in (v or "").lower() for h in _LFI_PARAM_HINTS):
+            return k
+    return pairs[0][0] if pairs else None
+
+
+def build_lfi_variants(url, method="GET", body=""):
+    """(attack, control) | None — probe LFI diferencial.
+
+    ataque : param = traversal profundo -> etc/passwd (arquivo real);
+    controle: MESMA profundidade -> nome inexistente (etc/stiglitz_absent_zzz).
+    Assinatura só-no-ataque é atribuível à leitura do arquivo real. None se a
+    query não tiver parâmetros (fail-safe → oráculo ausente → fallback legado)."""
+    pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    key = _pick_lfi_param(pairs)
+    if not key:
+        return None
+    attack = {"method": method, "body": body,
+              "url": _rebuild_query(url, key, _LFI_DEPTH + "etc/passwd")}
+    control = {"method": method, "body": body,
+               "url": _rebuild_query(url, key, _LFI_DEPTH + "etc/stiglitz_absent_zzz")}
+    return attack, control
+
+
 # ── Orquestração fina (send_fn injetável, testável sem rede) ──────────────────
 def run_differential(base_url, attack_req, control_req, effect_fn, send_fn, cls):
     """Executa o par ataque/controle via `send_fn` e devolve o veredito diferencial.

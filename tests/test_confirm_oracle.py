@@ -298,3 +298,51 @@ def test_sqli_validator_oracle_rejected_does_not_veto_error_pattern():
                                  "class": "sqli_error", "note": "n", "evidence": ""})
     confirmed, _conf, _note = _sqli_validate(ctx)
     assert confirmed is True
+
+
+# ── LFI / path traversal ──────────────────────────────────────────────────────
+LFI_URL = "https://app.target.com/download?file=welcome.txt"
+
+
+def test_passwd_signature_detects_unix_passwd():
+    body = "daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nroot:x:0:0:root:/root:/bin/bash\n"
+    sig = co.passwd_signature(body)
+    assert sig["signal"] is True
+    assert "passwd" in sig["detail"].lower()
+
+
+def test_passwd_signature_detects_windows_ini():
+    assert co.passwd_signature("; for 16-bit app support\n[extensions]\n")["signal"] is True
+
+
+def test_passwd_signature_negative_on_plain_html():
+    assert co.passwd_signature("<html><body>hello root user</body></html>")["signal"] is False
+
+
+def test_build_lfi_variants_attack_and_control_shape():
+    attack, control = co.build_lfi_variants(LFI_URL)
+    assert _qval(attack["url"], "file").endswith("etc/passwd")
+    assert "../" in _qval(attack["url"], "file")
+    # controle: mesma profundidade, arquivo inexistente (não deve casar assinatura)
+    assert _qval(control["url"], "file").count("../") == _qval(attack["url"], "file").count("../")
+    assert not _qval(control["url"], "file").endswith("etc/passwd")
+
+
+def test_build_lfi_variants_none_without_params():
+    assert co.build_lfi_variants("https://app.target.com/download") is None
+
+
+def test_lfi_differential_confirmed():
+    # ataque lê /etc/passwd (assinatura), controle não
+    v = co.differential_verdict(
+        co.lfi_effect({"status": 200, "headers": {}, "body": "root:x:0:0:root:/root:/bin/bash"}),
+        co.lfi_effect({"status": 200, "headers": {}, "body": "File not found"}),
+        "lfi_traversal")
+    assert v["state"] == "CONFIRMED"
+
+
+def test_lfi_differential_rejected_when_both_signal():
+    # página que sempre contém a assinatura (FP) → controle também dispara
+    same = {"status": 200, "headers": {}, "body": "root:x:0:0:root:/root:/bin/bash"}
+    v = co.differential_verdict(co.lfi_effect(same), co.lfi_effect(same), "lfi_traversal")
+    assert v["state"] == "REJECTED"
