@@ -32,3 +32,22 @@ def test_authed_api_dimension_only_without_token():
     assert any(d["area"] == "Authenticated API surface" for d in dims)
     dims2 = cov.blind_spots({"nmap_ran": True, "authed_api": {"count": 12, "has_token": True}})
     assert not any(d["area"] == "Authenticated API surface" for d in dims2)
+
+
+def test_render_empty_when_no_dimensions():
+    assert cov.render_section_html([]) == ""
+
+
+def test_render_contains_section_and_rows():
+    html = cov.render_section_html([
+        {"area": "Network port scan", "status": "not_run",
+         "not_exercised": "x", "how_to_close": "y"}])
+    assert "Coverage &amp; Blind Spots" in html
+    assert "Network port scan" in html
+    assert "Not run" in html   # label legível
+
+
+def test_render_escapes_html():
+    html = cov.render_section_html([
+        {"area": "<svg>", "status": "partial", "not_exercised": "<b>", "how_to_close": "z"}])
+    assert "<svg>" not in html and "&lt;svg&gt;" in html

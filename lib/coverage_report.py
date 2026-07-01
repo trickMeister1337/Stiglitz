@@ -6,6 +6,8 @@ dimensões de lacuna (transforma achado-oculto em lacuna-declarada). NÃO é fin
 — não entra em severity_counts; é seção de apresentação (Modo B do roadmap de
 cobertura). Findings/relatório em EN; comentários PT-BR.
 """
+import html as _html
+
 _STATUS_LABEL = {"not_run": "Not run", "partial": "Partial", "ok": "OK"}
 
 
@@ -75,3 +77,23 @@ def blind_spots(signals):
         })
 
     return dims
+
+
+def render_section_html(dimensions):
+    """Seção HTML 'Coverage & Blind Spots'. Vazia quando não há lacunas (cobertura
+    completa). NÃO entra em severity_counts — é apresentação."""
+    if not dimensions:
+        return ""
+    rows = ""
+    for d in dimensions:
+        rows += ("<tr>"
+                 f"<td>{_html.escape(str(d.get('area', '')))}</td>"
+                 f"<td>{_html.escape(_STATUS_LABEL.get(d.get('status', ''), str(d.get('status', ''))))}</td>"
+                 f"<td style='font-size:12px'>{_html.escape(str(d.get('not_exercised', '')))}</td>"
+                 f"<td style='font-size:12px'>{_html.escape(str(d.get('how_to_close', '')))}</td>"
+                 "</tr>")
+    return ("<h2>Coverage &amp; Blind Spots</h2>"
+            "<p>Areas the automated scan did not fully exercise. Declared so that a low "
+            "finding count is read against actual coverage, not as an all-clear.</p>"
+            "<table><tr><th>Area</th><th>Status</th><th>Not exercised</th>"
+            "<th>How to close</th></tr>" + rows + "</table>")
