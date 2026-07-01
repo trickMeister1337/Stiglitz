@@ -58,3 +58,5 @@ from . import takeover          # noqa: F401, E402
 from . import jwt               # noqa: F401, E402
 from . import secret_aws        # noqa: F401, E402
 from . import generic           # noqa: F401, E402
+from . import ssti              # noqa: F401, E402
+from . import cmdi              # noqa: F401, E402

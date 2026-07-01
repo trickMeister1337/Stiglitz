@@ -410,6 +410,9 @@ def double_check(cmd, interval=4):
 
 def classify_vuln(template_id, name, tags=""):
     tid = (template_id + " " + name + " " + tags).lower()
+    if any(x in tid for x in ["ssti", "template-injection", "server-side-template"]): return "ssti"
+    if any(x in tid for x in ["command-injection", "cmd-injection", "os-command",
+                              "rce", "remote-code"]):                                 return "cmdi"
     if any(x in tid for x in ["sql", "sqli", "injection", "union"]):              return "sqli"
     if any(x in tid for x in ["xss", "cross-site-scripting", "cross site scr"]): return "xss"
     if any(x in tid for x in ["lfi", "path-traversal", "file-incl", "directory-traversal"]): return "lfi"
