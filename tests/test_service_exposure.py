@@ -87,6 +87,38 @@ def test_build_findings_schema_and_cwe():
     assert "all index names" in f["description"]
 
 
+def test_docker_version_marker_matches_real_docker_engine_body():
+    """Corpo real do Docker Engine /version (apiversion+components+"Os":"linux") ainda
+    deve casar o fingerprint do catálogo docker."""
+    docker_body = (
+        '{"Platform":{"Name":""},"Components":[{"Name":"Engine","Version":"24.0.5"}],'
+        '"Version":"24.0.5","ApiVersion":"1.43","MinAPIVersion":"1.12",'
+        '"GitCommit":"a61e2b4","GoVersion":"go1.20.6","Os":"linux","Arch":"amd64",'
+        '"KernelVersion":"5.15.0","BuildTime":"2023-08-03"}')
+    markers = se.SERVICE_CATALOG["docker"]["fingerprint"][0]["markers"]
+    assert se.markers_match(docker_body, markers) is True
+
+
+def test_docker_version_marker_no_longer_matches_generic_apiversion_components_body():
+    """Um corpo só com apiversion+components (sem o 3º marker distintivo do Docker)
+    não deve mais casar como docker -- reduz cross-match com etcd/k8s em /version."""
+    generic_body = '{"apiVersion":"v1","components":["a","b"]}'
+    markers = se.SERVICE_CATALOG["docker"]["fingerprint"][0]["markers"]
+    assert se.markers_match(generic_body, markers) is False
+
+
+def test_build_findings_unknown_service_key_degrades_gracefully():
+    """service_key fora do catálogo -> spec={} ; _finding não pode estourar KeyError
+    (bracket access em spec['name']/probe['exposes']/probe['name']/probe['severity'])."""
+    spec = se.SERVICE_CATALOG["elasticsearch"]
+    probe = spec["probes"][0]
+    verdict = {"state": "CONFIRMED", "evidence": "without auth -> HTTP 200"}
+    out = se.build_findings("__inexistente__", [(probe, verdict)], "https://host")
+    assert len(out) == 1
+    f = out[0]
+    assert f["url"] == "https://host/_cat/indices"
+
+
 def test_build_findings_distinct_endpoints_distinct_fingerprints():
     spec = se.SERVICE_CATALOG["actuator"]
     v = {"state": "CONFIRMED", "evidence": "x"}

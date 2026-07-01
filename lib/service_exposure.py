@@ -106,7 +106,12 @@ SERVICE_CATALOG = {
     },
     "docker": {
         "name": "Docker Engine API",
-        "fingerprint": [{"path": "/version", "markers": ["apiversion", "components"]}],
+        # 3 serviços fingerprintam em /version (etcd/docker/kubernetes); "apiversion"+
+        # "components" por si só é genérico demais. O 3º marker ("os", de "Os":"linux"
+        # no corpo real do Docker Engine) desambiguiza: etcd não tem esse campo e o k8s
+        # usa "platform" em vez de "os" -- reduz risco de cross-match sem arriscar
+        # falso-negativo no Docker real.
+        "fingerprint": [{"path": "/version", "markers": ["apiversion", "components", "os"]}],
         "probes": [{"path": "/containers/json", "finding_class": "docker_api_exposed",
                     "severity": "critical", "cwe": "CWE-306",
                     "name": "Docker Engine API exposed without authentication",
@@ -201,15 +206,19 @@ def _finding(probe, base, spec, verdict):
     """Schema do finding (igual apm_probe._finding). Texto em EN. description gerada
     por template a partir de name/path/exposes; remediation específica do catálogo."""
     url = base + probe["path"].split("?", 1)[0]
+    service_name = spec.get("name", "service")
+    exposes = probe.get("exposes", "data")
+    finding_name = probe.get("name", probe.get("finding_class", "issue"))
     description = (
-        f"The {spec['name']} endpoint {probe['path']} responded to an unauthenticated "
-        f"request with HTTP 200, exposing {probe['exposes']} without requiring credentials. "
+        f"The {service_name} endpoint {probe['path']} responded to an unauthenticated "
+        f"request with HTTP 200, exposing {exposes} without requiring credentials. "
         "An attacker on the network can reach this endpoint directly; the scan did not send "
         "any state-changing request (GET only).")
     f = {
-        "tool": "service_exposure", "type": probe["finding_class"], "source": "Service Exposure",
-        "name": probe["name"], "url": url, "severity": probe["severity"],
-        "description": description, "remediation": probe["remediation"],
+        "tool": "service_exposure", "type": probe.get("finding_class", "service_exposure_unauth"),
+        "source": "Service Exposure",
+        "name": finding_name, "url": url, "severity": probe.get("severity", "medium"),
+        "description": description, "remediation": probe.get("remediation", ""),
         "evidence": verdict.get("evidence", ""), "cwe": probe.get("cwe", ""),
     }
     f["fingerprint"] = _fingerprint(f)
